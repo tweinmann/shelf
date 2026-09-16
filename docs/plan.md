@@ -225,6 +225,7 @@ Complete inventory of what gets created:
 | Container | `k3d-shelf-dev-tools` (runs as long as the cluster exists) | k3d | yes, if left over |
 | Network | `k3d-shelf-dev` | k3d | yes |
 | Volume | `k3d-shelf-dev-images` | k3d | yes |
+| Volumes | four anonymous volumes of the server container (the k3s image declares `VOLUME`s) | k3d | yes, with the container (`rm -v`) |
 
 Workload images inside the cluster (e.g. `busybox` for smoke tests) are pulled by k3s's own
 containerd inside the node container, not into the host's image store; they disappear with the
@@ -573,7 +574,23 @@ Results (2026-09-16):
   one of the maintainer's private GHCR images. Negative check: the same pod without
   `imagePullSecrets` fails with `401 Unauthorized`, so the image is really private.
 - Step 6: `just cluster-reset` in 13 s.
-- Step 7: pending (run on the Mac).
+- Step 7, first attempt: failed. `nuke.sh` was started in a terminal inside the devcontainer,
+  removed `shelf-devcontainer` and thereby killed itself; network, volumes and images stayed.
+  It also left four anonymous volumes behind, because the k3s image declares `VOLUME`s and the
+  server container was removed without `-v`; they were removed by exact ID. Fixes: `nuke.sh`
+  now refuses to run inside a container and removes containers with `rm -f -v`.
+- Step 7, second attempt: green. `hack/nuke.sh --with-shared-images` run in a terminal on the
+  Mac, then the devcontainer was reopened and the baseline repeated. Compared with the baseline,
+  containers, networks, volumes and images differ only by the objects of the reopened
+  devcontainer (`shelf-devcontainer`, its `vsc-shelf-…` image, the base image
+  `devcontainers/go:2-1.27-trixie`, and the volumes `shelf-gomodcache`, `shelf-gocache`,
+  `shelf-claude-config`). Nothing from k3d is left, no foreign object is missing, the
+  anonymous-volume count matches. Build cache grew from 81 to 109 entries (expected, left in
+  place). The two untagged images of the baseline still exist; Docker CLI 29 in the
+  devcontainer lists them only with `docker images -a`. The SHA-256 of the Mac's
+  `~/.kube/config` is unchanged.
+
+Phase 0 is complete; all acceptance criteria are met.
 
 **Acceptance:** all tools at the pinned versions; both smoke tests green;
 `just cluster-reset` in under a minute; after `hack/nuke.sh` the baseline is identical to

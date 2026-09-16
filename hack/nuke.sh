@@ -13,6 +13,13 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+# Inside the devcontainer, removing shelf-devcontainer kills this very script halfway through,
+# leaving networks, volumes and images behind.
+if [ -f /.dockerenv ] || [ -n "${LOCAL_WORKSPACE_FOLDER:-}" ]; then
+  echo "error: run this on the host Mac, not inside a container" >&2
+  exit 1
+fi
+
 with_shared_images=0
 assume_yes=0
 for arg in "$@"; do
@@ -93,7 +100,9 @@ else
   fi
   printf '%s' "$plan" | while read -r kind name; do
     case "$kind" in
-      container) docker container rm -f "$name" >/dev/null ;;
+      # -v removes the container's anonymous volumes (the k3s image declares four) and never
+      # touches named volumes.
+      container) docker container rm -f -v "$name" >/dev/null ;;
       network) docker network rm "$name" >/dev/null ;;
       volume) docker volume rm "$name" >/dev/null ;;
       image) docker image rm "$name" >/dev/null ;;

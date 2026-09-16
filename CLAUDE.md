@@ -9,10 +9,9 @@ architecture.
 
 ## Status
 
-Phase 0 in progress. Done: repository, devcontainer, justfile, hack/ scripts, Docker baseline
-in `.local/baseline/`, steps 2–6 (tools, cluster, both smoke tests, reset in 13 s; results in
-docs/plan.md). Next: step 7 — `hack/nuke.sh --with-shared-images` on the Mac and compare with the
-baseline; then close Phase 0 and wait for approval before Phase 1.
+Phase 0 complete (results in docs/plan.md): devcontainer, dev cluster, both smoke tests,
+reset in 13 s, and `hack/nuke.sh` restores the Docker baseline. Next: Phase 1 (scaffold,
+schema, renderer), once the maintainer approves it.
 
 ## Working agreements
 
@@ -48,7 +47,7 @@ Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
-| `hack/nuke.sh` | host Mac | remove every Docker object shelf created (only needs `docker`) |
+| `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
 
