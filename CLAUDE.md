@@ -77,7 +77,7 @@ Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer
 - Go: standard layout (`cmd/`, `internal/`), table-driven tests, golden files in `testdata/`
   (`-update` via `just golden`); the registry is behind `render.Resolver`, so tests never need
   the network
-- Adding a Go module: `/go/pkg` is root-owned in the current image, so run
-  `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …` (see Phase 1 results)
+- Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):
+  `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …`
 - Shell: `hack/*.sh` use bash with `set -euo pipefail` and source `hack/lib.sh`;
   `hack/nuke.sh` is POSIX `sh` because it runs on the host

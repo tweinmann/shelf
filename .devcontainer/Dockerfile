@@ -37,8 +37,14 @@ RUN set -eux; \
       /usr/local/bin/flux /usr/local/bin/just /usr/local/bin/kubeconform; \
     rm -rf "$tmp"
 
-# A named volume copies ownership from the image directory it is mounted over, but only if that
-# directory exists in the image. Without this, the cache and config volumes end up owned by root
-# and the vscode user cannot write to them.
+# A named volume copies ownership and mode from the image directory it is mounted over, but only
+# if that directory exists in the image. Without this, the cache and config volumes end up owned
+# by root and the vscode user cannot write to them.
+# The Go directories are world-writable with the sticky bit, like /go in the base image, rather
+# than owned by vscode: in CI, devcontainers/ci changes vscode's UID to the runner's, and usermod
+# only re-owns the home directory. /go/pkg needs this too, because mkdir creates it as root and Go
+# keeps its checksum database cache in /go/pkg/sumdb.
 RUN mkdir -p /go/pkg/mod /home/vscode/.cache/go-build /home/vscode/.claude /home/vscode/.kube \
- && chown -R vscode:vscode /go/pkg/mod /home/vscode/.cache /home/vscode/.claude /home/vscode/.kube
+ && chown -R vscode:vscode /home/vscode/.cache /home/vscode/.claude /home/vscode/.kube \
+ && chown vscode:golang /go/pkg /go/pkg/mod \
+ && chmod 1777 /go/pkg /go/pkg/mod

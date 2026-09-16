@@ -662,10 +662,14 @@ Results (2026-09-16):
   with path and line. The committed schema is checked against the Go types, and it must accept
   the examples. Removing the `$` escaping makes the render and CLI tests fail (checked).
 - Deferred to Phase 4: `render --reveal`, the changed-volume warning.
-- Found: the devcontainer's `/go/pkg` is root-owned (`mkdir -p /go/pkg/mod` runs as root and
-  only `mod` is chowned), so `go get` of a new module fails writing `/go/pkg/sumdb`. Builds and
-  tests are unaffected once `go.sum` is complete. Workaround until the Dockerfile is fixed:
-  `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …`.
+- Found: the Go directories in the image were not writable in two situations. Locally,
+  `/go/pkg` was root-owned (`mkdir -p` runs as root, only `mod` was chowned), so `go get` of a
+  new module failed writing `/go/pkg/sumdb`. In CI, the first run failed with
+  `mkdir /go/pkg/mod/cache: permission denied`: `devcontainers/ci` changes `vscode`'s UID to the
+  runner's (1001), `usermod` only re-owns the home directory, and the fresh module-cache volume
+  copies the old owner (1000) from the image. Fix: `/go/pkg` and `/go/pkg/mod` are now mode
+  `1777`, like `/go` in the base image, so any UID can write. Until the local devcontainer is
+  rebuilt, add modules with `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …`.
 
 ### Phase 2 – Chart `shelf-app`
 Deployment vs. StatefulSet, Services, headless Services, Ingress, PVCs, secret env prefixing,
