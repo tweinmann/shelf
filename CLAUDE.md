@@ -10,8 +10,9 @@ architecture.
 ## Status
 
 Phase 0 in progress. Done: repository, devcontainer, justfile, hack/ scripts, Docker baseline
-in `.local/baseline/` (taken on the host before anything was created). Next: open the
-devcontainer and continue with Phase 0 step 2 in docs/plan.md.
+in `.local/baseline/`, steps 2–6 (tools, cluster, both smoke tests, reset in 13 s; results in
+docs/plan.md). Next: step 7 — `hack/nuke.sh --with-shared-images` on the Mac and compare with the
+baseline; then close Phase 0 and wait for approval before Phase 1.
 
 ## Working agreements
 

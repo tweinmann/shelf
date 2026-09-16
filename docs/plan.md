@@ -119,7 +119,8 @@ containers, sharing daemon, image store and RAM budget. Isolation there comes fr
 and complete cleanup (see footprint below).
 
 `.devcontainer/devcontainer.json` sets a fixed container name (`shelf-devcontainer`, needed
-for `docker network connect` and exact-name cleanup), the DooD feature, `KUBECONFIG` and
+for `docker network connect` and exact-name cleanup), the DooD feature with `"moby": false`
+(its default `moby-cli` has no packages for Debian trixie; the Docker CE CLI does), `KUBECONFIG` and
 `LOCAL_WORKSPACE_FOLDER`, three named volumes, port 8080 forwarding, and the Go, YAML and
 Claude Code extensions. The Claude Code extension and a volume for `~/.claude` keep the
 assistant available and logged in across container rebuilds.
@@ -221,7 +222,7 @@ Complete inventory of what gets created:
 | Image | `rancher/k3s:v1.36.4-k3s1` (~250 MB) | k3d | only with `--with-shared-images` |
 | Image | `ghcr.io/k3d-io/k3d-tools:5.9.0` | k3d | only with `--with-shared-images` |
 | Container | `k3d-shelf-dev-server-0` | k3d | yes |
-| Container | `k3d-shelf-dev-tools` (short-lived) | k3d | yes, if left over |
+| Container | `k3d-shelf-dev-tools` (runs as long as the cluster exists) | k3d | yes, if left over |
 | Network | `k3d-shelf-dev` | k3d | yes |
 | Volume | `k3d-shelf-dev-images` | k3d | yes |
 
@@ -552,6 +553,27 @@ images, `docker system df`, and a SHA-256 of `~/.kube/config`. Taken 2026-09-16;
 5. `just smoke-registry ghcr.io/<owner>/<image>:<tag>` with a classic PAT
 6. `just cluster-reset`, timed
 7. `hack/nuke.sh --with-shared-images` from the Mac; repeat the baseline and compare
+
+Results (2026-09-16):
+
+- Step 2: all tools at the pinned versions (Docker CLI 29.8.1 against daemon 28.1.1); the
+  volume mount points are owned by `vscode`. `k3d version` reports k3s v1.35.5 as its default —
+  irrelevant, because `cluster-up.sh` always passes `SHELF_K3S_IMAGE`.
+- Step 3: cluster up in 14 s; the API server is reached **by name** through Docker DNS, no IP
+  fallback needed; no Traefik; `kubectl` verifies TLS; StorageClass `local-path` with
+  `WaitForFirstConsumer`.
+- Step 4: green after two fixes to the test itself. (a) The expected values lived in the
+  container's `args`, so the secret value was always in the pod spec and the check could never
+  pass; they are now assembled from two parts. (b) The `$$` check could never fail: kubelet also
+  expands `args`, so both sides of the comparison were unescaped alike, and the escaped
+  reference pointed at an undefined variable, which kubelet leaves alone anyway. It now
+  references the defined `SHELF_SECRET_PASSWORD`, builds the expected value without `$$`/`$(`,
+  and checks that the spec keeps the `$$` form. Verified negatively: without `$$` the test fails.
+- Step 5: green with a classic PAT against the private image
+  one of the maintainer's private GHCR images. Negative check: the same pod without
+  `imagePullSecrets` fails with `401 Unauthorized`, so the image is really private.
+- Step 6: `just cluster-reset` in 13 s.
+- Step 7: pending (run on the Mac).
 
 **Acceptance:** all tools at the pinned versions; both smoke tests green;
 `just cluster-reset` in under a minute; after `hack/nuke.sh` the baseline is identical to

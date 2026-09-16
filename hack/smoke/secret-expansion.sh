@@ -19,7 +19,11 @@ done
 kubectl -n "$ns" logs "pod/$pod" || true
 [[ "$phase" == Succeeded ]] || die "pod ended in phase '${phase:-unknown}'"
 
-if kubectl -n "$ns" get pod "$pod" -o yaml | grep -q 'smoke-value-7f3a'; then
+spec="$(kubectl -n "$ns" get pod "$pod" -o yaml)"
+if grep -q 'smoke-value-7f3a' <<<"$spec"; then
   die "the secret value appears in the pod spec"
 fi
+# The spec keeps the escaped form; only the container sees a single "$".
+grep -qF 'value: $$(SHELF_SECRET_PASSWORD)' <<<"$spec" \
+  || die "the pod spec does not contain the escaped literal"
 echo "PASS: secret expansion in env and args, \$\$ escaping, no secret value in the pod spec"

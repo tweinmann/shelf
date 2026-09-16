@@ -8,8 +8,11 @@
 
   // Docker-outside-of-Docker: the host daemon's socket is passed in. Containers started from
   // here (k3d nodes) are siblings of this container on the host daemon.
+  // "moby": false installs the Docker CE CLI; moby-cli has no packages for Debian trixie.
   "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false
+    }
   },
 
   "remoteUser": "vscode",
