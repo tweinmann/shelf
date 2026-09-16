@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tweinmann/shelf/main/schema/app.schema.json",
+  "$defs": {
+    "Component": {
+      "not": {
+        "required": [
+          "port",
+          "ports"
+        ]
+      },
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Image reference. Tags are pinned to a digest by shelf render."
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Overrides the image entrypoint. Supports ${...} references; write $$ for a literal $."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Overrides the image command. Supports ${...} references; write $$ for a literal $."
+        },
+        "env": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "type": "object",
+          "description": "Environment variables. Values support ${...} references; write $$ for a literal $."
+        },
+        "port": {
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 1,
+          "description": "The single port the container listens on. Mutually exclusive with ports."
+        },
+        "ports": {
+          "additionalProperties": {
+            "type": "integer",
+            "maximum": 65535,
+            "minimum": 1
+          },
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 15,
+            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          },
+          "type": "object",
+          "minProperties": 1,
+          "description": "Named ports the container listens on. Mutually exclusive with port."
+        },
+        "route": {
+          "$ref": "#/$defs/Route",
+          "description": "Makes the component reachable from outside under this path."
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of replicas. Default 1. Instances do not form a cluster."
+        },
+        "volumes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Volume"
+          },
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 40,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "type": "object",
+          "description": "Persistent volumes by name. Turns the component into a StatefulSet."
+        },
+        "health": {
+          "$ref": "#/$defs/Health",
+          "description": "HTTP readiness and liveness probe."
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources",
+          "description": "Resource requests. Memory is also the limit."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "image"
+      ]
+    },
+    "Health": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "HTTP path that answers 2xx or 3xx when the component is healthy."
+        },
+        "port": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "description": "Port name from ports. Required when the component has more than one port."
+        },
+        "initialDelay": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Seconds to wait before the first probe."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path"
+      ]
+    },
+    "Resources": {
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "description": "CPU request, e.g. 500m."
+        },
+        "memory": {
+          "type": "string",
+          "description": "Memory request and limit, e.g. 512Mi."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Route": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^/"
+        },
+        {
+          "properties": {
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "port": {
+              "type": "string",
+              "maxLength": 15,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            },
+            "stripPrefix": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "path"
+          ]
+        }
+      ],
+      "description": "A path like /api, or { path, port, stripPrefix }."
+    },
+    "Secret": {
+      "properties": {
+        "generate": {
+          "type": "boolean",
+          "const": true,
+          "description": "Generate a random URL-safe value once when the app is added. Must be true."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "generate"
+      ]
+    },
+    "Volume": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute mount path in the container."
+        },
+        "size": {
+          "type": "string",
+          "description": "Requested size, e.g. 10Gi. Not enforced by the local-path provisioner."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "size"
+      ]
+    }
+  },
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "shelf.dev/v1alpha1",
+      "description": "Always shelf.dev/v1alpha1."
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 40,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "App name. Becomes the namespace and the host name \u003cname\u003e.\u003cdomain\u003e."
+    },
+    "components": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Component"
+      },
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 40,
+        "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+      },
+      "type": "object",
+      "minProperties": 1,
+      "description": "The containers that make up the app, by name."
+    },
+    "secrets": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Secret"
+      },
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 63,
+        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+      },
+      "type": "object",
+      "description": "Secrets referenced as ${secrets.\u003cname\u003e}, by name."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "name",
+    "components"
+  ],
+  "title": "shelf app (shelf.dev/v1alpha1)"
+}

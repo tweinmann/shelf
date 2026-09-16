@@ -9,9 +9,10 @@ architecture.
 
 ## Status
 
-Phase 0 complete (results in docs/plan.md): devcontainer, dev cluster, both smoke tests,
-reset in 13 s, and `hack/nuke.sh` restores the Docker baseline. Next: Phase 1 (scaffold,
-schema, renderer), once the maintainer approves it.
+Phase 0 complete: devcontainer, dev cluster, smoke tests, `hack/nuke.sh`.
+Phase 1 complete (awaiting approval): `shelf validate`, `shelf render`, `shelf schema`, JSON
+Schema, `examples/hello`, `just test`, CI. Results and decisions in docs/plan.md.
+Next: Phase 2 (chart `shelf-app`), once the maintainer approves it.
 
 ## Working agreements
 
@@ -41,6 +42,9 @@ Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer
 
 | Command | Run from | Purpose |
 |---|---|---|
+| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, kubeconform, examples) |
+| `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
+| `just build` | devcontainer | build `bin/shelf` (linux) |
 | `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, join its network, write kubeconfig |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
@@ -71,5 +75,9 @@ Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
 - Secret env prefix `SHELF_SECRET_<NAME>`; label `shelf.dev/app`; OCI annotations `dev.shelf.*`
 - Go: standard layout (`cmd/`, `internal/`), table-driven tests, golden files in `testdata/`
+  (`-update` via `just golden`); the registry is behind `render.Resolver`, so tests never need
+  the network
+- Adding a Go module: `/go/pkg` is root-owned in the current image, so run
+  `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …` (see Phase 1 results)
 - Shell: `hack/*.sh` use bash with `set -euo pipefail` and source `hack/lib.sh`;
   `hack/nuke.sh` is POSIX `sh` because it runs on the host

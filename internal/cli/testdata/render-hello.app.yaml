@@ -1,0 +1,49 @@
+apiVersion: shelf.dev/v1alpha1
+name: hello
+components:
+  check:
+    image: postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    command:
+      - sh
+      - -c
+    args:
+      - while true; do psql "$$DATABASE_URL" -tAc 'select 1' && sleep 30 || sleep 5; done
+    env:
+      DATABASE_URL: postgres://app:${secrets.db-password}@db:5432/hello
+    instances: 1
+    resources:
+      memory: 64Mi
+  db:
+    image: postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    env:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_DB: hello
+      POSTGRES_PASSWORD: ${secrets.db-password}
+      POSTGRES_USER: app
+    ports:
+      main: 5432
+    instances: 1
+    volumes:
+      data:
+        path: /var/lib/postgresql/data
+        size: 1Gi
+    resources:
+      cpu: 100m
+      memory: 256Mi
+  web:
+    image: traefik/whoami:v1.11.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    ports:
+      main: 80
+    route:
+      path: /
+      port: main
+    instances: 2
+    health:
+      path: /health
+      port: main
+    resources:
+      cpu: 50m
+      memory: 32Mi
+secrets:
+  db-password:
+    generate: true

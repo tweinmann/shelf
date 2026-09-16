@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../schema/app.schema.json
+#
+# Reference app: a public web frontend, a Postgres database with a generated password, and a
+# worker that proves the connection string reaches the database.
+apiVersion: shelf.dev/v1alpha1
+name: hello
+
+components:
+  web:
+    image: traefik/whoami:v1.11.0
+    port: 80
+    route: /
+    instances: 2
+    health: { path: /health }
+    resources: { cpu: 50m, memory: 32Mi }
+
+  check:
+    image: postgres:16
+    env:
+      DATABASE_URL: postgres://app:${secrets.db-password}@${db.host}:${db.port}/hello
+    # A lone $ is literal: the shell, not shelf, expands $DATABASE_URL.
+    command: [sh, -c]
+    args:
+      - while true; do psql "$DATABASE_URL" -tAc 'select 1' && sleep 30 || sleep 5; done
+    resources: { memory: 64Mi }
+
+  db:
+    image: postgres:16
+    port: 5432
+    env:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${secrets.db-password}
+      POSTGRES_DB: hello
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      data: { path: /var/lib/postgresql/data, size: 1Gi }
+    resources: { cpu: 100m, memory: 256Mi }
+
+secrets:
+  db-password: { generate: true }

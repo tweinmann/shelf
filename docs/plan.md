@@ -48,6 +48,14 @@ Decided during planning (deviations from the original draft, stated explicitly):
 - Reference app is **Postgres**, not MongoDB with a replica set
 - **CI**: level-1 tests from Phase 1; k3d cluster tests from Phase 4
 
+Decided in Phase 1 (2026-09-16):
+
+| Question | Decision |
+|---|---|
+| Digest pinning | **`shelf render` resolves tags** through the registry (go-containerregistry, Docker keychain). Tests use a fake resolver and an in-memory registry. The same lookup requires a `linux/arm64` variant and feeds the `EXPOSE` warning. |
+| Literal `$` | **docker compose rules**: `${…}` is a reference, `$$` is a literal `$`, any other `$` is literal too (`$HOME` works in shell commands) |
+| CI | **Inside the devcontainer image** (`devcontainers/ci`, `ubuntu-24.04-arm`), running `just test`; tool versions stay in the Dockerfile only |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -410,15 +418,36 @@ secrets:
 ```
 
 ### Fields
-- `image`, `command`, `args`, `env` — as in Kubernetes
+- `image`, `command`, `args`, `env` — as in Kubernetes; `env` is a map, and scalar values
+  (`PORT: 8080`) are taken as text
 - `port` (single port) or `ports` (map `name → number`)
 - `route`: short form `route: /path`; with multiple ports
   `route: { path: /path, port: <name>, stripPrefix: false }`
 - `instances`: default 1
 - `volumes`: map `name → { path, size }`
-- `health`: `{ path, port?, initialDelay? }` → readiness and liveness probe
+- `health`: `{ path, port?, initialDelay? }` → readiness and liveness probe; `port` is a port
+  name, `initialDelay` is in seconds
 - `resources`: `{ cpu, memory }` → `requests`; `limits` only for memory
 - Top-level `secrets`: map `name → { generate: true }`
+
+References in `env`, `command` and `args`: `${<component>.host}` (the Service name),
+`${<component>.port}` (only for a component with exactly one port),
+`${<component>.ports.<name>}`, `${secrets.<name>}`. Anything else in `${…}` is an error.
+
+Name rules: app names are DNS-1123 labels, component names DNS-1035 labels, both at most 40
+characters so suffixes (`-values`, StatefulSet pod names, revision hashes) still fit into 63.
+Secret names allow no `_`, so `SHELF_SECRET_<NAME>` cannot collide. Env names are C
+identifiers, and the prefix `SHELF_SECRET_` is reserved.
+
+### Resolved app.yaml
+`shelf render` produces the values file of the `shelf-app` chart. Compared with the input:
+images pinned by digest (the tag stays for readability, e.g. `postgres:16@sha256:…`; for
+multi-platform images the index digest); host and port references substituted; every literal
+`$` escaped as `$$` for kubelet; `${secrets.<name>}` left in place. The shape is normalized so
+the chart needs no case analysis: `ports` is always a map (a single `port` becomes
+`ports.main`), `route.port` and `health.port` are always set, `instances` is always set.
+Because every literal `$` is doubled, the chart finds secret references safely by splitting a
+string on `$$` and rewriting `${secrets.x}` in each part.
 
 **Why `health` and `resources` are in the MVP:** on a single-node mini, an app without a memory
 limit can take down the whole cluster. And without a readiness probe, Flux `wait: true` reports
@@ -445,7 +474,7 @@ For each referenced secret, the chart renders a variable `SHELF_SECRET_<NAME>` v
 Two pitfalls the renderer must handle:
 - A literal `$` in user `env`/`args` must be escaped to `$$`, otherwise kubelet consumes `$(…)`
 - Generated passwords must be **URL-safe** (no ``@ : / ? # [ ] ``), otherwise every connection
-  URI breaks
+  URI breaks. They come from Go's `crypto/rand.Text`: 26 characters of `A–Z2–7`, 130 bits.
 
 ### Validation (`shelf validate`, in CLI and CI)
 Errors: `route` without `port`/`ports`; multiple `ports` and `route` without a port;
@@ -453,8 +482,16 @@ Errors: `route` without `port`/`ports`; multiple `ports` and `route` without a p
 reserved names `secrets`, `app`, `shelf`; duplicate volume names; overlapping paths; colliding
 `route` paths across components.
 
-Warnings: `port` differs from `EXPOSE` in the image; changed volume definition of an existing
-component (`volumeClaimTemplates` are immutable, local-path cannot grow).
+Also errors: invalid names (see above), `port` together with `ports`, duplicate port numbers,
+empty components, non-generated secrets, malformed paths and quantities.
+
+Warnings: `port` differs from `EXPOSE` in the image (from `shelf render`, which looks at the
+image); unreferenced secrets; changed volume definition of an existing component
+(`volumeClaimTemplates` are immutable, local-path cannot grow) — this one needs the previous
+deploy artifact and comes in Phase 4.
+
+`shelf validate` never contacts a registry. Duplicate keys (e.g. two volumes with the same name)
+are rejected by the parser, as are unknown fields and wrong types.
 
 ## App registration without GitOps drift
 
@@ -475,8 +512,11 @@ cluster live and die together. On the mini, `~/.shelf/` is the real home directo
 
 ## CLI `shelf` (Go)
 
-- `shelf validate <app.yaml>`
-- `shelf render <app.yaml>` — resolved file, PVC names, secret *names*; values only with `--reveal`
+- `shelf validate <app.yaml>...`
+- `shelf render <app.yaml> [-o configmap|app]` — the manifest on stdout; findings and a
+  summary (objects, PVC names, secret *names*) on stderr. `--reveal` for secret values follows
+  in Phase 4, when `shelf app add` creates them.
+- `shelf schema` — the JSON Schema; `shelf version`
 - `shelf init cluster` / `shelf init expose` / `shelf init host` / `shelf init`
 - `shelf app add <name> <artifact-url>` / `shelf app rm <name>`
 - `shelf doctor` — preflight plus runtime (VM, tunnel, Flux status), reporting per layer
@@ -499,9 +539,12 @@ shelf/
     smoke/                    Phase 0 smoke tests
   cmd/shelf/                  CLI entry point
   internal/
-    schema/                   app.yaml types, JSON Schema generation
+    cli/                      cobra commands
+    schema/                   app.yaml types, parser, ${…} syntax, JSON Schema generation
     validate/                 validation rules
-    render/                   app.yaml → resolved app.yaml → ConfigMap manifest
+    render/                   app.yaml → resolved app.yaml → ConfigMap manifest; registry lookup
+    secrets/                  secret value generation
+    testutil/                 golden-file helper
     preflight/                host checks
     host/                     brew, pmset, colima — behind a command-runner interface
     cloudflare/               tunnel and DNS API
@@ -511,6 +554,7 @@ shelf/
     flux/ traefik/ cloudflared/ external-dns/
     resourcesets/app.yaml     the ResourceSet
   .github/workflows/
+    ci.yml                    level-1 checks in the devcontainer image
     build.yml                 reusable tenant workflow
     release.yml               CLI binaries, chart push, platform artifact
   examples/hello/
@@ -601,6 +645,27 @@ Repository layout, JSON Schema for `app.yaml` (editor autocomplete), `shelf vali
 `shelf render`, `just test`, CI with `go test` + `kubeconform`.
 **Acceptance:** the example validates, every error case has a test, `$` escaping and URL-safe
 password generation are tested.
+
+Results (2026-09-16):
+
+- Layout: `cmd/shelf`, `internal/{schema,validate,render,secrets,cli,testutil}`,
+  `schema/app.schema.json`, `examples/hello`, `.github/workflows/ci.yml`. Dependencies: cobra,
+  go.yaml.in/yaml/v3, invopop/jsonschema (generation), santhosh-tekuri/jsonschema (tests only),
+  go-containerregistry, k8s.io/apimachinery v0.36 (quantities, port names).
+- `examples/hello`: `web` (traefik/whoami, route `/`), `db` (Postgres with a volume and a
+  generated password) and `check`, which runs `psql "$DATABASE_URL"` in a loop — the Phase 2
+  proof that the generated `DATABASE_URL` reaches the database, and a live test of `$`
+  escaping. It validates without findings, and `shelf render` against Docker Hub pins both
+  images.
+- `just test` is green: gofmt, `go vet`, `go test`, `kubeconform -strict` on the rendered
+  ConfigMap, `shelf validate examples/*/app.yaml`. Every validation error has a table test
+  with path and line. The committed schema is checked against the Go types, and it must accept
+  the examples. Removing the `$` escaping makes the render and CLI tests fail (checked).
+- Deferred to Phase 4: `render --reveal`, the changed-volume warning.
+- Found: the devcontainer's `/go/pkg` is root-owned (`mkdir -p /go/pkg/mod` runs as root and
+  only `mod` is chowned), so `go get` of a new module fails writing `/go/pkg/sumdb`. Builds and
+  tests are unaffected once `go.sum` is complete. Workaround until the Dockerfile is fixed:
+  `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …`.
 
 ### Phase 2 – Chart `shelf-app`
 Deployment vs. StatefulSet, Services, headless Services, Ingress, PVCs, secret env prefixing,

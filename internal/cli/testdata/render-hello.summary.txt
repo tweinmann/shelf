@@ -1,0 +1,10 @@
+
+App hello (namespace hello):
+  check  Deployment × 1   postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  db     StatefulSet × 1  postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+         Service db       main=5432
+         PVC data-db-0    1Gi at /var/lib/postgresql/data
+  web    Deployment × 2   traefik/whoami:v1.11.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+         Service web      main=80
+         Route            / → port main
+  secret db-password (generated) → env SHELF_SECRET_DB_PASSWORD

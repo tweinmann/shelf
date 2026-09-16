@@ -1,0 +1,24 @@
+# Level-1 checks. They run inside the devcontainer image, so CI uses exactly the tool versions
+# pinned in .devcontainer/Dockerfile.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # The same architecture as the Mac and the mini.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: just test (in the devcontainer)
+        uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: just test
