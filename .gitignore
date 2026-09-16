@@ -1,0 +1,6 @@
+# Machine-local state (Docker baseline snapshots, scratch files)
+/.local/
+
+# Build output
+/bin/
+/dist/

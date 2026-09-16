@@ -1,0 +1,43 @@
+{
+  "name": "shelf",
+  "build": { "dockerfile": "Dockerfile" },
+
+  // Fixed name so hack/cluster-up.sh can attach this container to the k3d network,
+  // and hack/nuke.sh can remove it by exact name.
+  "runArgs": ["--name", "shelf-devcontainer"],
+
+  // Docker-outside-of-Docker: the host daemon's socket is passed in. Containers started from
+  // here (k3d nodes) are siblings of this container on the host daemon.
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    // The only kubeconfig tooling in this container should ever use.
+    "KUBECONFIG": "/home/vscode/.kube/shelf-dev.yaml",
+    // Host path of the workspace. Bind mounts are resolved by the host daemon, so any path
+    // passed to `docker -v` or `k3d --volume` must be built from this, never from $PWD.
+    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+  },
+
+  // Every volume here is listed in the footprint inventory in docs/plan.md and removed by
+  // hack/nuke.sh. Add new ones in all three places.
+  "mounts": [
+    "source=shelf-gomodcache,target=/go/pkg/mod,type=volume",
+    "source=shelf-gocache,target=/home/vscode/.cache/go-build,type=volume",
+    "source=shelf-claude-config,target=/home/vscode/.claude,type=volume"
+  ],
+
+  "forwardPorts": [8080],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "redhat.vscode-yaml",
+        "anthropic.claude-code"
+      ]
+    }
+  }
+}
