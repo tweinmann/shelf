@@ -47,7 +47,7 @@ func TestRenderHello(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, findings, err := Render(context.Background(), parse(t, file, src), helloImages)
+	app, findings, err := Render(context.Background(), parse(t, file, src), helloImages, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +63,13 @@ func TestRenderHello(t *testing.T) {
 
 const head = "apiVersion: shelf.dev/v1alpha1\nname: shop\n"
 
-func renderApp(t *testing.T, src string, images fakeResolver) (*schema.App, validate.Findings) {
+func renderApp(t *testing.T, src string, images fakeResolver, built ...map[string]string) (*schema.App, validate.Findings) {
 	t.Helper()
-	app, findings, err := Render(context.Background(), parse(t, "app.yaml", []byte(src)), images)
+	var b map[string]string
+	if len(built) > 0 {
+		b = built[0]
+	}
+	app, findings, err := Render(context.Background(), parse(t, "app.yaml", []byte(src)), images, b)
 	if err != nil {
 		t.Fatalf("%v: %+v", err, findings)
 	}
@@ -246,7 +250,7 @@ func TestRenderDoesNotModifyInput(t *testing.T) {
 components:
   web: { image: nginx, port: 80, route: /, env: { A: $x } }
 `))
-	if _, _, err := Render(context.Background(), doc, fakeResolver{"nginx": {Digest: digest('1')}}); err != nil {
+	if _, _, err := Render(context.Background(), doc, fakeResolver{"nginx": {Digest: digest('1')}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	web := doc.App.Components["web"]
@@ -284,14 +288,14 @@ components:
 func TestRenderErrors(t *testing.T) {
 	t.Run("invalid app", func(t *testing.T) {
 		doc := parse(t, "app.yaml", []byte(head+"components:\n  web: { image: nginx, route: / }\n"))
-		app, findings, err := Render(context.Background(), doc, fakeResolver{})
+		app, findings, err := Render(context.Background(), doc, fakeResolver{}, nil)
 		if !errors.Is(err, ErrInvalid) || app != nil || !findings.HasErrors() {
 			t.Errorf("got app=%v findings=%v err=%v", app, findings, err)
 		}
 	})
 	t.Run("resolver fails", func(t *testing.T) {
 		doc := parse(t, "app.yaml", []byte(head+"components:\n  web: { image: nginx }\n"))
-		_, _, err := Render(context.Background(), doc, fakeResolver{})
+		_, _, err := Render(context.Background(), doc, fakeResolver{}, nil)
 		if err == nil || !strings.Contains(err.Error(), "component web: image not found: nginx") {
 			t.Errorf("err = %v", err)
 		}
@@ -311,7 +315,7 @@ func (c *countingResolver) Resolve(ctx context.Context, image string) (ImageInfo
 func TestRenderResolvesEachImageOnce(t *testing.T) {
 	r := &countingResolver{fakeResolver{"postgres:16": {Digest: digest('1')}}, map[string]int{}}
 	doc := parse(t, "app.yaml", []byte(head+"components:\n  a: { image: 'postgres:16' }\n  b: { image: 'postgres:16' }\n"))
-	if _, _, err := Render(context.Background(), doc, r); err != nil {
+	if _, _, err := Render(context.Background(), doc, r, nil); err != nil {
 		t.Fatal(err)
 	}
 	if r.calls["postgres:16"] != 1 {
@@ -354,5 +358,62 @@ secrets:
 	}
 	if got := back.App.Components["db"].Env["POSTGRES_PASSWORD"]; got != "${secrets.pw}" {
 		t.Errorf("POSTGRES_PASSWORD = %q", got)
+	}
+}
+
+func TestRenderBuiltComponents(t *testing.T) {
+	const src = head + `
+components:
+  web:
+    build: ./web
+    port: 8080
+  db:
+    image: postgres:16
+    port: 5432
+`
+	images := fakeResolver{
+		"ghcr.io/o/shop-web:main": {Digest: digest('c'), ExposedPorts: []int{8080}},
+		"postgres:16":             {Digest: digest('b'), ExposedPorts: []int{5432}},
+	}
+	built := map[string]string{"web": "ghcr.io/o/shop-web:main"}
+
+	app, findings := renderApp(t, src, images, built)
+	if len(findings) > 0 {
+		t.Errorf("unexpected findings: %+v", findings)
+	}
+	if got := app.Components["web"].Image; got != "ghcr.io/o/shop-web:main@"+digest('c') {
+		t.Errorf("web image %q", got)
+	}
+	if app.Components["web"].Build != "" {
+		t.Error("the resolved app.yaml must not keep the build directory")
+	}
+	if got := app.Components["db"].Image; got != "postgres:16@"+digest('b') {
+		t.Errorf("db image %q", got)
+	}
+}
+
+func TestRenderBuiltComponentErrors(t *testing.T) {
+	const src = head + `
+components:
+  web: { build: ./web }
+  db: { image: postgres:16 }
+`
+	images := fakeResolver{"ghcr.io/o/shop-web:main": {Digest: digest('c')}, "postgres:16": {Digest: digest('b')}}
+	tests := []struct {
+		name    string
+		built   map[string]string
+		wantErr string
+	}{
+		{"no image for a built component", nil, "pass the image it was pushed as"},
+		{"image for an unknown component", map[string]string{"web": "ghcr.io/o/shop-web:main", "nope": "x"}, "no component nope"},
+		{"image for a component with an image", map[string]string{"web": "ghcr.io/o/shop-web:main", "db": "x"}, "component db has an image"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := Render(context.Background(), parse(t, "app.yaml", []byte(src)), images, tt.built)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %v, want one containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }

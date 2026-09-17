@@ -1,0 +1,77 @@
+# Publishes a shelf release: CLI binaries, the shelf-app chart and the platform artifact, all
+# tagged with the release version. Triggered by pushing a tag, e.g. `git tag v0.1.0 && git push
+# origin v0.1.0`. The major tag (v0, later v1) is moved to the release, so tenants can use
+# `uses: tweinmann/shelf/.github/workflows/build.yml@v0` without tracking versions.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build the binaries
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            echo "::group::$os/$arch"
+            GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X github.com/tweinmann/shelf/internal/cli.Version=$VERSION" \
+              -o "dist/shelf" ./cmd/shelf
+            tar -czf "dist/shelf_${os}_${arch}.tar.gz" -C dist shelf
+            rm dist/shelf
+            echo "::endgroup::"
+          done
+          (cd dist && sha256sum ./*.tar.gz >checksums.txt)
+          cat dist/checksums.txt
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$VERSION" dist/*.tar.gz dist/checksums.txt --generate-notes --verify-tag
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Push the chart
+        run: |
+          # Helm versions are semver without a leading v; shelf init cluster expects that.
+          helm package charts/shelf-app --version "${VERSION#v}" --destination dist
+          helm push "dist/shelf-app-${VERSION#v}.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shelf/charts"
+
+      - uses: fluxcd/flux2/action@v2.9.5
+        with:
+          version: 2.9.5
+
+      - name: Push the platform artifact
+        run: |
+          flux push artifact "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shelf/platform:$VERSION" \
+            --path platform \
+            --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --revision "$VERSION@sha1:$GITHUB_SHA"
+
+      - name: Move the major tag
+        run: |
+          major="${VERSION%%.*}"
+          git tag -f "$major" "$GITHUB_SHA"
+          git push -f origin "$major"

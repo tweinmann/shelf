@@ -77,6 +77,8 @@ func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
 	prop(s, "instances").Minimum = "1"
 	prop(s, "volumes").PropertyNames = namePattern(VolumeNamePattern, MaxVolumeNameLength)
 	s.Not = &jsonschema.Schema{Required: []string{"port", "ports"}}
+	prop(s, "build").Pattern = BuildPathPattern
+	s.OneOf = []*jsonschema.Schema{{Required: []string{"image"}}, {Required: []string{"build"}}}
 }
 
 func (Route) JSONSchema() *jsonschema.Schema {

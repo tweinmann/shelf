@@ -50,6 +50,11 @@ func TestValid(t *testing.T) {
 components:
   web: { image: nginx }
 `,
+		"built component": head + `
+components:
+  web: { build: ./web, port: 8080, route: / }
+  api: { build: services/api }
+`,
 		"digest-pinned image": head + `
 components:
   web: { image: "ghcr.io/o/web:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000" }
@@ -163,7 +168,12 @@ func TestErrors(t *testing.T) {
 		{"reserved component app", head + "components:\n  app: { image: nginx }\n", "components.app", "reserved"},
 		{"reserved component shelf", head + "components:\n  shelf: { image: nginx }\n", "components.shelf", "reserved"},
 		{"reserved component suffix headless", head + "components:\n  db-headless: { image: nginx }\n", "components.db-headless", "reserved"},
-		{"missing image", head + "components:\n  web: { port: 80 }\n", "components.web.image", "is required"},
+		{"neither image nor build", head + "components:\n  web: { port: 80 }\n", "components.web", "needs image or build"},
+		{"image and build", head + "components:\n  web: { image: nginx, build: ./web }\n", "components.web.build", "together with image"},
+		{"absolute build path", head + "components:\n  web: { build: /web }\n", "components.web.build", "must be relative"},
+		{"build path leaves the repository", head + "components:\n  web: { build: ../web }\n", "components.web.build", "inside the repository"},
+		{"build path is the app directory", head + "components:\n  web: { build: . }\n", "components.web.build", "must name a directory"},
+		{"build path with a space", head + "components:\n  web: { build: \"./my web\" }\n", "components.web.build", "relative directory"},
 		{"invalid image", head + "components:\n  web: { image: 'Not An Image' }\n", "components.web.image", "invalid image reference"},
 		{"instances zero", head + "components:\n  web: { image: nginx, instances: 0 }\n", "components.web.instances", "at least 1"},
 
@@ -286,7 +296,7 @@ components:
 	got := formatAll(Validate(doc))
 	want := strings.Join([]string{
 		"  app.yaml:6: error: components.web.route: route needs a port; add port or ports to the component",
-		"  app.yaml:7: error: components.db.image: is required",
+		"  app.yaml:7: error: components.db: needs image or build",
 		"  app.yaml:8: error: components.db.port: must be between 1 and 65535, got 0",
 	}, "\n")
 	if got != want {

@@ -133,9 +133,18 @@ file.
 
 ## Deploying an app
 
-Your repository needs an `app.yaml` and a workflow that calls the shelf workflow. It builds
-your images for `linux/arm64`, renders `app.yaml` and pushes the deploy artifact
-`ghcr.io/<owner>/<app>-deploy`:
+Your repository needs two files. In `app.yaml`, a component you build yourself points at its
+directory instead of an image:
+
+```yaml
+components:
+  web:
+    build: ./web          # directory with the Dockerfile
+    port: 8080
+    route: /
+```
+
+The second file is the same for every app:
 
 ```yaml
 # .github/workflows/deploy.yml
@@ -148,15 +157,13 @@ permissions:
   packages: write
 jobs:
   shelf:
-    uses: tweinmann/shelf/.github/workflows/build.yml@main
-    with:
-      images: |
-        web=web          # <name>=<build context>, pushed as ghcr.io/<owner>/<repo>-<name>:main
+    uses: tweinmann/shelf/.github/workflows/build.yml@v0
 ```
 
-In `app.yaml`, refer to your own images by the `main` tag; `shelf render` pins them to the
-digests the workflow just pushed. [examples/tenant](examples/tenant) is a complete example
-repository.
+The workflow builds every `build` directory for `linux/arm64`, pushes the images, pins them to
+their digests, and publishes the deploy artifact `ghcr.io/<owner>/<app>-deploy`. Image names
+never appear in `app.yaml`. Ready-made images such as `postgres:16` stay as `image:`.
+[examples/tenant](examples/tenant) is a complete example repository.
 
 Once per cluster, install the platform. The GHCR login lets the cluster pull private images
 and artifacts; use a classic personal access token with `read:packages`:
@@ -226,7 +233,8 @@ and other editors that support JSON Schema. `shelf schema` prints the same schem
 
 | Field | Meaning |
 |---|---|
-| `image` | Image reference (required). `shelf render` pins tags to a digest. The image must provide `linux/arm64`. |
+| `image` | A ready-made image, e.g. `postgres:16`. `shelf render` pins tags to a digest. The image must provide `linux/arm64`. |
+| `build` | A directory of this repository with a Dockerfile, e.g. `./web`. Your CI builds and pushes it. Use either `image` or `build`. |
 | `command`, `args` | Override the image's entrypoint and command, as in Kubernetes. |
 | `env` | Environment variables as a map. Numbers and booleans are fine (`PORT: 8080`). |
 | `port` | The single port the container listens on. |
@@ -271,8 +279,9 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 | Command | What it does |
 |---|---|
 | `shelf validate <app.yaml>...` | Checks one or more files without network access. Errors and warnings show file, line and field. Exits with 1 on errors. |
-| `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. Registry credentials come from `docker login`. |
+| `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <component>=<reference>` supplies the image of a component with a `build` directory. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
+| `shelf build-plan <app.yaml>` | Prints the components with a `build` directory as JSON. The workflow uses it to know what to build. |
 | `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
 | `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes and secrets, after asking. The secret backup stays. |

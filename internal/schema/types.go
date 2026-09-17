@@ -34,6 +34,8 @@ const (
 	SecretNamePattern = `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// EnvNamePattern is a C identifier, which every shell can reference.
 	EnvNamePattern = `^[A-Za-z_][A-Za-z0-9_]*$`
+	// BuildPathPattern is a relative directory below the app.yaml, e.g. ./web or services/api.
+	BuildPathPattern = `^\.?/?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`
 )
 
 // App is the root of an app.yaml file.
@@ -46,7 +48,8 @@ type App struct {
 
 // Component is one container image with its runtime settings.
 type Component struct {
-	Image     string             `yaml:"image" jsonschema_description:"Image reference. Tags are pinned to a digest by shelf render."`
+	Image     string             `yaml:"image,omitempty" jsonschema_description:"Image reference of a ready-made image. Tags are pinned to a digest by shelf render. Mutually exclusive with build."`
+	Build     string             `yaml:"build,omitempty" jsonschema_description:"Directory with the Dockerfile of this component, relative to app.yaml. The CI builds it and shelf render pins the result. Mutually exclusive with image."`
 	Command   []string           `yaml:"command,omitempty" jsonschema_description:"Overrides the image entrypoint. Supports ${...} references; write $$ for a literal $."`
 	Args      []string           `yaml:"args,omitempty" jsonschema_description:"Overrides the image command. Supports ${...} references; write $$ for a literal $."`
 	Env       map[string]string  `yaml:"env,omitempty" jsonschema_description:"Environment variables. Values support ${...} references; write $$ for a literal $."`
@@ -102,6 +105,9 @@ func (c *Component) PortNames() map[string]int {
 	}
 	return c.Ports
 }
+
+// IsBuilt reports whether the component's image is built from this repository.
+func (c *Component) IsBuilt() bool { return c.Build != "" }
 
 // HasPorts reports whether the component declares any port.
 func (c *Component) HasPorts() bool {

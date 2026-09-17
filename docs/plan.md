@@ -86,6 +86,15 @@ Decided in Phase 4 (2026-09-17):
 | shelf in tenant CI | **Built from source** (`go install …@<ref>`) in the reusable workflow; release binaries come later. |
 | Webhook receiver | **Moved to Phase 5**, where the tunnel makes it reachable and testable. Phase 4 relies on `OCIRepository` polling every minute. |
 
+Decided in Phase 4b (2026-09-17), after the Phase 4 acceptance:
+
+| Question | Decision |
+|---|---|
+| What a tenant repository must know | **As little as possible: the `app.yaml` format and one boilerplate workflow.** The image names of components built in the repository are not part of that knowledge any more. |
+| Building own images | **`build: ./web` instead of `image:`.** `shelf build-plan` lists what has to be built, the workflow builds and pushes it as `ghcr.io/<owner>/<repository>-<component>`, and `shelf render --image <component>=<ref>` pins the digest. The naming convention lives in the workflow, not in shelf and not in `app.yaml`. |
+| shelf in the tenant CI | **Stays, but as a release binary.** `release.yml` publishes binaries, the chart and the platform artifact per tag; the workflow downloads the pinned binary in seconds instead of building it. Rendering in the cluster was considered and rejected: it would move a tested renderer into Helm templates, lose the checks in the pull request, and rebuild digest pinning in shell, without reducing what the tenant repository knows. |
+| Workflow reference | **A moving major tag** (`@v0`, later `@v1`), maintained by the release, so tenants do not track versions. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -464,7 +473,12 @@ secrets:
 ```
 
 ### Fields
-- `image`, `command`, `args`, `env` — as in Kubernetes; `env` is a map, and scalar values
+- `image` — a ready-made image; or `build: ./web`, a directory of the tenant repository that the
+  CI builds. Exactly one of the two. `shelf build-plan` lists the build directories, and
+  `shelf render --image <component>=<reference>` takes the pushed image back. The image name of
+  a built component is the workflow's convention (`ghcr.io/<owner>/<repository>-<component>`),
+  so it never appears in `app.yaml`
+- `command`, `args`, `env` — as in Kubernetes; `env` is a map, and scalar values
   (`PORT: 8080`) are taken as text
 - `port` (single port) or `ports` (map `name → number`)
 - `route`: short form `route: /path`; with multiple ports
@@ -612,8 +626,8 @@ shelf/
     apps/                     the ResourceSet (Phase 4)
   .github/workflows/
     ci.yml                    level-1 checks and level-2 smoke tests in the devcontainer image
-    build.yml                 reusable tenant workflow
-    release.yml               CLI binaries, chart push, platform artifact
+    build.yml                 reusable tenant workflow (build-plan, render, push artifact)
+    release.yml               CLI binaries, chart and platform artifact per tag, major tag
   examples/hello/
   examples/tenant/            files of the example tenant repo tweinmann/shelf-hello
   schema/app.schema.json
@@ -1021,6 +1035,25 @@ Results (2026-09-17, steps 1–5 and 7):
 - Open for later: during one rollout of a single-instance app Traefik answered 504 for a
   moment, although a Deployment starts the new pod before it stops the old one; in a second
   run this did not happen. Worth a look when the platform is exposed for real (Phase 5).
+
+### Phase 4b – Less shelf in the tenant repository
+Decided after the Phase 4 acceptance (rationale in the decisions table). A tenant repository
+should only know the `app.yaml` format and one boilerplate workflow.
+
+1. Schema `build: ./web` as an alternative to `image:`; validation (exactly one of the two, a
+   relative directory inside the repository)
+2. `shelf build-plan` (JSON: component and build context) and
+   `shelf render --image <component>=<reference>`
+3. `release.yml`: binaries for linux and darwin with checksums, the chart as
+   `oci://ghcr.io/<owner>/shelf/charts/shelf-app:<version without v>`, the platform artifact as
+   `oci://ghcr.io/<owner>/shelf/platform:<tag>`, and the major tag moved to the release
+4. `build.yml`: download the release binary instead of `go install`, build what `build-plan`
+   lists, pin the digests from the build metadata, no `images` input any more
+5. `examples/tenant` uses `build: ./web` and `@v0`; the tenant repository has no image names
+6. Acceptance: release, then a push in `tweinmann/shelf-hello` reaches the app again
+
+**Acceptance:** a tenant repository consists of `app.yaml` plus an unchanged workflow file, and
+a push rolls out as in Phase 4.
 
 ### Phase 5 – `shelf init expose`
 Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and

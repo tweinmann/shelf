@@ -17,11 +17,13 @@ Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart
 `just smoke-chart`. Results and decisions in docs/plan.md.
 Phase 3 complete: `shelf init cluster` (Flux Operator, FluxInstance, platform artifact with
 Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md.
-Phase 4 complete (awaiting approval): deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`,
-reusable workflow `build.yml`, level 2 in CI. Accepted end to end with the tenant repo
-`tweinmann/shelf-hello`: a push reached the app in 173 s. Results in docs/plan.md.
-Next: Phase 5 (`shelf init expose`: Cloudflare Tunnel, DNS, and the Flux Receiver moved here),
-once the maintainer approves it.
+Phase 4 complete: deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`, reusable workflow,
+level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push reached the app in
+173 s.
+In progress: Phase 4b (less shelf in the tenant repo): `build: ./web` in the schema,
+`shelf build-plan`, `shelf render --image`, `release.yml` with binaries, chart and platform
+artifact. Open: the release itself and the acceptance with the tenant repo.
+After that: Phase 5 (`shelf init expose`; the Flux Receiver moved there).
 
 ## Working agreements
 
@@ -96,6 +98,8 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 ## Conventions
 
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
+- A component has either `image:` or `build: ./dir`; the image name of a built component is the
+  workflow's business (`ghcr.io/<owner>/<repository>-<component>`), never `app.yaml`'s
 - Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
   the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
   OCI annotations `dev.shelf.*`

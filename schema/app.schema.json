@@ -3,6 +3,18 @@
   "$id": "https://raw.githubusercontent.com/tweinmann/shelf/main/schema/app.schema.json",
   "$defs": {
     "Component": {
+      "oneOf": [
+        {
+          "required": [
+            "image"
+          ]
+        },
+        {
+          "required": [
+            "build"
+          ]
+        }
+      ],
       "not": {
         "required": [
           "port",
@@ -12,7 +24,12 @@
       "properties": {
         "image": {
           "type": "string",
-          "description": "Image reference. Tags are pinned to a digest by shelf render."
+          "description": "Image reference of a ready-made image. Tags are pinned to a digest by shelf render. Mutually exclusive with build."
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^\\.?/?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+          "description": "Directory with the Dockerfile of this component, relative to app.yaml. The CI builds it and shelf render pins the result. Mutually exclusive with image."
         },
         "command": {
           "items": {
@@ -102,10 +119,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "image"
-      ]
+      "type": "object"
     },
     "Health": {
       "properties": {

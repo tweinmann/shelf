@@ -39,29 +39,34 @@ type Resolver interface {
 	Resolve(ctx context.Context, image string) (ImageInfo, error)
 }
 
-// Render validates the document, resolves its images and returns the resolved app. Findings
-// include validation findings and warnings from the image lookup. On validation errors it
-// returns ErrInvalid together with the findings.
-func Render(ctx context.Context, doc *schema.Document, resolver Resolver) (*schema.App, validate.Findings, error) {
+// Render validates the document, resolves its images and returns the resolved app. built holds
+// the image reference for every component with a `build` directory, by component name; the CI
+// pushes those images and passes what it got. Findings include validation findings and warnings
+// from the image lookup. On validation errors it returns ErrInvalid together with the findings.
+func Render(ctx context.Context, doc *schema.Document, resolver Resolver, built map[string]string) (*schema.App, validate.Findings, error) {
 	findings := validate.Validate(doc)
 	if findings.HasErrors() {
 		return nil, findings, ErrInvalid
 	}
 	src := doc.App
 
+	refs, err := imageRefs(src, built)
+	if err != nil {
+		return nil, findings, err
+	}
 	images := map[string]ImageInfo{}
 	for _, compName := range slices.Sorted(maps.Keys(src.Components)) {
-		comp := src.Components[compName]
-		info, ok := images[comp.Image]
+		ref := refs[compName]
+		info, ok := images[ref]
 		if !ok {
 			var err error
-			info, err = resolver.Resolve(ctx, comp.Image)
+			info, err = resolver.Resolve(ctx, ref)
 			if err != nil {
 				return nil, findings, fmt.Errorf("component %s: %w", compName, err)
 			}
-			images[comp.Image] = info
+			images[ref] = info
 		}
-		findings = append(findings, checkExposedPorts(doc, compName, info)...)
+		findings = append(findings, checkExposedPorts(doc, compName, ref, info)...)
 	}
 	findings.Sort()
 
@@ -72,14 +77,43 @@ func Render(ctx context.Context, doc *schema.Document, resolver Resolver) (*sche
 		Secrets:    src.Secrets,
 	}
 	for compName, comp := range src.Components {
-		out.Components[compName] = resolveComponent(src, comp, images[comp.Image])
+		out.Components[compName] = resolveComponent(src, comp, refs[compName], images[refs[compName]])
 	}
 	return out, findings, nil
 }
 
+// imageRefs returns the image reference of every component: the one from app.yaml, or the one
+// the CI passed for a component built from a directory.
+func imageRefs(app *schema.App, built map[string]string) (map[string]string, error) {
+	for _, compName := range slices.Sorted(maps.Keys(built)) {
+		comp, ok := app.Components[compName]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("no component %s in this app.yaml, but an image was passed for it", compName)
+		case !comp.IsBuilt():
+			return nil, fmt.Errorf("component %s has an image in app.yaml, so no image can be passed for it", compName)
+		}
+	}
+	refs := map[string]string{}
+	for _, compName := range slices.Sorted(maps.Keys(app.Components)) {
+		comp := app.Components[compName]
+		if !comp.IsBuilt() {
+			refs[compName] = comp.Image
+			continue
+		}
+		ref, ok := built[compName]
+		if !ok {
+			return nil, fmt.Errorf("component %s is built from %s; pass the image it was pushed as (--image %s=<reference>)",
+				compName, comp.Build, compName)
+		}
+		refs[compName] = ref
+	}
+	return refs, nil
+}
+
 // checkExposedPorts warns about declared ports the image does not EXPOSE. Images without any
 // EXPOSE are not checked.
-func checkExposedPorts(doc *schema.Document, compName string, info ImageInfo) validate.Findings {
+func checkExposedPorts(doc *schema.Document, compName, image string, info ImageInfo) validate.Findings {
 	comp := doc.App.Components[compName]
 	if len(info.ExposedPorts) == 0 || !comp.HasPorts() {
 		return nil
@@ -92,7 +126,7 @@ func checkExposedPorts(doc *schema.Document, compName string, info ImageInfo) va
 				Severity: validate.Warning,
 				Path:     strings.Join(p, "."),
 				Line:     doc.Line(p...),
-				Message:  fmt.Sprintf("port %d is not exposed by image %s (EXPOSE %s)", port, comp.Image, exposed),
+				Message:  fmt.Sprintf("port %d is not exposed by image %s (EXPOSE %s)", port, image, exposed),
 			})
 		}
 	}
@@ -113,9 +147,9 @@ func joinInts(ns []int) string {
 	return strings.Join(s, " ")
 }
 
-func resolveComponent(app *schema.App, comp *schema.Component, info ImageInfo) *schema.Component {
+func resolveComponent(app *schema.App, comp *schema.Component, image string, info ImageInfo) *schema.Component {
 	out := &schema.Component{
-		Image:     pinImage(comp.Image, info.Digest),
+		Image:     pinImage(image, info.Digest),
 		Command:   resolveList(app, comp.Command),
 		Args:      resolveList(app, comp.Args),
 		Volumes:   comp.Volumes,

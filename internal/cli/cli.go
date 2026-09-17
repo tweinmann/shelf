@@ -37,6 +37,7 @@ func New(resolver render.Resolver) *cobra.Command {
 	root.AddCommand(
 		newValidateCmd(),
 		newRenderCmd(resolver),
+		newBuildPlanCmd(),
 		newSchemaCmd(),
 		newInitCmd(),
 		newAppCmd(),
@@ -107,7 +108,10 @@ func plural(n int, word string) string {
 }
 
 func newRenderCmd(resolver render.Resolver) *cobra.Command {
-	var output string
+	var (
+		output string
+		images []string
+	)
 	cmd := &cobra.Command{
 		Use:   "render <app.yaml>",
 		Short: "Resolve an app.yaml and print the deploy manifest",
@@ -116,18 +120,23 @@ references, escape literal $ for Kubernetes, and normalize the structure.
 
 The manifest goes to stdout; findings and a summary of what will be created go to stderr.
 Secret values never appear in the output; ${secrets.<name>} is resolved in the cluster.
-Registry credentials come from the Docker config (docker login).`,
+Components with a ` + "`build`" + ` directory get their image from --image; the CI pushes those
+images first. Registry credentials come from the Docker config (docker login).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "configmap" && output != "app" {
 				return fmt.Errorf("--output must be configmap or app, got %q", output)
+			}
+			built, err := parseImages(images)
+			if err != nil {
+				return err
 			}
 			file := args[0]
 			doc, err := readDocument(file)
 			if err != nil {
 				return err
 			}
-			app, findings, err := render.Render(cmd.Context(), doc, resolver)
+			app, findings, err := render.Render(cmd.Context(), doc, resolver, built)
 			printFindings(cmd.ErrOrStderr(), file, findings)
 			if errors.Is(err, render.ErrInvalid) {
 				return ErrReported
@@ -154,6 +163,8 @@ Registry credentials come from the Docker config (docker login).`,
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "configmap",
 		"what to print: configmap (the deploy manifest) or app (the resolved app.yaml)")
+	cmd.Flags().StringArrayVar(&images, "image", nil,
+		"image a built component was pushed as, <component>=<reference>; repeatable")
 	return cmd
 }
 

@@ -57,7 +57,7 @@ func renderValues(t *testing.T, file string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, findings, err := render.Render(context.Background(), doc, fakeResolver{})
+	app, findings, err := render.Render(context.Background(), doc, fakeResolver{}, nil)
 	if err != nil {
 		t.Fatalf("%v: %+v", err, findings)
 	}

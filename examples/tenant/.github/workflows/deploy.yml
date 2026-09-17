@@ -1,4 +1,5 @@
-# Builds web, renders app.yaml and pushes the deploy artifact ghcr.io/tweinmann/greeter-deploy.
+# Builds everything app.yaml declares with `build`, renders it and pushes the deploy artifact
+# ghcr.io/tweinmann/greeter-deploy. Nothing in here is specific to this app.
 name: deploy
 
 on:
@@ -12,7 +13,4 @@ permissions:
 
 jobs:
   shelf:
-    uses: tweinmann/shelf/.github/workflows/build.yml@main
-    with:
-      images: |
-        web=web
+    uses: tweinmann/shelf/.github/workflows/build.yml@v0

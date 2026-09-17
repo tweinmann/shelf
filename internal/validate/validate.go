@@ -21,6 +21,7 @@ var (
 	volumeNameRE    = regexp.MustCompile(schema.VolumeNamePattern)
 	secretNameRE    = regexp.MustCompile(schema.SecretNamePattern)
 	envNameRE       = regexp.MustCompile(schema.EnvNamePattern)
+	buildPathRE     = regexp.MustCompile(schema.BuildPathPattern)
 )
 
 // reservedComponentNames would be ambiguous in ${...} references or clash with platform names.
@@ -114,15 +115,11 @@ func (c *checker) checkComponent(app *schema.App, compName string) {
 			compName, headlessSuffix)
 	}
 	if comp == nil {
-		c.errorf(p, "component is empty; image is required")
+		c.errorf(p, "component is empty; image or build is required")
 		return
 	}
 
-	if comp.Image == "" {
-		c.errorf(at(p, "image"), "is required")
-	} else if _, err := name.ParseReference(comp.Image); err != nil {
-		c.errorf(at(p, "image"), "invalid image reference %q: %v", comp.Image, err)
-	}
+	c.checkImage(p, comp)
 
 	c.checkPorts(p, comp)
 	c.checkRoute(p, comp)
@@ -149,6 +146,39 @@ func (c *checker) checkComponent(app *schema.App, compName string) {
 				schema.SecretEnvPrefix)
 		}
 		c.checkTemplate(app, ep, comp.Env[k])
+	}
+}
+
+// checkImage requires exactly one of image (a ready-made image) and build (a directory in the
+// repository, which the CI builds and shelf render pins).
+func (c *checker) checkImage(p []string, comp *schema.Component) {
+	switch {
+	case comp.Image == "" && comp.Build == "":
+		c.errorf(p, "needs image or build")
+	case comp.Image != "" && comp.Build != "":
+		c.errorf(at(p, "build"), "cannot be used together with image")
+	case comp.Image != "":
+		if _, err := name.ParseReference(comp.Image); err != nil {
+			c.errorf(at(p, "image"), "invalid image reference %q: %v", comp.Image, err)
+		}
+	default:
+		c.checkBuildPath(at(p, "build"), comp.Build)
+	}
+}
+
+// checkBuildPath allows a relative directory below the app.yaml and nothing else: the CI passes
+// it to the build as a context, so it must not leave the repository.
+func (c *checker) checkBuildPath(p []string, dir string) {
+	clean := path.Clean(dir)
+	switch {
+	case path.IsAbs(dir):
+		c.errorf(p, "%q must be relative to the app.yaml, e.g. ./web", dir)
+	case clean == "." || clean == "..":
+		c.errorf(p, "%q must name a directory, e.g. ./web", dir)
+	case strings.HasPrefix(clean, "../"):
+		c.errorf(p, "%q must stay inside the repository", dir)
+	case !buildPathRE.MatchString(dir):
+		c.errorf(p, "%q must be a relative directory such as ./web or services/api", dir)
 	}
 }
 

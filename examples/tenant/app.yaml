@@ -7,8 +7,9 @@ name: greeter
 
 components:
   web:
-    # Built and pushed by the workflow; shelf render pins the tag to the digest just pushed.
-    image: ghcr.io/tweinmann/shelf-hello-web:main
+    # The workflow builds this directory, pushes the image and pins it to its digest. The image
+    # name is the workflow's business, so it does not appear here.
+    build: ./web
     port: 8080
     route: /
     health: { path: /healthz }
