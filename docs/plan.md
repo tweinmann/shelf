@@ -191,7 +191,9 @@ devcontainer's own loopback, where `kubectl` runs, so the kubeconfig from k3d wo
 kubeconfig.
 
 Stopping or rebuilding the devcontainer stops the inner daemon and with it the cluster. Its
-state survives in the `shelf-docker` volume; `just cluster-up` starts it again.
+state survives in the `shelf-docker` volume, and the inner daemon starts the node container
+again by itself (k3d sets a restart policy). The kubeconfig does not survive, because the home
+directory is not a volume; `just cluster-up` writes it again (about 2 s).
 
 For the ingress test, `kubectl port-forward svc/traefik 8080:80` runs in the devcontainer; VS
 Code forwards port 8080 to the Mac, so `curl -H "Host: hello.dev.local" localhost:8080` also
@@ -654,6 +656,31 @@ Docker-in-Docker"). Code from Phase 1 is not affected.
 **Acceptance:** as for Phase 0 (smoke tests green, reset under a minute, baseline restored,
 `~/.kube/config` unchanged), plus: no k3d object on the host daemon at any time, and the
 cluster survives a devcontainer restart.
+
+Results (2026-09-17):
+
+- Step 1: done (commit `a1ea53d`); the rebuild also updated `devcontainer-lock.json` to
+  `docker-in-docker` 4.1.1.
+- Step 2: the container mounts `shelf-docker` on `/var/lib/docker` and `shelf-containerd` on
+  `/var/lib/containerd`, so the mounts in `devcontainer.json` do replace the feature's own; no
+  `dind-*` volume exists. The shared `vscode` volume is mounted at `/vscode`, which is why
+  `nuke.sh` resolves only the two daemon targets through the container.
+- Step 3: `docker info` reports the container's host name, Docker 29.8.1, cgroup v2, storage on
+  the `shelf-docker` volume (ext4); `just test` green. `/go/pkg` has mode `1777` after the
+  rebuild; the existing `shelf-gomodcache` volume keeps its earlier owner `vscode`, which is
+  fine locally.
+- Step 4: `just cluster-up` in 14 s including the first k3s pull, `just cluster-reset` in 10 s
+  (Phase 0: 13 s). kubectl reaches `https://127.0.0.1:6445` with the kubeconfig from k3d as is;
+  nested k3s runs without extra flags. No Traefik; StorageClass `local-path` with
+  `WaitForFirstConsumer`. `just smoke-secrets` green. While the cluster ran, `docker ps` on the
+  Mac showed no k3d container. The guard rejects a missing marker, a foreign `KUBECONFIG` and an
+  unreachable daemon, and leaves the cluster alone. `just smoke-registry` green against the
+private one of the maintainer's private GHCR images (run by the maintainer, because it prompts
+for the PAT).
+- Step 5: after a rebuild of the devcontainer (new container, new host name) the node
+  container was already running again, with the cluster 5 minutes old and the system pods
+  restarted once. `~/.kube` was empty; `just cluster-up` rewrote the kubeconfig in 2 s.
+- Steps 6–7: pending.
 
 ### Phase 1 – Scaffold, schema, renderer
 Repository layout, JSON Schema for `app.yaml` (editor autocomplete), `shelf validate`,

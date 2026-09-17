@@ -12,8 +12,9 @@ architecture.
 Phase 0 complete: devcontainer, dev cluster, smoke tests, `hack/nuke.sh`.
 Phase 1 complete (awaiting approval): `shelf validate`, `shelf render`, `shelf schema`, JSON
 Schema, `examples/hello`, `just test`, CI. Results and decisions in docs/plan.md.
-In progress: Phase 0b, switch from Docker-outside-of-Docker to Docker-in-Docker (files changed;
-next: the maintainer rebuilds the devcontainer, then steps 2–7 in docs/plan.md).
+In progress: Phase 0b, switch from Docker-outside-of-Docker to Docker-in-Docker. Steps 1–5
+green; open: step 6 (CI with the privileged devcontainer) and step 7 (`nuke.sh` and baseline
+comparison), see docs/plan.md.
 After that: Phase 2 (chart `shelf-app`), once the maintainer approves it.
 
 ## Working agreements
@@ -48,7 +49,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
-| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, write kubeconfig (also after a container restart) |
+| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, write kubeconfig (run after every container restart or rebuild) |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
