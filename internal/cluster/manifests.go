@@ -32,7 +32,7 @@ const (
 )
 
 // fluxOperatorManifest is the install.yaml of the Flux Operator release FluxOperatorVersion,
-// unchanged.
+// copied unchanged from the project's GitHub release (Apache-2.0, see NOTICE).
 //
 //go:embed manifests/flux-operator.yaml
 var fluxOperatorManifest []byte

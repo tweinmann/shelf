@@ -990,6 +990,9 @@ Results (2026-09-17, steps 1–5 and 7):
   8 minutes. Running it exposed a race in `smoke-secrets` and `smoke-registry`: a pod created
   right after its namespace is rejected until the namespace's `default` ServiceAccount
   exists; `create_namespace` in `hack/lib.sh` now waits for it.
+- License: Apache-2.0 (`LICENSE`), with a `NOTICE` for the redistributed Flux Operator
+  manifest. Chosen over MIT for the explicit patent grant and because Flux, Helm and k3s use it
+  too.
 - Before publishing: the repository history was rewritten (`git filter-branch`) to remove the
   names of the maintainer's private projects and the machine path from `docs/plan.md`, and to
   replace the author address with `tweinmann@users.noreply.github.com`; `user.email` is set to

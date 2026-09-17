@@ -1,0 +1,13 @@
+shelf
+Copyright 2026 Tobias Weinmann
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It redistributes one file from another project:
+
+  internal/cluster/manifests/flux-operator.yaml is the unchanged installation manifest of the
+  Flux Operator (https://github.com/controlplaneio-fluxcd/flux-operator),
+  Copyright ControlPlane, licensed under the Apache License, Version 2.0.
+
+At runtime shelf installs further components from their own registries, each under its own
+license: Flux (Apache-2.0), the Flux Operator (Apache-2.0) and Traefik (MIT).

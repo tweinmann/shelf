@@ -23,6 +23,7 @@ at `<app>.<your-domain>`.
 - [CLI reference](#cli-reference)
 - [Developing shelf](#developing-shelf)
 - [Further reading](#further-reading)
+- [License](#license)
 
 ## Why shelf
 
@@ -323,6 +324,7 @@ volumes, as listed in [docs/plan.md](docs/plan.md#footprint-on-the-existing-dock
 Repository layout:
 
 ```text
+LICENSE, NOTICE     Apache-2.0, and what shelf redistributes
 cmd/shelf/          CLI entry point
 internal/           schema, validation, rendering, cluster installation, CLI
 charts/shelf-app/   the generic Helm chart every app is installed with
@@ -340,3 +342,9 @@ docs/plan.md        design, decisions, phase plan
 - [docs/plan.md](docs/plan.md): architecture, decisions, the schema in detail, and the phase
   plan
 - [CLAUDE.md](CLAUDE.md): working agreements for AI-assisted development in this repository
+
+## License
+
+[Apache License 2.0](LICENSE). shelf redistributes the installation manifest of the
+[Flux Operator](https://github.com/controlplaneio-fluxcd/flux-operator) (Apache-2.0); see
+[NOTICE](NOTICE).
