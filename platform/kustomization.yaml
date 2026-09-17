@@ -1,0 +1,6 @@
+# The shelf platform: everything Flux installs into a cluster after `shelf init cluster`.
+# Pushed as an OCI artifact; the FluxInstance syncs it into the cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - traefik

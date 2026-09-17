@@ -38,6 +38,7 @@ func New(resolver render.Resolver) *cobra.Command {
 		newValidateCmd(),
 		newRenderCmd(resolver),
 		newSchemaCmd(),
+		newInitCmd(),
 		newVersionCmd(),
 	)
 	return root

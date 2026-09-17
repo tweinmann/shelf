@@ -1,0 +1,39 @@
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux
+  namespace: flux-system
+spec:
+  cluster:
+    networkPolicy: true
+    type: kubernetes
+  components:
+  - source-controller
+  - kustomize-controller
+  - helm-controller
+  - notification-controller
+  distribution:
+    registry: ghcr.io/fluxcd
+    version: 2.9.5
+  kustomize:
+    patches:
+    - patch: |
+        - op: add
+          path: /spec/wait
+          value: true
+      target:
+        kind: Kustomization
+        name: flux-system
+    - patch: |
+        - op: add
+          path: /spec/insecure
+          value: true
+      target:
+        kind: OCIRepository
+        name: flux-system
+  sync:
+    interval: 1m
+    kind: OCIRepository
+    path: ./
+    ref: dev
+    url: oci://shelf-registry:5000/shelf/platform

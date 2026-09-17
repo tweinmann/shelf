@@ -66,6 +66,16 @@ Decided in Phase 2 (2026-09-17):
 | Ingress | **One Ingress per routed component**, all on `<app>.<domain>`; Traefik attaches middlewares per Ingress, so `stripPrefix` stays per route. The Ingress is Traefik's routing table and external-dns's source, so it is needed despite the tunnel. |
 | Platform values | **`platform` block** next to the app values: `domain`, `ingressClassName` (default `traefik`), `imagePullSecret`. The ResourceSet sets it inline in the HelmRelease (Phase 4); later additions such as the external-dns target go here too. |
 
+Decided in Phase 3 (2026-09-17):
+
+| Question | Decision |
+|---|---|
+| Installation path | **Flux Operator + `FluxInstance` with `spec.sync`** pointing at the platform artifact. The operator creates the `OCIRepository` and `Kustomization` `flux-system`; shelf adjusts them only through `spec.kustomize.patches` (`wait: true`, and `insecure: true` for the dev registry, since `spec.sync` has no such field). |
+| Flux Operator install | **Official `install.yaml` embedded** in the binary (`go:embed`), applied with server-side apply. No helm on the target, no download at runtime; upgrading the operator means a new shelf build (`just flux-operator-update`). |
+| API access | **client-go in Go** (dynamic client, server-side apply, field manager `shelf`); no kubectl or flux on the target. |
+| Safety | `shelf init cluster` **shows context, API server and platform and asks** `Proceed? [y/N]`; `--yes` skips; `--context`/`--kubeconfig` pick the target explicitly. |
+| Dev artifact | **Local k3d registry** `shelf-registry`, created with the cluster. `just platform-push` pushes `platform/` as tag `dev`; in the cluster it is `oci://shelf-registry:5000/shelf/platform:dev`. Releases use `oci://ghcr.io/tweinmann/shelf/platform:<version>`, the default of `--platform`. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -176,6 +186,14 @@ Pinned versions (September 2026):
 | just | 1.58.0 | |
 | kubeconform | 0.8.0 | |
 
+Pinned in the platform (Phase 3), not in the Dockerfile:
+
+| Component | Version | Where |
+|---|---|---|
+| Flux Operator | v0.60.0 | `internal/cluster/manifests/flux-operator.yaml`, `FluxOperatorVersion` |
+| Flux | 2.9.5 | `FluxVersion` in `internal/cluster`; matches the Flux CLI |
+| Traefik chart | 41.6.0 (Traefik v3.7.13) | `platform/traefik/release.yaml` |
+
 **Guard.** Every `hack/` script calls `require_devcontainer`, which aborts unless
 `SHELF_DEVCONTAINER=1`, `KUBECONFIG` is the dev kubeconfig, and `docker info` reports the
 container's own host name — a daemon reached through a mounted host socket would report the
@@ -190,6 +208,7 @@ k3d cluster create shelf-dev \
   --image "$SHELF_K3S_IMAGE" \
   --k3s-arg "--disable=traefik@server:*" \
   --no-lb --api-port 127.0.0.1:6445 \
+  --registry-create shelf-registry:127.0.0.1:5050 \
   --kubeconfig-update-default=false --kubeconfig-switch-context=false
 
 k3d kubeconfig get shelf-dev > "$KUBECONFIG"
@@ -197,6 +216,11 @@ k3d kubeconfig get shelf-dev > "$KUBECONFIG"
 
 If the cluster exists it is started instead of created. The API server is published on the
 devcontainer's own loopback, where `kubectl` runs, so the kubeconfig from k3d works unchanged.
+The registry `shelf-registry` holds the dev platform artifact. `flux push` reaches it as
+`localhost:5050`, pods as `shelf-registry:5000` (k3d adds the name to CoreDNS's `NodeHosts`;
+the entry takes a few seconds to become resolvable after cluster creation). It is plain HTTP
+and is deleted together with the cluster, so after `just cluster-reset` run
+`just platform-push` again.
 `just cluster-down` (`hack/cluster-down.sh`) runs `k3d cluster delete shelf-dev` and removes the
 kubeconfig.
 
@@ -239,8 +263,8 @@ Complete inventory of what gets created on the host daemon:
 | Volumes | `shelf-docker`, `shelf-containerd` (inner Docker daemon: k3s images, cluster, a few GB) | devcontainer | yes; volumes on these two targets are also resolved via the container, in case the feature used its own generated names |
 
 Everything k3d creates — the k3s and k3d-tools images, the node containers with their anonymous
-volumes, the `k3d-shelf-dev` network and the `k3d-shelf-dev-images` volume — lives in the inner
-daemon and therefore inside `shelf-docker`. Workload images (e.g. `busybox` for smoke tests) are
+volumes, the `k3d-shelf-dev` network, the `k3d-shelf-dev-images` volume and the registry
+container `shelf-registry` — lives in the inner daemon and therefore inside `shelf-docker`. Workload images (e.g. `busybox` for smoke tests) are
 pulled by k3s's own containerd inside the node container.
 
 `hack/nuke.sh` is a POSIX `sh` script run **in a terminal on the Mac** — only `docker` is
@@ -337,7 +361,12 @@ In development, k3d plays the same role — see the development environment abov
 | Exposure | `cloudflared` in-cluster, one catch-all rule pointing at Traefik |
 | DNS | external-dns, Cloudflare provider |
 
-Platform components are installed by Flux from an OCI artifact of the shelf release.
+Platform components are installed by Flux from an OCI artifact of the shelf release: the
+directory `platform/` (a kustomization), pushed with `flux push artifact`. `shelf init cluster`
+installs the Flux Operator and a `FluxInstance` whose `spec.sync` points at that artifact; from
+then on Flux keeps the platform in sync. Traefik runs in namespace `traefik` with a ClusterIP
+Service on port 80, IngressClass `traefik` (not the default class), the Kubernetes Ingress and
+CRD providers, and no `websecure` port, because TLS ends at Cloudflare.
 
 **cloudflared configuration**: locally managed tunnel with exactly one rule,
 `service: http://traefik.traefik.svc.cluster.local:80`. Cloudflare is then *only* DNS per app;
@@ -524,7 +553,10 @@ cluster live and die together. On the mini, `~/.shelf/` is the real home directo
   summary (objects, PVC names, secret *names*) on stderr. `--reveal` for secret values follows
   in Phase 4, when `shelf app add` creates them.
 - `shelf schema` — the JSON Schema; `shelf version`
-- `shelf init cluster` / `shelf init expose` / `shelf init host` / `shelf init`
+- `shelf init cluster [--platform oci://…:<tag>] [--insecure-registry] [--context …]
+  [--kubeconfig …] [--yes] [--timeout 5m]` — shows the target and asks; prints what it
+  created, changed or left unchanged, and how long each wait took
+- `shelf init expose` / `shelf init host` / `shelf init`
 - `shelf app add <name> <artifact-url>` / `shelf app rm <name>`
 - `shelf doctor` — preflight plus runtime (VM, tunnel, Flux status), reporting per layer
 - `shelf destroy` — remove profile, tunnel and DNS records
@@ -540,10 +572,11 @@ shelf/
     ssh_config                template for mini access (Phase 6)
   hack/
     lib.sh                    shared helpers, require_devcontainer guard
-    cluster-up.sh             create/start dev cluster, join network, write kubeconfig
-    cluster-down.sh           detach and delete dev cluster
+    cluster-up.sh             create/start dev cluster and registry, write kubeconfig
+    cluster-down.sh           delete dev cluster and registry
+    platform-push.sh          push platform/ to the dev registry
     nuke.sh                   host-side cleanup by exact name (POSIX sh)
-    smoke/                    smoke tests (Phase 0, chart install in Phase 2)
+    smoke/                    smoke tests (Phase 0, chart install in Phase 2, init in Phase 3)
   cmd/shelf/                  CLI entry point
   internal/
     cli/                      cobra commands
@@ -556,10 +589,11 @@ shelf/
     preflight/                host checks
     host/                     brew, pmset, colima — behind a command-runner interface
     cloudflare/               tunnel and DNS API
-    cluster/                  apply/wait helpers
+    cluster/                  shelf init cluster: embedded Flux Operator manifest, FluxInstance,
+                              server-side apply and readiness waits
   charts/shelf-app/           the generic app chart
   platform/                   Flux-managed platform manifests (→ OCI artifact)
-    flux/ traefik/ cloudflared/ external-dns/
+    traefik/                  Phase 3; cloudflared/ and external-dns/ follow in Phase 5
     resourcesets/app.yaml     the ResourceSet
   .github/workflows/
     ci.yml                    level-1 checks in the devcontainer image
@@ -799,6 +833,44 @@ Flux Operator, `FluxInstance`, Traefik as ClusterIP, platform OCI artifact, all 
 current kubecontext. No Colima assumptions in the code.
 **Acceptance:** runs in one command on a freshly reset dev cluster, twice in a row without
 changes; example app reachable via `port-forward` + `Host` header.
+
+Results (2026-09-17):
+
+- Design checked by hand first: operator via `kubectl apply`, a `FluxInstance` with the sync
+  patches, Traefik from the platform artifact, `hello` reached through
+  `kubectl port-forward svc/traefik` with a `Host` header (unknown host: 404). Then built in Go.
+- `internal/cluster.Install`: applies namespaces and CRDs first and waits until they are
+  established, resets the discovery cache, applies the rest, waits for the operator
+  Deployment, applies the `FluxInstance` and waits for it, then waits for the platform. Each
+  apply is classified as created, configured or unchanged by comparing `resourceVersion`
+  (a server-side apply that changes nothing does not write).
+- Readiness: kstatus for built-in kinds (CRDs, Deployments). For Flux objects kstatus is not
+  enough: it reports a custom resource without any status as ready, which made the first
+  version claim "Flux ready after 0s". Flux objects now need `Ready=True` for the current
+  `generation`.
+- The platform wait requests a reconciliation of the sync `OCIRepository`
+  (`reconcile.fluxcd.io/requestedAt`, as `flux reconcile` does), waits until Flux handled it,
+  and then until the `Kustomization` is ready with exactly that artifact revision. Without
+  this, re-pushing the moving `dev` tag and rerunning `shelf init cluster` reported the old
+  revision as ready.
+- Level 1: golden files for the `FluxInstance` (with and without the insecure patch), the
+  embedded manifest (its operator image must match `FluxOperatorVersion`), reference parsing,
+  install order, apply classification, the Ready rule, and the CLI (confirm, decline, no
+  answer, `--yes`, `--context`, unknown context, bad reference, dev build without
+  `--platform`, default platform from the version). `just test` now validates custom
+  resources against the CRDs-catalog (Flux, Flux Operator, Traefik `Middleware`, which was
+  skipped before) and the kustomize build of `platform/`.
+- Level 2, `just smoke-init` on a freshly reset cluster, green: first run 60–86 s (operator
+  18–28 s, Flux 36–50 s including image pulls, platform 2–4 s), second run 6 s with all 13
+  operator objects and the `FluxInstance` unchanged; a re-pushed artifact is applied within
+  about 1 s; Traefik HelmRelease ready, Service ClusterIP, no `LoadBalancer` Service in the
+  cluster; `hello.dev.local/` reaches `web`, an unknown host gets 404; an app with
+  `route: { path: /api, stripPrefix: true }` receives `/api/items` as `/items`, and a path
+  outside the route gets 404.
+- The binary grew to about 37 MB (client-go); the darwin/arm64 build works.
+- Open for Phase 4: private platform artifacts (`spec.sync.pullSecret`) are not needed, the
+  release artifact is public; per-cluster settings for the platform (domain, tunnel) come
+  with Phase 4/5, probably as `postBuild.substituteFrom` on the sync Kustomization.
 
 ### Phase 4 – Delivery
 Deploy artifact format, `ResourceSet` + `ResourceSetInputProvider`, `shelf app add`/`rm`,

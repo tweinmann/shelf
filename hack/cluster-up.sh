@@ -9,15 +9,19 @@ require_devcontainer
 if k3d cluster get "$SHELF_CLUSTER" >/dev/null 2>&1; then
   echo "cluster $SHELF_CLUSTER exists, making sure it is running"
   k3d cluster start "$SHELF_CLUSTER" --wait
+  docker inspect "$SHELF_REGISTRY" >/dev/null 2>&1 \
+    || die "cluster $SHELF_CLUSTER has no registry $SHELF_REGISTRY; run just cluster-reset"
 else
   # servicelb stays enabled: disabling it makes k3d hang (k3d-io/k3d#742, #1241).
   # Nothing in shelf may use a LoadBalancer Service; the mini has none.
-  # The API server is published on this container's loopback, where kubectl runs.
+  # The API server and the registry are published on this container's loopback, where kubectl
+  # and flux run. The registry is deleted together with the cluster.
   k3d cluster create "$SHELF_CLUSTER" \
     --image "$SHELF_K3S_IMAGE" \
     --k3s-arg "--disable=traefik@server:*" \
     --no-lb \
     --api-port 127.0.0.1:6445 \
+    --registry-create "$SHELF_REGISTRY:127.0.0.1:${SHELF_REGISTRY_LOCAL##*:}" \
     --kubeconfig-update-default=false \
     --kubeconfig-switch-context=false \
     --wait

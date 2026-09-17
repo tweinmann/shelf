@@ -2,6 +2,11 @@
 
 readonly SHELF_CLUSTER=shelf-dev
 readonly SHELF_KUBECONFIG=/home/vscode/.kube/shelf-dev.yaml
+# The dev registry for the platform artifact, created with the cluster. Pods reach it as
+# shelf-registry:5000, this container as localhost:5050.
+readonly SHELF_REGISTRY=shelf-registry
+readonly SHELF_REGISTRY_IN_CLUSTER=shelf-registry:5000
+readonly SHELF_REGISTRY_LOCAL=localhost:5050
 
 die() {
   echo "error: $*" >&2

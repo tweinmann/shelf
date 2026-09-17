@@ -15,7 +15,9 @@ Phase 1 complete: `shelf validate`, `shelf render`, `shelf schema`, JSON Schema,
 `examples/hello`, `just test`, CI.
 Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart`,
 `just smoke-chart`. Results and decisions in docs/plan.md.
-In progress: Phase 3 (`shelf init cluster`).
+Phase 3 complete: `shelf init cluster` (Flux Operator, FluxInstance, platform artifact with
+Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md.
+In progress: Phase 4 (delivery: deploy artifact, `shelf app add`/`rm`).
 
 ## Working agreements
 
@@ -49,13 +51,17 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
-| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, write kubeconfig (run after every container restart or rebuild) |
+| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry`, write kubeconfig (run after every container restart or rebuild) |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
+| `just platform-push` | devcontainer | push `platform/` to the dev registry (`oci://shelf-registry:5000/shelf/platform:dev` in the cluster) |
+| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform artifact |
+| `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
 | `just smoke-chart` | devcontainer | install `examples/hello` with the chart, check the Phase 2 acceptance criteria (needs Docker Hub) |
+| `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -85,6 +91,8 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - Go: standard layout (`cmd/`, `internal/`), table-driven tests, golden files in `testdata/`
   (`-update` via `just golden`); the registry is behind `render.Resolver`, so tests never need
   the network
+- `internal/cluster` talks to the API server only (client-go, server-side apply with field
+  manager `shelf`); it must not shell out to kubectl, helm or flux
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
   themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):

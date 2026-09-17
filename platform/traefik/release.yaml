@@ -1,0 +1,56 @@
+# Traefik routes requests by Host header and path, using the Ingress objects of the apps.
+# The Service is ClusterIP: the mini has no load balancer, and cloudflared (Phase 5) reaches
+# Traefik inside the cluster at traefik.traefik.svc.cluster.local:80.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 1h
+  url: oci://ghcr.io/traefik/helm/traefik
+  ref:
+    tag: 41.6.0
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: traefik
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  values:
+    service:
+      spec:
+        type: ClusterIP
+    ports:
+      # TLS ends at Cloudflare; the tunnel speaks plain HTTP to the web entry point.
+      websecure:
+        expose:
+          default: false
+    ingressClass:
+      enabled: true
+      name: traefik
+      isDefaultClass: false
+    providers:
+      kubernetesIngress:
+        enabled: true
+      # Needed for the Middleware objects the shelf-app chart renders for stripPrefix.
+      kubernetesCRD:
+        enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi

@@ -22,14 +22,25 @@ test:
     go test ./...
     helm lint --strict charts/shelf-app --namespace hello \
       -f internal/cli/testdata/render-hello.app.yaml --set platform.domain=dev.local
-    # The Traefik Middleware CRD has no schema in kubeconform's default catalog.
-    kubeconform -strict -summary -skip Middleware \
-      internal/render/testdata/*.yaml internal/chart/testdata/*.manifests.yaml
+    # Custom resources (Flux, Flux Operator, Traefik) are checked against the CRDs-catalog.
+    schemas=(-schema-location default -schema-location \
+      'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{"{{"}}.Group{{"}}"}}/{{"{{"}}.ResourceKind{{"}}"}}_{{"{{"}}.ResourceAPIVersion{{"}}"}}.json')
+    kubeconform -strict -summary "${schemas[@]}" \
+      internal/render/testdata/*.yaml internal/chart/testdata/*.manifests.yaml \
+      internal/cluster/testdata/*.yaml
+    kubectl kustomize platform | kubeconform -strict -summary "${schemas[@]}" -
     go run ./cmd/shelf validate examples/*/app.yaml
 
 # Rewrite golden files and schema/app.schema.json from the current code
 golden:
-    go test ./internal/schema ./internal/render ./internal/cli ./internal/chart -update
+    go test ./internal/schema ./internal/render ./internal/cli ./internal/chart ./internal/cluster -update
+
+# Replace the embedded Flux Operator manifest with the install.yaml of another release
+flux-operator-update version:
+    curl -fsSL -o internal/cluster/manifests/flux-operator.yaml \
+      https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/{{version}}/install.yaml
+    sed -i 's/^\(\s*FluxOperatorVersion *= *\)".*"/\1"{{version}}"/' internal/cluster/manifests.go
+    go test ./internal/cluster
 
 # Build the CLI for this container (linux) into bin/
 build:
@@ -50,6 +61,14 @@ cluster-down:
 # Delete and recreate the dev cluster
 cluster-reset: cluster-down cluster-up
 
+# Push platform/ to the dev registry as the platform artifact (tag dev)
+platform-push:
+    hack/platform-push.sh
+
+# Install Flux and the platform into the dev cluster from the dev registry
+init-cluster *flags:
+    go run ./cmd/shelf init cluster --platform oci://shelf-registry:5000/shelf/platform:dev --insecure-registry {{flags}}
+
 # Smoke test: $(VAR) expansion from secretKeyRef in env and args
 smoke-secrets:
     hack/smoke/secret-expansion.sh
@@ -57,6 +76,10 @@ smoke-secrets:
 # Install examples/hello with the shelf-app chart and check the Phase 2 acceptance criteria
 smoke-chart:
     hack/smoke/chart.sh
+
+# Check shelf init cluster and routing through Traefik (run just cluster-reset first)
+smoke-init:
+    hack/smoke/init.sh
 
 # Smoke test: pull a private GHCR image through an imagePullSecret
 smoke-registry image:

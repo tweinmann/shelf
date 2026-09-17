@@ -78,8 +78,8 @@ one starts.
 | 1 | `app.yaml` schema, `shelf validate`, `shelf render`, CI | ✅ done |
 | 0b | Switch the devcontainer to Docker-in-Docker | ✅ done |
 | 2 | Helm chart `shelf-app` | ✅ done |
-| 3 | `shelf init cluster`: Flux, Traefik | 🔧 in progress |
-| 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | planned |
+| 3 | `shelf init cluster`: Flux, Traefik | ✅ done |
+| 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | 🔧 in progress |
 | 5 | `shelf init expose`: Cloudflare Tunnel, DNS | planned |
 | 6 | Installation on the Mac mini | planned |
 | 7 | Reference apps | planned |
@@ -224,6 +224,7 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 | `shelf validate <app.yaml>...` | Checks one or more files without network access. Errors and warnings show file, line and field. Exits with 1 on errors. |
 | `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
+| `shelf init cluster` | Installs Flux and the platform (Traefik) into the cluster of the current kubecontext, and waits until everything is ready. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
 | `shelf version` | Prints the version. |
 
 Example of an error message:
@@ -232,8 +233,8 @@ Example of an error message:
 app.yaml:12: error: components.web.route: route needs a port; add port or ports to the component
 ```
 
-Commands for installing the platform (`shelf init`) and for adding apps (`shelf app add`)
-follow in later phases.
+Commands for adding apps (`shelf app add`) and for the Mac mini (`shelf init host`) follow in
+later phases.
 
 ## Developing shelf
 
@@ -260,7 +261,8 @@ Useful commands:
 | `just golden` | Rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
-| `just smoke-secrets`, `just smoke-registry <image>`, `just smoke-chart` | Smoke tests against the local cluster; `smoke-chart` installs `examples/hello` with the chart |
+| `just platform-push`, `just init-cluster` | Push `platform/` to the local registry and install it with `shelf init cluster` |
+| `just smoke-secrets`, `just smoke-registry <image>`, `just smoke-chart`, `just smoke-init` | Smoke tests against the local cluster; `smoke-chart` installs `examples/hello` with the chart, `smoke-init` checks `shelf init cluster` and routing through Traefik |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |
 
 On your machine's Docker daemon, shelf only creates the devcontainer with its image and
@@ -271,10 +273,12 @@ Repository layout:
 
 ```text
 cmd/shelf/          CLI entry point
-internal/           schema, validation, rendering, CLI
+internal/           schema, validation, rendering, cluster installation, CLI
+charts/shelf-app/   the generic Helm chart every app is installed with
+platform/           what Flux installs into every cluster (Traefik)
 schema/             generated JSON Schema for app.yaml
 examples/hello/     reference app
-hack/               dev cluster and cleanup scripts
+hack/               dev cluster, platform push, smoke tests, cleanup
 docs/plan.md        design, decisions, phase plan
 ```
 
