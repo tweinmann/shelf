@@ -2,21 +2,22 @@
 # Remove every Docker object created for shelf development, by exact name.
 #
 # Runs on the host Mac and needs only the docker CLI. Nothing is matched by prefix and nothing
-# is pruned, so containers, volumes and images of other projects are never touched.
+# is pruned, so containers, volumes and images of other projects are never touched. The k3d
+# cluster lives in the devcontainer's own Docker daemon, whose data is in the shelf-docker and
+# shelf-containerd volumes, so it disappears with them.
 #
 # Usage: hack/nuke.sh [--with-shared-images] [--yes]
-#   --with-shared-images  also remove the third-party images shelf pulls (devcontainer base
-#                         image, k3s, k3d-tools). Only use this if they were not on this
-#                         machine before, since other projects may use them.
+#   --with-shared-images  also remove the devcontainer base image. Only use this if it was not
+#                         on this machine before, since other projects may use it.
 #   --yes                 do not ask for confirmation
 set -eu
 
 cd "$(dirname "$0")/.."
 
-# Inside the devcontainer, removing shelf-devcontainer kills this very script halfway through,
-# leaving networks, volumes and images behind.
-if [ -f /.dockerenv ] || [ -n "${LOCAL_WORKSPACE_FOLDER:-}" ]; then
-  echo "error: run this on the host Mac, not inside a container" >&2
+# Inside the devcontainer, docker talks to the container's own daemon, and removing
+# shelf-devcontainer from the host would kill this very script.
+if [ -f /.dockerenv ] || [ -n "${SHELF_DEVCONTAINER:-}" ]; then
+  echo "error: run this in a terminal on the host Mac, not inside a container" >&2
   exit 1
 fi
 
@@ -27,7 +28,7 @@ for arg in "$@"; do
     --with-shared-images) with_shared_images=1 ;;
     --yes) assume_yes=1 ;;
     -h | --help)
-      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -37,41 +38,49 @@ for arg in "$@"; do
   esac
 done
 
-# Versions come from the Dockerfile so this script never drifts from what was actually pulled.
+# The base image comes from the Dockerfile so this script never drifts from what was pulled.
 dockerfile=.devcontainer/Dockerfile
 base_image=$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p' "$dockerfile" | head -n 1)
-k3d_version=$(sed -n 's/^ARG K3D_VERSION=//p' "$dockerfile")
-k3s_image=$(sed -n 's/^ENV SHELF_K3S_IMAGE=//p' "$dockerfile")
-if [ -z "$base_image" ] || [ -z "$k3d_version" ] || [ -z "$k3s_image" ]; then
-  echo "error: could not read versions from $dockerfile" >&2
+if [ -z "$base_image" ]; then
+  echo "error: could not read the base image from $dockerfile" >&2
   exit 1
 fi
 
-# Keep in sync with the footprint inventory in docs/plan.md.
-containers="k3d-shelf-dev-server-0 k3d-shelf-dev-tools shelf-devcontainer"
-networks="k3d-shelf-dev"
-volumes="k3d-shelf-dev-images shelf-gomodcache shelf-gocache shelf-claude-config"
-shared_images="$base_image $k3s_image ghcr.io/k3d-io/k3d-tools:$k3d_version"
+# Keep in sync with the footprint inventory in docs/plan.md and the mounts in
+# .devcontainer/devcontainer.json.
+container=shelf-devcontainer
+volumes="shelf-gomodcache shelf-gocache shelf-claude-config shelf-docker shelf-containerd"
+shared_images="$base_image"
 
 # The devcontainer image has a generated name (vsc-shelf-<hash>...). Resolve it through the
 # container rather than by name, so another project folder that is also called "shelf" is safe.
+# The volumes behind the docker-in-docker daemon are resolved the same way, in case the
+# feature mounted them under its own generated names. Only these two mount targets count:
+# the container also mounts the shared 'vscode' volume, which must stay.
 devcontainer_image=""
-if docker container inspect shelf-devcontainer >/dev/null 2>&1; then
-  devcontainer_image=$(docker container inspect -f '{{.Image}}' shelf-devcontainer)
+if docker container inspect "$container" >/dev/null 2>&1; then
+  devcontainer_image=$(docker container inspect -f '{{.Image}}' "$container")
+  mounted=$(docker container inspect -f \
+    '{{range .Mounts}}{{if eq .Type "volume"}}{{.Destination}}={{.Name}} {{end}}{{end}}' "$container")
+  for m in $mounted; do
+    case "$m" in
+      /var/lib/docker=* | /var/lib/containerd=*) v=${m#*=} ;;
+      *) continue ;;
+    esac
+    case " $volumes " in
+      *" $v "*) ;;
+      *) volumes="$volumes $v" ;;
+    esac
+  done
 fi
 
-# Collect what exists, in removal order: containers, networks, volumes, images.
+# Collect what exists, in removal order: container, volumes, images.
 plan=""
 add() {
   plan="${plan}$1 $2
 "
 }
-for c in $containers; do
-  if docker container inspect "$c" >/dev/null 2>&1; then add container "$c"; fi
-done
-for n in $networks; do
-  if docker network inspect "$n" >/dev/null 2>&1; then add network "$n"; fi
-done
+if docker container inspect "$container" >/dev/null 2>&1; then add container "$container"; fi
 for v in $volumes; do
   if docker volume inspect "$v" >/dev/null 2>&1; then add volume "$v"; fi
 done
@@ -100,10 +109,8 @@ else
   fi
   printf '%s' "$plan" | while read -r kind name; do
     case "$kind" in
-      # -v removes the container's anonymous volumes (the k3s image declares four) and never
-      # touches named volumes.
+      # -v removes the container's anonymous volumes and never touches named volumes.
       container) docker container rm -f -v "$name" >/dev/null ;;
-      network) docker network rm "$name" >/dev/null ;;
       volume) docker volume rm "$name" >/dev/null ;;
       image) docker image rm "$name" >/dev/null ;;
     esac

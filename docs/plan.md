@@ -33,7 +33,7 @@ English because it is committed to the repo as `docs/plan.md`.
 | arm64 builds | **GitHub runner `ubuntu-24.04-arm`** (available in private repos since 01/2026) |
 | Ordering | **Mac mini installation last**, base platform first |
 | Dev cluster | **k3d on the Docker Desktop engine** — no local Colima, no Docker Desktop Kubernetes |
-| Dev environment | **Devcontainer + Docker-outside-of-Docker**, from Phase 0 — nothing installed on the Mac |
+| Dev environment | **Devcontainer + Docker-in-Docker** (Docker-outside-of-Docker until Phase 0b) — nothing installed on the Mac |
 | Language | **English** for all repo content; `CLAUDE.md` records the working agreements |
 
 Decided during planning (deviations from the original draft, stated explicitly):
@@ -114,37 +114,50 @@ shelf init          # wrapper around all three
 `shelf init cluster` must contain **no Colima assumptions** and only use the kubecontext.
 In development, `cluster` runs (and from Phase 5 optionally `expose`); `host` never does.
 
-### Devcontainer with Docker-outside-of-Docker
+### Devcontainer with Docker-in-Docker
 
 Nothing is installed on the Mac beyond what is already there: Docker Desktop and VS Code with
 the Dev Containers extension. The entire toolchain lives versioned in the repo.
 
-**What DooD isolates and what it does not.** The devcontainer gets the host daemon's socket.
-Isolated are the *toolchain* (Go, k3d, kubectl, helm, flux, just, kubeconform — pinned in the
-image) and the *kubeconfig* (lives in the container; the Mac's `~/.kube/config` is not mounted).
-Docker itself is **not** isolated: k3d containers are siblings of the existing Docker Desktop
-containers, sharing daemon, image store and RAM budget. Isolation there comes from fixed names
-and complete cleanup (see footprint below).
+**What DinD isolates.** The devcontainer runs its own Docker daemon (the `docker-in-docker`
+feature), and the k3d cluster lives in that daemon. Isolated are the *toolchain* (Go, k3d,
+kubectl, helm, flux, just, kubeconform — pinned in the image), the *kubeconfig* (lives in the
+container; the Mac's `~/.kube/config` is not mounted) and *Docker itself*: k3s images, cluster
+containers and the cluster network never appear on the host daemon, and `docker` inside the
+container cannot see or touch the maintainer's other containers. Shared with the host remain the
+RAM budget of the Docker Desktop VM and the few objects in the footprint below.
 
-`.devcontainer/devcontainer.json` sets a fixed container name (`shelf-devcontainer`, needed
-for `docker network connect` and exact-name cleanup), the DooD feature with `"moby": false`
-(its default `moby-cli` has no packages for Debian trixie; the Docker CE CLI does), `KUBECONFIG` and
-`LOCAL_WORKSPACE_FOLDER`, three named volumes, port 8080 forwarding, and the Go, YAML and
-Claude Code extensions. The Claude Code extension and a volume for `~/.claude` keep the
-assistant available and logged in across container rebuilds.
+The feature makes the container **privileged**, i.e. root in the Docker Desktop VM (not on the
+Mac). That is no real step down from the earlier Docker-outside-of-Docker setup: access to the
+host's Docker socket was already root-equivalent in the same VM.
 
-`.devcontainer/Dockerfile` is the single source of truth for versions. It downloads tool
+The switch from Docker-outside-of-Docker (Phase 0) happened on 2026-09-17 (see Phase 0b). It
+removed two workarounds the shared daemon needed: bind-mount paths had to be translated to host
+paths via `$LOCAL_WORKSPACE_FOLDER`, and the API server, published on the host's loopback, had
+to be reached by joining the k3d network, with an extra TLS SAN and an IP fallback.
+
+`.devcontainer/devcontainer.json` sets a fixed container name (`shelf-devcontainer`, for
+exact-name cleanup), the `docker-in-docker` feature with `"moby": false` (moby has no packages
+for Debian trixie; Docker CE does) and Docker pinned to 29.8.1, `KUBECONFIG` and the marker
+`SHELF_DEVCONTAINER=1`, five named volumes, port 8080 forwarding, and the Go, YAML and Claude
+Code extensions. The Claude Code extension and a volume for `~/.claude` keep the assistant
+available and logged in across container rebuilds. The feature brings its own volumes for
+`/var/lib/docker` and `/var/lib/containerd` with generated names; `devcontainer.json` mounts
+`shelf-docker` and `shelf-containerd` on the same targets instead, so the names are fixed.
+
+`.devcontainer/Dockerfile` is the single source of truth for tool versions. It downloads tool
 binaries at `ARG`-pinned versions and selects the architecture via
 `dpkg --print-architecture` — `arm64` on the M2 and in CI. Go module and build caches live in
 named volumes because the workspace bind mount over VirtioFS is noticeably slower for builds.
-The Dockerfile pre-creates and chowns every volume mount point: a new named volume copies
-ownership from the image directory, and without it the volumes would be root-owned.
+The Dockerfile pre-creates every volume mount point: a new named volume copies ownership and
+mode from the image directory, and without it the volumes would be root-owned.
 
 Pinned versions (September 2026):
 
 | Tool | Version | Note |
 |---|---|---|
 | Base image | `mcr.microsoft.com/devcontainers/go:2-1.27-trixie` | Go 1.27 |
+| Docker engine | 29.8.1 | in `devcontainer.json` (feature option) |
 | k3s | `rancher/k3s:v1.36.4-k3s1` | k3s stable channel |
 | kubectl | 1.36.4 | follows the k3s minor version |
 | k3d | 5.9.0 | |
@@ -153,20 +166,10 @@ Pinned versions (September 2026):
 | just | 1.58.0 | |
 | kubeconform | 0.8.0 | |
 
-**Pitfall 1 — path translation.** Every bind mount that k3d or `docker run` passes on is
-resolved by the *host* daemon. Inside the container `$PWD` is `/workspaces/shelf`, which does
-not exist on the Mac; Docker then silently creates an empty directory. Rule: **no host bind
-mounts in k3d.** If one is needed, the host path comes from `$LOCAL_WORKSPACE_FOLDER` (the
-approach documented by the DooD feature). Every `hack/` script aborts through
-`require_devcontainer` if the variable is missing, if `KUBECONFIG` is not the dev kubeconfig,
-or if the shell is not running in `shelf-devcontainer`.
-
-**Pitfall 2 — API server reachability.** k3d publishes the API server on the host's
-`127.0.0.1`. Inside the devcontainer `127.0.0.1` is its own loopback — `kubectl` would find
-nothing. Fix: the devcontainer joins the k3d network and addresses the server container by name
-through Docker's embedded DNS. The container name is added explicitly as a TLS SAN so
-verification passes without `insecure-skip-tls-verify`. (Microsoft's reference devcontainer for
-k3d sidesteps this with DinD and `--privileged`; with DooD this route is required.)
+**Guard.** Every `hack/` script calls `require_devcontainer`, which aborts unless
+`SHELF_DEVCONTAINER=1`, `KUBECONFIG` is the dev kubeconfig, and `docker info` reports the
+container's own host name — a daemon reached through a mounted host socket would report the
+Docker Desktop VM instead.
 
 ### Dev cluster: `just cluster-up`
 
@@ -176,25 +179,19 @@ k3d sidesteps this with DinD and `--privileged`; with DooD this route is require
 k3d cluster create shelf-dev \
   --image "$SHELF_K3S_IMAGE" \
   --k3s-arg "--disable=traefik@server:*" \
-  --k3s-arg "--tls-san=k3d-shelf-dev-server-0@server:*" \
   --no-lb --api-port 127.0.0.1:6445 \
   --kubeconfig-update-default=false --kubeconfig-switch-context=false
 
-docker network connect k3d-shelf-dev shelf-devcontainer
-
 k3d kubeconfig get shelf-dev > "$KUBECONFIG"
-kubectl config set-cluster k3d-shelf-dev --server=https://k3d-shelf-dev-server-0:6443
 ```
 
-If the cluster exists it is started instead of created, and an existing network attachment is
-accepted. If the server name does not resolve inside the devcontainer, the script falls back to
-the server's IP on the k3d network and sets `tls-server-name` to the container name, so TLS is
-still verified against the SAN. Phase 0 step 3 shows which path is taken.
+If the cluster exists it is started instead of created. The API server is published on the
+devcontainer's own loopback, where `kubectl` runs, so the kubeconfig from k3d works unchanged.
+`just cluster-down` (`hack/cluster-down.sh`) runs `k3d cluster delete shelf-dev` and removes the
+kubeconfig.
 
-`network connect` must be repeated after every rebuild (new network), so everything lives in one
-script. `just cluster-down` (`hack/cluster-down.sh`) **disconnects the devcontainer first** and
-then runs `k3d cluster delete shelf-dev`: Docker refuses to remove a network that still has
-endpoints, so k3d would otherwise leave `k3d-shelf-dev` behind.
+Stopping or rebuilding the devcontainer stops the inner daemon and with it the cluster. Its
+state survives in the `shelf-docker` volume; `just cluster-up` starts it again.
 
 For the ingress test, `kubectl port-forward svc/traefik 8080:80` runs in the devcontainer; VS
 Code forwards port 8080 to the Mac, so `curl -H "Host: hello.dev.local" localhost:8080` also
@@ -219,42 +216,36 @@ devcontainer; the `--kubeconfig-*=false` flags additionally stop k3d from touchi
 kubeconfig. A misconfigured `shelf init cluster` therefore cannot hit `docker-desktop`, and later
 cannot hit the mini.
 
-Complete inventory of what gets created:
+Complete inventory of what gets created on the host daemon:
 
 | Object | Name | Created by | Removed by `hack/nuke.sh` |
 |---|---|---|---|
 | Image | `vsc-shelf-…` (generated name) | devcontainer build | yes, resolved via the container |
+| Image | `mcr.microsoft.com/devcontainers/go:2-1.27-trixie` | devcontainer build | only with `--with-shared-images` |
 | Container | `shelf-devcontainer` | devcontainer | yes |
 | Volumes | `shelf-gomodcache`, `shelf-gocache`, `shelf-claude-config` | devcontainer | yes |
-| Image | `mcr.microsoft.com/devcontainers/go:2-1.27-trixie` | devcontainer build | only with `--with-shared-images` |
-| Image | `rancher/k3s:v1.36.4-k3s1` (~250 MB) | k3d | only with `--with-shared-images` |
-| Image | `ghcr.io/k3d-io/k3d-tools:5.9.0` | k3d | only with `--with-shared-images` |
-| Container | `k3d-shelf-dev-server-0` | k3d | yes |
-| Container | `k3d-shelf-dev-tools` (runs as long as the cluster exists) | k3d | yes, if left over |
-| Network | `k3d-shelf-dev` | k3d | yes |
-| Volume | `k3d-shelf-dev-images` | k3d | yes |
-| Volumes | four anonymous volumes of the server container (the k3s image declares `VOLUME`s) | k3d | yes, with the container (`rm -v`) |
+| Volumes | `shelf-docker`, `shelf-containerd` (inner Docker daemon: k3s images, cluster, a few GB) | devcontainer | yes; volumes on these two targets are also resolved via the container, in case the feature used its own generated names |
 
-Workload images inside the cluster (e.g. `busybox` for smoke tests) are pulled by k3s's own
-containerd inside the node container, not into the host's image store; they disappear with the
-cluster.
+Everything k3d creates — the k3s and k3d-tools images, the node containers with their anonymous
+volumes, the `k3d-shelf-dev` network and the `k3d-shelf-dev-images` volume — lives in the inner
+daemon and therefore inside `shelf-docker`. Workload images (e.g. `busybox` for smoke tests) are
+pulled by k3s's own containerd inside the node container.
 
-`hack/nuke.sh` is a POSIX `sh` script run **from the Mac** — only `docker` is needed, and `just`
-is not installed there. It also removes the devcontainer itself. It lists what it found and asks
-for confirmation (`--yes` skips that). Deleting by prefix match or with `docker … prune` is
-forbidden — the script names every object explicitly, so a foreign container that happens to
-start with `shelf-` is never caught. The devcontainer image has a generated name and is resolved
-through the container, never by name; if the container is already gone, matching images are
-only listed.
+`hack/nuke.sh` is a POSIX `sh` script run **in a terminal on the Mac** — only `docker` is
+needed, and `just` is not installed there. It refuses to run inside a container. It removes the
+devcontainer and lists what it found and asks for confirmation (`--yes` skips that). Deleting
+by prefix match or with `docker … prune` is forbidden — the script names every object
+explicitly, so a foreign container that happens to start with `shelf-` is never caught. The
+devcontainer image has a generated name and is resolved through the container, never by name;
+if the container is already gone, matching images are only listed.
 
-Shared third-party images are kept by default because other projects may use them; the baseline
-taken on 2026-09-16 shows none of them were present on this Mac, so `--with-shared-images` is
-safe here.
+The shared base image is kept by default because other projects may use it; the baseline taken
+on 2026-09-16 shows it was not present on this Mac, so `--with-shared-images` is safe here.
 
 Deliberately left in place, and reported by the script:
 
-- The **`vscode` volume**, which VS Code shares across all devcontainers and which already
-  existed on this Mac.
+- The **`vscode` volume**, which VS Code shares across all devcontainers (mounted at `/vscode`)
+  and which already existed on this Mac.
 - **Build cache** from the devcontainer build. It cannot be removed selectively without `prune`,
   and Docker's build cache garbage collection keeps it bounded.
 - **Untagged intermediate images** from the build, if any. They cannot be attributed to shelf
@@ -268,13 +259,14 @@ Three pitfalls:
   asserting that `type: LoadBalancer` is never rendered.
 - **local-path data lives inside the node container.** It survives pod restarts — exactly what
   Phase 2 tests — but not `k3d cluster delete`. If that is ever wanted:
-  `--volume "$LOCAL_WORKSPACE_FOLDER/.k3d-storage:/var/lib/rancher/k3s/storage@all"` —
-  **not** `$PWD`, see pitfall 1.
+  `--volume "$PWD/.k3d-storage:/var/lib/rancher/k3s/storage@all"` (with DinD, container paths
+  are resolved by the inner daemon, so `$PWD` is correct).
 - **The Docker Desktop VM needs headroom.** A k3s node plus Flux, Traefik and test apps wants
   ~3–4 GB *inside* the VM. If the VM is capped at 4 GB, other containers come under pressure and
   the OOM killer picks victims. Before Phase 0, check Settings → Resources for ~8 GB (no issue
-  with 24 GB on the host), and run `just cluster-stop` when not working on it.
-  Disabling Docker Desktop's built-in Kubernetes saves another ~2 GB — optional, both coexist.
+  with 24 GB on the host), and run `just cluster-stop` or stop the devcontainer when not
+  working on it. Disabling Docker Desktop's built-in Kubernetes saves another ~2 GB — optional,
+  both coexist.
 
 The throwaway reset (`just cluster-down && just cluster-up`) is the metric Phase 3 optimizes for.
 
@@ -528,7 +520,7 @@ cluster live and die together. On the mini, `~/.shelf/` is the real home directo
 shelf/
   CLAUDE.md                   working agreements for Claude (see below)
   .devcontainer/
-    devcontainer.json         DooD, volumes, remoteEnv
+    devcontainer.json         Docker-in-Docker, volumes, remoteEnv
     Dockerfile                Go base + pinned tool binaries (single source of versions)
     ssh_config                template for mini access (Phase 6)
   hack/
@@ -639,6 +631,29 @@ Phase 0 is complete; all acceptance criteria are met.
 **Acceptance:** all tools at the pinned versions; both smoke tests green;
 `just cluster-reset` in under a minute; after `hack/nuke.sh` the baseline is identical to
 before, apart from build cache entries; the Mac's `~/.kube/config` hash is unchanged.
+
+### Phase 0b – Switch to Docker-in-Docker
+Decided on 2026-09-17, after Phase 1 and before Phase 2 (rationale under "Devcontainer with
+Docker-in-Docker"). Code from Phase 1 is not affected.
+
+1. `devcontainer.json`: `docker-in-docker` feature instead of `docker-outside-of-docker`,
+   volumes `shelf-docker` and `shelf-containerd`, marker `SHELF_DEVCONTAINER` instead of
+   `LOCAL_WORKSPACE_FOLDER`; `hack/lib.sh` guard, `cluster-up.sh`, `cluster-down.sh` and
+   `nuke.sh` simplified; docs updated
+2. On the Mac: "Rebuild Container". Then, in a Mac terminal, check that the container mounts
+   `shelf-docker` and `shelf-containerd` and that no `dind-var-lib-*` volume exists
+3. In the container: `docker info` reports the container's host name and Docker 29.8.1;
+   `just test` is green
+4. `just cluster-up` (timed), `just smoke-secrets`, `just smoke-registry <image>`,
+   `just cluster-reset` (timed); meanwhile `docker ps` on the Mac shows no k3d containers
+5. Restart the devcontainer; `just cluster-up` brings the existing cluster back
+6. CI is green with the privileged devcontainer
+7. On the Mac: `hack/nuke.sh --with-shared-images`, reopen the devcontainer, compare with the
+   baseline as in Phase 0 step 7
+
+**Acceptance:** as for Phase 0 (smoke tests green, reset under a minute, baseline restored,
+`~/.kube/config` unchanged), plus: no k3d object on the host daemon at any time, and the
+cluster survives a devcontainer restart.
 
 ### Phase 1 – Scaffold, schema, renderer
 Repository layout, JSON Schema for `app.yaml` (editor autocomplete), `shelf validate`,

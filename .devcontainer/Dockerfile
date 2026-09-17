@@ -1,5 +1,6 @@
 # Development image for shelf. Every tool version is pinned here; this file is the single
-# source of truth for versions (hack/nuke.sh reads the base image and k3d version from it).
+# source of truth for versions (hack/nuke.sh reads the base image from it). The Docker engine
+# comes from the docker-in-docker feature, pinned in devcontainer.json.
 FROM mcr.microsoft.com/devcontainers/go:2-1.27-trixie
 
 ARG K3D_VERSION=5.9.0

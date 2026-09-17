@@ -12,7 +12,9 @@ architecture.
 Phase 0 complete: devcontainer, dev cluster, smoke tests, `hack/nuke.sh`.
 Phase 1 complete (awaiting approval): `shelf validate`, `shelf render`, `shelf schema`, JSON
 Schema, `examples/hello`, `just test`, CI. Results and decisions in docs/plan.md.
-Next: Phase 2 (chart `shelf-app`), once the maintainer approves it.
+In progress: Phase 0b, switch from Docker-outside-of-Docker to Docker-in-Docker (files changed;
+next: the maintainer rebuilds the devcontainer, then steps 2–7 in docs/plan.md).
+After that: Phase 2 (chart `shelf-app`), once the maintainer approves it.
 
 ## Working agreements
 
@@ -37,15 +39,16 @@ Next: Phase 2 (chart `shelf-app`), once the maintainer approves it.
 
 ## Dev environment
 
-All development happens inside the devcontainer (Docker-outside-of-Docker on Docker Desktop).
-Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
+All development happens inside the devcontainer on Docker Desktop. It runs its own Docker
+daemon (Docker-in-Docker), which also hosts the k3d cluster. Nothing is installed on the host
+Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 
 | Command | Run from | Purpose |
 |---|---|---|
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
-| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, join its network, write kubeconfig |
+| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, write kubeconfig (also after a container restart) |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
@@ -58,12 +61,13 @@ Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer
 - The devcontainer sets `KUBECONFIG` to `~/.kube/shelf-dev.yaml`. Never write to a shared
   kubeconfig, never switch contexts, and never target a cluster other than `shelf-dev` unless
   explicitly told to. Scripts in `hack/` enforce this through `require_devcontainer`.
-- The host Docker daemon is shared with the maintainer's other containers and volumes. Only
-  create Docker objects listed in the footprint inventory in docs/plan.md, and delete them by
-  exact name — never by prefix, never with `prune`. New objects go into the inventory,
-  `hack/nuke.sh` and (for volumes) `devcontainer.json` together.
-- Never pass `$PWD` or other container paths to `docker -v` or `k3d --volume`; the host daemon
-  resolves them. Use `$LOCAL_WORKSPACE_FOLDER`.
+- `docker` inside the devcontainer talks to its own daemon; `require_devcontainer` checks that.
+  Never mount the host's Docker socket or otherwise reach the host daemon from here.
+- The host Docker daemon is shared with the maintainer's other containers and volumes. The only
+  shelf objects on it are those in the footprint inventory in docs/plan.md (devcontainer,
+  its images and volumes). Delete them by exact name — never by prefix, never with `prune`.
+  New host objects go into the inventory, `hack/nuke.sh` and (for volumes)
+  `devcontainer.json` together.
 - A plain `go build` produces a Linux binary. Anything shipped to the mini needs
   `GOOS=darwin GOARCH=arm64`.
 - `internal/host` (brew, pmset, colima) cannot run in the devcontainer. Test it through the
@@ -80,4 +84,5 @@ Nothing is installed on the host Mac. Tool versions are pinned in `.devcontainer
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):
   `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …`
 - Shell: `hack/*.sh` use bash with `set -euo pipefail` and source `hack/lib.sh`;
-  `hack/nuke.sh` is POSIX `sh` because it runs on the host
+  `hack/nuke.sh` is POSIX `sh` because it runs on the host; hack scripts require
+  `SHELF_DEVCONTAINER=1`

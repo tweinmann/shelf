@@ -2,16 +2,18 @@
   "name": "shelf",
   "build": { "dockerfile": "Dockerfile" },
 
-  // Fixed name so hack/cluster-up.sh can attach this container to the k3d network,
-  // and hack/nuke.sh can remove it by exact name.
+  // Fixed name so hack/nuke.sh can remove it by exact name.
   "runArgs": ["--name", "shelf-devcontainer"],
 
-  // Docker-outside-of-Docker: the host daemon's socket is passed in. Containers started from
-  // here (k3d nodes) are siblings of this container on the host daemon.
-  // "moby": false installs the Docker CE CLI; moby-cli has no packages for Debian trixie.
+  // Docker-in-Docker: a private Docker daemon runs inside this container (the feature makes the
+  // container privileged). The k3d cluster lives in that daemon, not next to the host's other
+  // containers. "moby": false installs Docker CE; moby has no packages for Debian trixie.
   "features": {
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-      "moby": false
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {
+      "moby": false,
+      "version": "29.8.1",
+      "dockerDashComposeVersion": "none",
+      "installDockerBuildx": false
     }
   },
 
@@ -19,17 +21,20 @@
   "remoteEnv": {
     // The only kubeconfig tooling in this container should ever use.
     "KUBECONFIG": "/home/vscode/.kube/shelf-dev.yaml",
-    // Host path of the workspace. Bind mounts are resolved by the host daemon, so any path
-    // passed to `docker -v` or `k3d --volume` must be built from this, never from $PWD.
-    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+    // Marks the shelf devcontainer; hack/lib.sh requires it and hack/nuke.sh refuses it.
+    "SHELF_DEVCONTAINER": "1"
   },
 
   // Every volume here is listed in the footprint inventory in docs/plan.md and removed by
   // hack/nuke.sh. Add new ones in all three places.
+  // The last two replace the docker-in-docker feature's own mounts for the same targets, whose
+  // names contain a generated ID; fixed names keep exact-name cleanup possible.
   "mounts": [
     "source=shelf-gomodcache,target=/go/pkg/mod,type=volume",
     "source=shelf-gocache,target=/home/vscode/.cache/go-build,type=volume",
-    "source=shelf-claude-config,target=/home/vscode/.claude,type=volume"
+    "source=shelf-claude-config,target=/home/vscode/.claude,type=volume",
+    "source=shelf-docker,target=/var/lib/docker,type=volume",
+    "source=shelf-containerd,target=/var/lib/containerd,type=volume"
   ],
 
   "forwardPorts": [8080],

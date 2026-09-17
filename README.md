@@ -75,6 +75,7 @@ one starts.
 |---|---|---|
 | 0 | Devcontainer, local k3d cluster, smoke tests | ✅ done |
 | 1 | `app.yaml` schema, `shelf validate`, `shelf render`, CI | ✅ done |
+| 0b | Switch the devcontainer to Docker-in-Docker | 🔧 in progress |
 | 2 | Helm chart `shelf-app` | ⏳ next |
 | 3 | `shelf init cluster`: Flux, Traefik | planned |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | planned |
@@ -236,6 +237,10 @@ All development happens in a [devcontainer](https://containers.dev). On your mac
 need Docker Desktop and VS Code with the Dev Containers extension. Every tool version is pinned
 in [.devcontainer/Dockerfile](.devcontainer/Dockerfile).
 
+The devcontainer runs its own Docker daemon (Docker-in-Docker, which makes it a privileged
+container), and the local Kubernetes cluster runs inside it. Your other Docker containers stay
+out of reach.
+
 1. Open the repository in VS Code and choose **Reopen in Container**.
 2. Run the checks, the same ones CI runs:
 
@@ -252,11 +257,11 @@ Useful commands:
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
 | `just smoke-secrets`, `just smoke-registry <image>` | Smoke tests against the local cluster |
-| `hack/nuke.sh` | **Run on the host, not in the container.** Removes every Docker object shelf created. |
+| `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |
 
-The devcontainer shares the Docker daemon of your machine. shelf only creates the containers,
-networks, volumes and images listed in [docs/plan.md](docs/plan.md#footprint-on-the-existing-docker-desktop-setup),
-and `hack/nuke.sh` removes exactly those, by name.
+On your machine's Docker daemon, shelf only creates the devcontainer with its image and
+volumes, as listed in [docs/plan.md](docs/plan.md#footprint-on-the-existing-docker-desktop-setup).
+`hack/nuke.sh` removes exactly those, by name. The cluster disappears with them.
 
 Repository layout:
 
