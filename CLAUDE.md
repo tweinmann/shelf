@@ -20,10 +20,10 @@ Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md
 Phase 4 complete: deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`, reusable workflow,
 level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push reached the app in
 173 s.
-In progress: Phase 4b (less shelf in the tenant repo): `build: ./web` in the schema,
-`shelf build-plan`, `shelf render --image`, `release.yml` with binaries, chart and platform
-artifact. Open: the release itself and the acceptance with the tenant repo.
-After that: Phase 5 (`shelf init expose`; the Flux Receiver moved there).
+Phase 4b complete (awaiting approval): `build: ./web`, `shelf build-plan`,
+`shelf render --image`, `release.yml`. Release `v0.1.0` published; a push in the tenant repo
+reached the app in 81 s. A tenant repo now holds `app.yaml` plus one boilerplate workflow.
+Next: Phase 5 (`shelf init expose`: Cloudflare Tunnel, DNS, Flux Receiver), once approved.
 
 ## Working agreements
 

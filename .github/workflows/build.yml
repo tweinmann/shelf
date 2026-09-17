@@ -105,7 +105,9 @@ jobs:
             echo "::endgroup::"
             if [[ "$PUBLISH" == true ]]; then
               digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/$component.json")"
-              images+=("--image" "$component=$image@$digest")
+              # With the commit tag in front of the digest, the rendered app.yaml shows which
+              # commit built the image; shelf pins it to the digest either way.
+              images+=("--image" "$component=$image:sha-${GITHUB_SHA::7}@$digest")
             fi
           done < <(shelf build-plan "$APP_FILE" | jq -r '.[] | "\(.component) \(.context)"')
           : >"$RUNNER_TEMP/image-args"

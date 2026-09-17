@@ -371,17 +371,19 @@ components:
     image: postgres:16
     port: 5432
 `
+	// The CI passes tag and digest, as its build reported them.
+	const webRef = "ghcr.io/o/shop-web:sha-abc1234@" + "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	images := fakeResolver{
-		"ghcr.io/o/shop-web:main": {Digest: digest('c'), ExposedPorts: []int{8080}},
-		"postgres:16":             {Digest: digest('b'), ExposedPorts: []int{5432}},
+		webRef:        {Digest: digest('c'), ExposedPorts: []int{8080}},
+		"postgres:16": {Digest: digest('b'), ExposedPorts: []int{5432}},
 	}
-	built := map[string]string{"web": "ghcr.io/o/shop-web:main"}
+	built := map[string]string{"web": webRef}
 
 	app, findings := renderApp(t, src, images, built)
 	if len(findings) > 0 {
 		t.Errorf("unexpected findings: %+v", findings)
 	}
-	if got := app.Components["web"].Image; got != "ghcr.io/o/shop-web:main@"+digest('c') {
+	if got := app.Components["web"].Image; got != "ghcr.io/o/shop-web:sha-abc1234@"+digest('c') {
 		t.Errorf("web image %q", got)
 	}
 	if app.Components["web"].Build != "" {

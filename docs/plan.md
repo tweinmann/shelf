@@ -1055,6 +1055,19 @@ should only know the `app.yaml` format and one boilerplate workflow.
 **Acceptance:** a tenant repository consists of `app.yaml` plus an unchanged workflow file, and
 a push rolls out as in Phase 4.
 
+Results (2026-09-17):
+
+- Release `v0.1.0`: `release.yml` ran on the tag, published four binaries with checksums (the
+  linux/arm64 one verifies and prints `shelf v0.1.0`), pushed the chart as
+  `oci://ghcr.io/tweinmann/shelf/charts/shelf-app:0.1.0` and the platform as
+  `oci://ghcr.io/tweinmann/shelf/platform:v0.1.0`, both publicly readable, and moved `v0` to the
+  release commit.
+- `tweinmann/shelf-hello` now holds only `app.yaml` (with `build: ./web`) and a workflow that
+  is the same for every app. A push reached the app after **81 s**, less than half of the 173 s
+  in Phase 4, because the workflow downloads the release binary instead of building shelf.
+- The rendered `app.yaml` carries `ghcr.io/tweinmann/shelf-hello-web@sha256:…`. The workflow now
+  passes `<image>:sha-<short>@<digest>`, so the commit that built the image stays visible.
+
 ### Phase 5 – `shelf init expose`
 Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and
 `cloudflare-proxied` annotations. Tested **from the dev cluster** against a test domain — the

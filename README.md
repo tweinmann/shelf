@@ -82,14 +82,23 @@ one starts.
 | 0b | Switch the devcontainer to Docker-in-Docker | ✅ done |
 | 2 | Helm chart `shelf-app` | ✅ done |
 | 3 | `shelf init cluster`: Flux, Traefik | ✅ done |
-| 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | 🔍 in review |
+| 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | ✅ done |
+| 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | 🔍 in review |
 | 5 | `shelf init expose`: Cloudflare Tunnel, DNS | planned |
 | 6 | Installation on the Mac mini | planned |
 | 7 | Reference apps | planned |
 
 ## Quick start
 
-There are no release binaries yet. Build the CLI from source (Go 1.27 or later):
+Download the latest release for your platform (linux or darwin, amd64 or arm64):
+
+```sh
+curl -fsSL -o shelf.tar.gz \
+  https://github.com/tweinmann/shelf/releases/latest/download/shelf_darwin_arm64.tar.gz
+tar -xzf shelf.tar.gz && sudo install shelf /usr/local/bin/shelf
+```
+
+Or build it from source (Go 1.27 or later):
 
 ```sh
 git clone https://github.com/tweinmann/shelf.git
@@ -100,14 +109,14 @@ go build -o bin/shelf ./cmd/shelf
 Check the example app. `validate` works offline:
 
 ```console
-$ bin/shelf validate examples/hello/app.yaml
+$ shelf validate examples/hello/app.yaml
 examples/hello/app.yaml: valid
 ```
 
 Render it. This looks up the images in their registries:
 
 ```console
-$ bin/shelf render -o app examples/hello/app.yaml
+$ shelf render -o app examples/hello/app.yaml
 apiVersion: shelf.dev/v1alpha1
 name: hello
 components:
