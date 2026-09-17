@@ -15,11 +15,11 @@
 #     shelf:
 #       uses: tweinmann/shelf/.github/workflows/build.yml@v0
 #
-# Every component with `build: ./web` is pushed as ghcr.io/<owner>/<repository>-<component> with
-# the tags sha-<short> and main, and pinned to the digest it got. On the default branch the
-# deploy artifact is pushed as well, with the tags sha-<short> and main. On other branches and in
-# pull requests the images are built but nothing is pushed, so a change is checked without
-# deploying it.
+# Everything of an app lives under its name in the registry: the deploy artifact is
+# ghcr.io/<owner>/<app>, and every component with `build: ./web` is pushed as
+# ghcr.io/<owner>/<app>/<component>, each with the tags sha-<short> and main. Images are pinned
+# to the digest the build reported. On other branches and in pull requests the images are built
+# but nothing is pushed, so a change is checked without deploying it.
 name: shelf build
 
 on:
@@ -35,7 +35,7 @@ on:
         default: latest
     outputs:
       artifact:
-        description: The deploy artifact, oci://ghcr.io/<owner>/<app>-deploy:main; empty unless published.
+        description: The deploy artifact, oci://ghcr.io/<owner>/<app>:main; empty unless published.
         value: ${{ jobs.build.outputs.artifact }}
 
 jobs:
@@ -87,11 +87,12 @@ jobs:
       - name: Build the images of this repository
         id: images
         run: |
-          owner="${GITHUB_REPOSITORY_OWNER,,}"
-          repository="${GITHUB_REPOSITORY#*/}"
+          plan="$(shelf build-plan "$APP_FILE")"
+          app="$(jq -r .app <<<"$plan")"
+          echo "app=$app" >>"$GITHUB_ENV"
           images=()
           while read -r component context; do
-            image="ghcr.io/$owner/${repository,,}-$component"
+            image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$app/$component"
             args=(--platform linux/arm64
               --tag "$image:sha-${GITHUB_SHA::7}" --tag "$image:main"
               --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
@@ -109,7 +110,7 @@ jobs:
               # commit built the image; shelf pins it to the digest either way.
               images+=("--image" "$component=$image:sha-${GITHUB_SHA::7}@$digest")
             fi
-          done < <(shelf build-plan "$APP_FILE" | jq -r '.[] | "\(.component) \(.context)"')
+          done < <(jq -r '.builds[] | "\(.component) \(.context)"' <<<"$plan")
           : >"$RUNNER_TEMP/image-args"
           if (( ${#images[@]} )); then
             printf '%s\n' "${images[@]}" >"$RUNNER_TEMP/image-args"
@@ -127,9 +128,7 @@ jobs:
           mapfile -t image_args <"$RUNNER_TEMP/image-args"
           mkdir -p "$RUNNER_TEMP/deploy"
           shelf render "$APP_FILE" "${image_args[@]}" >"$RUNNER_TEMP/deploy/configmap.yaml"
-          app="$(sed -n 's/^  name: \(.*\)-values$/\1/p' "$RUNNER_TEMP/deploy/configmap.yaml")"
-          [[ -n "$app" ]] || { echo "could not read the app name" >&2; exit 1; }
-          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$app-deploy"
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$app"
           flux push artifact "oci://$repo:sha-${GITHUB_SHA::7}" \
             --path "$RUNNER_TEMP/deploy" \
             --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \

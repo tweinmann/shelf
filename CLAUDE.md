@@ -98,8 +98,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 ## Conventions
 
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
-- A component has either `image:` or `build: ./dir`; the image name of a built component is the
-  workflow's business (`ghcr.io/<owner>/<repository>-<component>`), never `app.yaml`'s
+- A component has either `image:` or `build: ./dir`; package names are the workflow's business,
+  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<app>`, a built image
+  `ghcr.io/<owner>/<app>/<component>`
 - Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
   the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
   OCI annotations `dev.shelf.*`

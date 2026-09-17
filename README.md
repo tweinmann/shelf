@@ -170,8 +170,9 @@ jobs:
 ```
 
 The workflow builds every `build` directory for `linux/arm64`, pushes the images, pins them to
-their digests, and publishes the deploy artifact `ghcr.io/<owner>/<app>-deploy`. Image names
-never appear in `app.yaml`. Ready-made images such as `postgres:16` stay as `image:`.
+their digests, and publishes the deploy artifact. Everything of an app lives under its name in
+the registry: the artifact is `ghcr.io/<owner>/<app>`, an image is `ghcr.io/<owner>/<app>/<component>`.
+Image names never appear in `app.yaml`. Ready-made images such as `postgres:16` stay as `image:`.
 [examples/tenant](examples/tenant) is a complete example repository.
 
 Once per cluster, install the platform. The GHCR login lets the cluster pull private images
@@ -187,7 +188,7 @@ Once per app, add it. shelf generates the app's secrets and keeps a backup in
 
 ```sh
 docker login ghcr.io          # shelf reads the artifact with your Docker credentials
-shelf app add <app> oci://ghcr.io/<owner>/<app>-deploy:main
+shelf app add <app> oci://ghcr.io/<owner>/<app>:main
 ```
 
 From then on, every push to `main` reaches the cluster by itself, usually within two minutes.
@@ -290,7 +291,7 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 | `shelf validate <app.yaml>...` | Checks one or more files without network access. Errors and warnings show file, line and field. Exits with 1 on errors. |
 | `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <component>=<reference>` supplies the image of a component with a `build` directory. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
-| `shelf build-plan <app.yaml>` | Prints the components with a `build` directory as JSON. The workflow uses it to know what to build. |
+| `shelf build-plan <app.yaml>` | Prints the app name and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
 | `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
 | `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes and secrets, after asking. The secret backup stays. |

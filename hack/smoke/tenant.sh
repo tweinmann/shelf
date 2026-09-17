@@ -2,7 +2,7 @@
 # Acceptance for Phase 4 with a real tenant: adds the app from its GHCR deploy artifact, then
 # waits while you push a change to the tenant repository, until the app answers differently.
 #
-# Usage: hack/smoke/tenant.sh <app> oci://ghcr.io/<owner>/<app>-deploy:main
+# Usage: hack/smoke/tenant.sh <app> oci://ghcr.io/<owner>/<app>:main
 # GHCR_USERNAME and GHCR_TOKEN (classic PAT, read:packages) are read from the environment, or
 # prompted for. They are stored in the cluster by shelf init cluster, and used by docker login
 # so that shelf app add can read the artifact.
@@ -13,7 +13,7 @@ require_devcontainer
 app="${1:-}"
 artifact="${2:-}"
 [[ -n "$app" && "$artifact" == oci://ghcr.io/* ]] \
-  || die "usage: $0 <app> oci://ghcr.io/<owner>/<app>-deploy:main"
+  || die "usage: $0 <app> oci://ghcr.io/<owner>/<app>:main"
 
 if [[ -z "${GHCR_USERNAME:-}" ]]; then read -rp "GHCR username: " GHCR_USERNAME; fi
 if [[ -z "${GHCR_TOKEN:-}" ]]; then

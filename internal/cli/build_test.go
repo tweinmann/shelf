@@ -38,19 +38,22 @@ func TestBuildPlan(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	var plan []buildItem
+	var plan buildPlan
 	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
 		t.Fatalf("%v: %s", err, stdout)
+	}
+	if plan.App != "shop" {
+		t.Errorf("app %q, want shop", plan.App)
 	}
 	dir := filepath.Dir(file)
 	want := []buildItem{
 		{Component: "api", Context: filepath.Join(dir, "services/api")},
 		{Component: "web", Context: filepath.Join(dir, "web")},
 	}
-	if len(plan) != len(want) {
-		t.Fatalf("plan %+v, want %+v", plan, want)
+	if len(plan.Builds) != len(want) {
+		t.Fatalf("plan %+v, want %+v", plan.Builds, want)
 	}
-	for i, item := range plan {
+	for i, item := range plan.Builds {
 		if item != want[i] {
 			t.Errorf("plan[%d] = %+v, want %+v", i, item, want[i])
 		}
@@ -60,7 +63,8 @@ func TestBuildPlan(t *testing.T) {
 func TestBuildPlanWithoutBuilds(t *testing.T) {
 	file := writeApp(t, "apiVersion: shelf.dev/v1alpha1\nname: shop\ncomponents:\n  db: { image: postgres:16 }\n")
 	stdout, _, code := run(t, "build-plan", file)
-	if code != 0 || strings.TrimSpace(stdout) != "[]" {
+	var plan buildPlan
+	if code != 0 || json.Unmarshal([]byte(stdout), &plan) != nil || plan.App != "shop" || len(plan.Builds) != 0 {
 		t.Errorf("exit code %d, stdout %q", code, stdout)
 	}
 }

@@ -17,6 +17,13 @@ import (
 
 var componentNameRE = regexp.MustCompile(schema.ComponentNamePattern)
 
+// buildPlan is what a CI needs before it can render an app.yaml: the app name, which the
+// package names are derived from, and the components it has to build.
+type buildPlan struct {
+	App    string      `json:"app"`
+	Builds []buildItem `json:"builds"`
+}
+
 // buildItem is one component that has to be built before rendering.
 type buildItem struct {
 	Component string `json:"component"`
@@ -27,12 +34,12 @@ type buildItem struct {
 func newBuildPlanCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "build-plan <app.yaml>",
-		Short: "List the components that have to be built, as JSON",
-		Long: `Print the components with a build directory, as a JSON array of {component, context}.
+		Short: "Print the app name and the components that have to be built, as JSON",
+		Long: `Print {app, builds} as JSON: the app name, and every component with a build directory.
 The build contexts are relative to the app.yaml, and printed relative to the working directory.
 
-A CI workflow builds each of them, pushes the image and passes the result to
-` + "`shelf render --image <component>=<reference>`" + `.`,
+A CI workflow names the packages after the app, builds each component, pushes the image and
+passes the result to ` + "`shelf render --image <component>=<reference>`" + `.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file := args[0]
@@ -40,7 +47,7 @@ A CI workflow builds each of them, pushes the image and passes the result to
 			if err != nil {
 				return err
 			}
-			plan := []buildItem{}
+			plan := buildPlan{App: doc.App.Name, Builds: []buildItem{}}
 			for _, compName := range slices.Sorted(maps.Keys(doc.App.Components)) {
 				comp := doc.App.Components[compName]
 				if comp == nil || !comp.IsBuilt() {
@@ -50,7 +57,7 @@ A CI workflow builds each of them, pushes the image and passes the result to
 				if info, err := os.Stat(context); err != nil || !info.IsDir() {
 					return fmt.Errorf("component %s: build directory %s does not exist", compName, context)
 				}
-				plan = append(plan, buildItem{Component: compName, Context: context})
+				plan.Builds = append(plan.Builds, buildItem{Component: compName, Context: context})
 			}
 			out, err := json.MarshalIndent(plan, "", "  ")
 			if err != nil {

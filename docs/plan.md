@@ -421,7 +421,8 @@ stays stable.
 For every build, the tenant workflow pushes:
 
 1. Images for `linux/arm64` to GHCR
-2. An OCI artifact `ghcr.io/<owner>/<app>-deploy`
+2. An OCI artifact `ghcr.io/<owner>/<app>`; images built in the same repository are pushed as
+   `ghcr.io/<owner>/<app>/<component>`, so everything of an app sits under its name
    - Content: a ConfigMap manifest holding the resolved `app.yaml` under the key `app.yaml`
      - images pinned by digest
      - `${<component>.host}` / `${<component>.port}` / `${<component>.ports.<name>}` substituted
@@ -931,7 +932,7 @@ Design:
 - `shelf app rm <name>` asks, deletes the provider and waits until the namespace is gone,
   then deletes `app-<name>`. The host backup stays.
 - Deploy artifact: `shelf render` output pushed with `flux push artifact` as
-  `ghcr.io/<owner>/<app>-deploy:sha-<short>`, tagged `main` on the default branch.
+  `ghcr.io/<owner>/<app>:sha-<short>`, tagged `main` on the default branch.
 - Dev registry: reachable as `shelf-registry:5000` from pods and from the devcontainer (an
   `/etc/hosts` entry written by `cluster-up.sh`), so the same reference works for `flux push`,
   `shelf app add` and Flux.
