@@ -8,8 +8,9 @@ at `<app>.<your-domain>`.
 
 > [!WARNING]
 > shelf is a learning project for platform engineering. It is **not meant for production**,
-> and it is **still under construction**: today the CLI can validate and render an app. It
-> cannot deploy one yet. See [Status](#status).
+> and it is **still under construction**: apps can be deployed to a Kubernetes cluster, but
+> they are not reachable from the internet yet, and the Mac mini setup is missing. See
+> [Status](#status).
 
 ## Contents
 
@@ -17,6 +18,7 @@ at `<app>.<your-domain>`.
 - [How it works](#how-it-works)
 - [Status](#status)
 - [Quick start](#quick-start)
+- [Deploying an app](#deploying-an-app)
 - [Writing an `app.yaml`](#writing-an-appyaml)
 - [CLI reference](#cli-reference)
 - [Developing shelf](#developing-shelf)
@@ -128,6 +130,52 @@ App hello (namespace hello):
 The manifest goes to stdout and the summary to stderr, so you can redirect the manifest to a
 file.
 
+## Deploying an app
+
+Your repository needs an `app.yaml` and a workflow that calls the shelf workflow. It builds
+your images for `linux/arm64`, renders `app.yaml` and pushes the deploy artifact
+`ghcr.io/<owner>/<app>-deploy`:
+
+```yaml
+# .github/workflows/deploy.yml
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  shelf:
+    uses: tweinmann/shelf/.github/workflows/build.yml@main
+    with:
+      images: |
+        web=web          # <name>=<build context>, pushed as ghcr.io/<owner>/<repo>-<name>:main
+```
+
+In `app.yaml`, refer to your own images by the `main` tag; `shelf render` pins them to the
+digests the workflow just pushed. [examples/tenant](examples/tenant) is a complete example
+repository.
+
+Once per cluster, install the platform. The GHCR login lets the cluster pull private images
+and artifacts; use a classic personal access token with `read:packages`:
+
+```sh
+export GHCR_USERNAME=<you> GHCR_TOKEN=<token>
+shelf init cluster --domain example.com
+```
+
+Once per app, add it. shelf generates the app's secrets and keeps a backup in
+`~/.shelf/apps/<app>/secrets.yaml`:
+
+```sh
+docker login ghcr.io          # shelf reads the artifact with your Docker credentials
+shelf app add <app> oci://ghcr.io/<owner>/<app>-deploy:main
+```
+
+From then on, every push to `main` reaches the cluster by itself, usually within two minutes.
+`shelf app rm <app>` removes the app with all its data.
+
 ## Writing an `app.yaml`
 
 A complete example with a web frontend, an API and a Postgres database:
@@ -224,7 +272,9 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 | `shelf validate <app.yaml>...` | Checks one or more files without network access. Errors and warnings show file, line and field. Exits with 1 on errors. |
 | `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
-| `shelf init cluster` | Installs Flux and the platform (Traefik) into the cluster of the current kubecontext, and waits until everything is ready. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
+| `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
+| `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
+| `shelf app rm <app>` | Removes an app with its namespace, volumes and secrets, after asking. The secret backup stays. |
 | `shelf version` | Prints the version. |
 
 Example of an error message:
@@ -233,8 +283,8 @@ Example of an error message:
 app.yaml:12: error: components.web.route: route needs a port; add port or ports to the component
 ```
 
-Commands for adding apps (`shelf app add`) and for the Mac mini (`shelf init host`) follow in
-later phases.
+Commands for exposing apps (`shelf init expose`) and for the Mac mini (`shelf init host`)
+follow in later phases.
 
 ## Developing shelf
 
@@ -261,8 +311,9 @@ Useful commands:
 | `just golden` | Rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
-| `just platform-push`, `just init-cluster` | Push `platform/` to the local registry and install it with `shelf init cluster` |
-| `just smoke-secrets`, `just smoke-registry <image>`, `just smoke-chart`, `just smoke-init` | Smoke tests against the local cluster; `smoke-chart` installs `examples/hello` with the chart, `smoke-init` checks `shelf init cluster` and routing through Traefik |
+| `just platform-push`, `just chart-push`, `just init-cluster` | Push `platform/` and the chart to the local registry and install them with `shelf init cluster` |
+| `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, and `shelf app add`/`rm` with rollouts from the local registry |
+| `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>` | Smoke tests that need a GHCR login: a private image pull, and a real tenant repository end to end |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |
 
 On your machine's Docker daemon, shelf only creates the devcontainer with its image and
@@ -275,9 +326,11 @@ Repository layout:
 cmd/shelf/          CLI entry point
 internal/           schema, validation, rendering, cluster installation, CLI
 charts/shelf-app/   the generic Helm chart every app is installed with
-platform/           what Flux installs into every cluster (Traefik)
+platform/           what Flux installs into every cluster (Traefik, the app ResourceSet)
 schema/             generated JSON Schema for app.yaml
 examples/hello/     reference app
+examples/tenant/    example tenant repository (app.yaml, image, workflow)
+.github/workflows/  CI, and build.yml, the reusable workflow for tenants
 hack/               dev cluster, platform push, smoke tests, cleanup
 docs/plan.md        design, decisions, phase plan
 ```

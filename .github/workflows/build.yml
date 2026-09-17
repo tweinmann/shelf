@@ -1,0 +1,135 @@
+# Reusable workflow for shelf tenants. It builds the app's images for linux/arm64, renders
+# app.yaml and pushes the deploy artifact ghcr.io/<owner>/<app>-deploy, which shelf deploys.
+#
+# Usage in a tenant repository:
+#
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#   permissions:
+#     contents: read
+#     packages: write
+#   jobs:
+#     shelf:
+#       uses: tweinmann/shelf/.github/workflows/build.yml@main
+#       with:
+#         images: |
+#           web=web
+#
+# On the default branch every image is pushed as ghcr.io/<owner>/<repository>-<name> with the
+# tags sha-<short> and main, and the deploy artifact with the tags sha-<short> and main. app.yaml
+# refers to the images by the main tag; shelf render pins them to the digests just pushed.
+# On other branches and in pull requests the images are built but not pushed, and app.yaml is
+# only validated.
+name: shelf build
+
+on:
+  workflow_call:
+    inputs:
+      app-file:
+        description: Path of app.yaml.
+        type: string
+        default: app.yaml
+      images:
+        description: Images to build, one per line as <name>=<build context directory>.
+        type: string
+        default: ""
+      shelf-version:
+        description: Git ref of shelf to build the CLI from.
+        type: string
+        default: main
+    outputs:
+      artifact:
+        description: The deploy artifact, oci://ghcr.io/<owner>/<app>-deploy:main; empty unless published.
+        value: ${{ jobs.build.outputs.artifact }}
+
+jobs:
+  build:
+    # The same architecture as the Mac mini, so images build natively.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      artifact: ${{ steps.publish.outputs.artifact }}
+    env:
+      APP_FILE: ${{ inputs.app-file }}
+      IMAGES: ${{ inputs.images }}
+      PUBLISH: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache: false
+
+      - name: Install shelf
+        env:
+          SHELF_VERSION: ${{ inputs.shelf-version }}
+        run: go install "github.com/tweinmann/shelf/cmd/shelf@${SHELF_VERSION}"
+
+      - name: Validate app.yaml
+        run: shelf validate "$APP_FILE"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build images
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repository="${GITHUB_REPOSITORY#*/}"
+          repository="${repository,,}"
+          while IFS='=' read -r name context; do
+            [[ -z "$name" ]] && continue
+            image="ghcr.io/$owner/$repository-$name"
+            args=(--platform linux/arm64 --tag "$image:sha-${GITHUB_SHA::7}" --tag "$image:main"
+              --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+              --label "org.opencontainers.image.revision=$GITHUB_SHA")
+            if [[ "$PUBLISH" == true ]]; then
+              args+=(--push)
+            fi
+            echo "::group::$image from $context"
+            docker buildx build "${args[@]}" "$context"
+            echo "::endgroup::"
+          done <<<"$IMAGES"
+
+      - uses: fluxcd/flux2/action@v2.9.5
+        if: env.PUBLISH == 'true'
+        with:
+          version: 2.9.5
+
+      - name: Render and push the deploy artifact
+        id: publish
+        if: env.PUBLISH == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/deploy"
+          shelf render "$APP_FILE" >"$RUNNER_TEMP/deploy/configmap.yaml"
+          app="$(sed -n 's/^  name: \(.*\)-values$/\1/p' "$RUNNER_TEMP/deploy/configmap.yaml")"
+          [[ -n "$app" ]] || { echo "could not read the app name" >&2; exit 1; }
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$app-deploy"
+          flux push artifact "oci://$repo:sha-${GITHUB_SHA::7}" \
+            --path "$RUNNER_TEMP/deploy" \
+            --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --revision "$GITHUB_REF_NAME@sha1:$GITHUB_SHA" \
+            --annotations "dev.shelf.app=$app"
+          flux tag artifact "oci://$repo:sha-${GITHUB_SHA::7}" --tag main
+          echo "artifact=oci://$repo:main" >>"$GITHUB_OUTPUT"
+          {
+            echo "### Deploy artifact"
+            echo
+            echo "\`oci://$repo:main\` (also \`sha-${GITHUB_SHA::7}\`)"
+            echo
+            echo "Add the app once with:"
+            echo
+            echo "\`\`\`"
+            echo "shelf app add $app oci://$repo:main"
+            echo "\`\`\`"
+          } >>"$GITHUB_STEP_SUMMARY"

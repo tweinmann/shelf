@@ -21,6 +21,12 @@ spec:
         - op: add
           path: /spec/wait
           value: true
+        - op: add
+          path: /spec/postBuild
+          value:
+            substituteFrom:
+              - kind: ConfigMap
+                name: shelf-config
       target:
         kind: Kustomization
         name: flux-system

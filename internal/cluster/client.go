@@ -135,29 +135,49 @@ func current(obj *unstructured.Unstructured) (bool, string, error) {
 	return res.Status == status.CurrentStatus, res.Message, nil
 }
 
+// conditions returns status.conditions.
+func conditions(obj *unstructured.Unstructured) []map[string]any {
+	items, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	var out []map[string]any
+	for _, item := range items {
+		if cond, ok := item.(map[string]any); ok {
+			out = append(out, cond)
+		}
+	}
+	return out
+}
+
 // readyCondition is ready when the Ready condition is True for the current generation. Flux
 // and the Flux Operator report readiness this way. Unlike kstatus it does not treat an object
-// without status as ready, which a freshly created custom resource is.
+// without status as ready, which a freshly created custom resource is. A Stalled condition
+// means Flux gave up until something changes, so it ends the wait with an error.
 func readyCondition(obj *unstructured.Unstructured) (bool, string, error) {
 	observed, found, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
-	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
-	for _, item := range conditions {
-		cond, ok := item.(map[string]any)
-		if !ok || cond["type"] != "Ready" {
-			continue
-		}
-		msg, _ := cond["message"].(string)
-		if !found {
-			if g, ok := cond["observedGeneration"].(int64); ok {
-				observed, found = g, true
+	var ready map[string]any
+	for _, cond := range conditions(obj) {
+		switch cond["type"] {
+		case "Stalled":
+			if cond["status"] == "True" {
+				msg, _ := cond["message"].(string)
+				return false, msg, fmt.Errorf("%s is stalled: %s", describe(obj), msg)
 			}
+		case "Ready":
+			ready = cond
 		}
-		if !found || observed != obj.GetGeneration() {
-			return false, "waiting for the controller to observe the latest change", nil
-		}
-		return cond["status"] == "True", msg, nil
 	}
-	return false, "no Ready condition yet", nil
+	if ready == nil {
+		return false, "no Ready condition yet", nil
+	}
+	msg, _ := ready["message"].(string)
+	if !found {
+		if g, ok := ready["observedGeneration"].(int64); ok {
+			observed, found = g, true
+		}
+	}
+	if !found || observed != obj.GetGeneration() {
+		return false, "waiting for the controller to observe the latest change", nil
+	}
+	return ready["status"] == "True", msg, nil
 }
 
 // waitFor polls until ready reports true or the context ends. A missing object counts as not

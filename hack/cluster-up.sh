@@ -21,10 +21,16 @@ else
     --k3s-arg "--disable=traefik@server:*" \
     --no-lb \
     --api-port 127.0.0.1:6445 \
-    --registry-create "$SHELF_REGISTRY:127.0.0.1:${SHELF_REGISTRY_LOCAL##*:}" \
+    --registry-create "$SHELF_REGISTRY:127.0.0.1:$SHELF_REGISTRY_PORT" \
     --kubeconfig-update-default=false \
     --kubeconfig-switch-context=false \
     --wait
+fi
+
+# The registry is published on this container's loopback; give it the name pods use. /etc/hosts
+# is recreated with the container, so this runs on every cluster-up.
+if ! grep -qE "^127\.0\.0\.1[[:space:]]+$SHELF_REGISTRY\$" /etc/hosts; then
+  echo "127.0.0.1 $SHELF_REGISTRY" | sudo tee -a /etc/hosts >/dev/null
 fi
 
 mkdir -p "$(dirname "$KUBECONFIG")"

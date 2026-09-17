@@ -49,7 +49,8 @@ func TestInitCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	const platform = "oci://shelf-registry:5000/shelf/platform:dev"
-	base := []string{"init", "cluster", "--kubeconfig", kubeconfig}
+	const chart = "oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev"
+	base := []string{"init", "cluster", "--kubeconfig", kubeconfig, "--domain", "dev.local"}
 
 	tests := []struct {
 		name       string
@@ -65,7 +66,7 @@ func TestInitCluster(t *testing.T) {
 	}{
 		{
 			name:     "confirmed",
-			args:     []string{"--platform", platform},
+			args:     []string{"--platform", platform, "--chart", chart},
 			stdin:    "y\n",
 			wantCode: 0, wantCalls: 1,
 			wantOut:  []string{"context   dev", "server    https://127.0.0.1:6445", "platform  " + platform, "Proceed? [y/N]"},
@@ -73,21 +74,21 @@ func TestInitCluster(t *testing.T) {
 		},
 		{
 			name:     "declined",
-			args:     []string{"--platform", platform},
+			args:     []string{"--platform", platform, "--chart", chart},
 			stdin:    "n\n",
 			wantCode: 1, wantCalls: 0,
 			wantErr: "aborted",
 		},
 		{
 			name:     "no answer",
-			args:     []string{"--platform", platform},
+			args:     []string{"--platform", platform, "--chart", chart},
 			stdin:    "",
 			wantCode: 1, wantCalls: 0,
 			wantErr: "aborted",
 		},
 		{
 			name:     "yes flag and other context",
-			args:     []string{"--platform", platform, "--insecure-registry", "--yes", "--context", "other"},
+			args:     []string{"--platform", platform, "--chart", chart, "--insecure-registry", "--yes", "--context", "other"},
 			wantCode: 0, wantCalls: 1,
 			wantOut:   []string{"context   other"},
 			wantHost:  "https://mini.example:6443",
@@ -95,7 +96,7 @@ func TestInitCluster(t *testing.T) {
 		},
 		{
 			name:     "unknown context",
-			args:     []string{"--platform", platform, "--yes", "--context", "nope"},
+			args:     []string{"--platform", platform, "--chart", chart, "--yes", "--context", "nope"},
 			wantCode: 1, wantCalls: 0,
 			wantErr: "nope",
 		},
@@ -150,8 +151,9 @@ func TestInitCluster(t *testing.T) {
 			}
 			if tt.wantCalls == 1 {
 				got := fake.calls[0]
-				if got.Platform.String() != platform || got.Platform.Insecure != tt.wantInsec {
-					t.Errorf("platform %+v", got.Platform)
+				if got.Platform.String() != platform || got.Settings.Chart.String() != chart ||
+					got.Settings.InsecureRegistry != tt.wantInsec || got.Settings.Domain != "dev.local" {
+					t.Errorf("options %+v", got)
 				}
 				if fake.host != tt.wantHost {
 					t.Errorf("host %s, want %s", fake.host, tt.wantHost)
@@ -174,11 +176,74 @@ func TestInitClusterDefaultPlatform(t *testing.T) {
 	installCluster, Version = fake.install, "v0.3.0"
 	t.Cleanup(func() { installCluster, Version = restore, oldVersion })
 
-	_, stderr, code := run(t, "init", "cluster", "--kubeconfig", kubeconfig, "--yes")
+	_, stderr, code := run(t, "init", "cluster", "--kubeconfig", kubeconfig, "--yes", "--domain", "example.com")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
 	if got := fake.calls[0].Platform.String(); got != DefaultPlatformRepository+":v0.3.0" {
 		t.Errorf("platform %s", got)
+	}
+	if got := fake.calls[0].Settings.Chart.String(); got != DefaultChartRepository+":0.3.0" {
+		t.Errorf("chart %s", got)
+	}
+}
+
+func TestInitClusterSettings(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(kubeconfig, []byte(testKubeconfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeInstall{}
+	restore, oldVersion := installCluster, Version
+	installCluster, Version = fake.install, "v0.3.0"
+	t.Cleanup(func() { installCluster, Version = restore, oldVersion })
+	base := []string{"init", "cluster", "--kubeconfig", kubeconfig, "--yes"}
+
+	tests := []struct {
+		name      string
+		args      []string
+		user      string
+		token     string
+		wantErr   string
+		wantLogin string
+		wantOut   string
+	}{
+		{name: "no domain", wantErr: "--domain"},
+		{name: "invalid domain", args: []string{"--domain", "Not A Domain"}, wantErr: "--domain"},
+		{name: "invalid chart", args: []string{"--domain", "example.com", "--chart", "oci://x"}, wantErr: "--chart"},
+		{name: "token without user", args: []string{"--domain", "example.com"}, token: "secret-token", wantErr: "GHCR_USERNAME"},
+		{name: "login", args: []string{"--domain", "example.com"}, user: "tobi", token: "secret-token",
+			wantLogin: "tobi", wantOut: "registry  ghcr.io as tobi"},
+		{name: "no login", args: []string{"--domain", "example.com"}, wantOut: "login unchanged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake.calls = nil
+			t.Setenv("GHCR_USERNAME", tt.user)
+			t.Setenv("GHCR_TOKEN", tt.token)
+			stdout, stderr, code := run(t, append(append([]string{}, base...), tt.args...)...)
+			if strings.Contains(stdout+stderr, "secret-token") {
+				t.Fatal("the token appears in the output")
+			}
+			if tt.wantErr != "" {
+				if code == 0 || !strings.Contains(stderr, tt.wantErr) || len(fake.calls) != 0 {
+					t.Fatalf("code %d, stderr %q, calls %d", code, stderr, len(fake.calls))
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("exit code %d: %s", code, stderr)
+			}
+			if !strings.Contains(stdout, tt.wantOut) {
+				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
+			}
+			auth := fake.calls[0].Registry
+			switch {
+			case tt.wantLogin == "" && auth != nil:
+				t.Errorf("unexpected login %+v", auth.Username)
+			case tt.wantLogin != "" && (auth == nil || auth.Username != tt.wantLogin || auth.Token != tt.token):
+				t.Errorf("login not passed on")
+			}
+		})
 	}
 }

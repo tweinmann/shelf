@@ -172,6 +172,30 @@ func TestSecretReferences(t *testing.T) {
 	}
 }
 
+// TestChartVersionLabel checks the chart label with a version as Flux sets it, with the chart
+// digest appended after "+", which label values do not allow.
+func TestChartVersionLabel(t *testing.T) {
+	values := renderValues(t, "../../examples/hello/app.yaml")
+	platform := writeFile(t, "platform.yaml", "platform:\n  domain: dev.local\n")
+	chart := t.TempDir()
+	cmd := exec.Command("helm", "package", chartDir, "--version", "0.1.0+"+strings.Repeat("a", 64), "--destination", chart)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("helm package: %v\n%s", err, out)
+	}
+	readChart(t)
+	out, err := exec.Command("helm", "template", "hello", filepath.Join(chart, "shelf-app-0.1.0+"+strings.Repeat("a", 64)+".tgz"),
+		"--namespace", "hello", "-f", values, "-f", platform).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "helm.sh/chart: shelf-app-0.1.0_" + strings.Repeat("a", 63-len("shelf-app-0.1.0_"))
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "helm.sh/chart:") && strings.TrimSpace(line) != want {
+			t.Fatalf("got %q, want %q", strings.TrimSpace(line), want)
+		}
+	}
+}
+
 func TestTemplateErrors(t *testing.T) {
 	hello := "../../examples/hello/app.yaml"
 	features := "testdata/features.app.yaml"

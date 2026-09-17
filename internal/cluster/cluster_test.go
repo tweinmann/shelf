@@ -84,7 +84,7 @@ func TestDecodeObjects(t *testing.T) {
 	}
 }
 
-func TestParsePlatform(t *testing.T) {
+func TestParseArtifact(t *testing.T) {
 	tests := []struct {
 		ref     string
 		url     string
@@ -100,7 +100,7 @@ func TestParsePlatform(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.ref, func(t *testing.T) {
-			p, err := ParsePlatform(tt.ref, false)
+			p, err := ParseArtifact(tt.ref)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error %v, want one containing %q", err, tt.wantErr)
@@ -116,6 +116,9 @@ func TestParsePlatform(t *testing.T) {
 			if p.String() != tt.ref {
 				t.Errorf("String() = %s, want %s", p, tt.ref)
 			}
+			if p.Reference() != strings.TrimPrefix(tt.ref, "oci://") {
+				t.Errorf("Reference() = %s", p.Reference())
+			}
 		})
 	}
 }
@@ -128,11 +131,11 @@ func TestFluxInstance(t *testing.T) {
 			name, ref = "fluxinstance-insecure", "oci://shelf-registry:5000/shelf/platform:dev"
 		}
 		t.Run(name, func(t *testing.T) {
-			p, err := ParsePlatform(ref, insecure)
+			p, err := ParseArtifact(ref)
 			if err != nil {
 				t.Fatal(err)
 			}
-			out, err := yaml.Marshal(FluxInstance(p).Object)
+			out, err := yaml.Marshal(FluxInstance(p, insecure).Object)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,4 +198,38 @@ func TestReadyCondition(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPlatformObjects(t *testing.T) {
+	chart, err := ParseArtifact("oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs := ConfigObjects(Settings{Domain: "dev.local", Chart: chart, InsecureRegistry: true})
+	withLogin, err := RegistrySecret(&RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutLogin, err := RegistrySecret(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := ParseArtifact("oci://ghcr.io/tweinmann/hello-deploy:main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs = append(objs, withLogin, withoutLogin,
+		AppSecret("hello", map[string]string{"db-password": "not-a-real-password"}),
+		AppSecret("empty", nil),
+		AppProvider(AppOptions{Name: "hello", Artifact: app}))
+
+	var out []byte
+	for _, obj := range objs {
+		data, err := yaml.Marshal(obj.Object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(append(out, "---\n"...), data...)
+	}
+	testutil.Golden(t, filepath.Join("testdata", "objects.yaml"), out)
 }

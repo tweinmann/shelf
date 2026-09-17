@@ -1,0 +1,72 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: shelf
+  name: shelf-system
+---
+apiVersion: v1
+data:
+  SHELF_CHART_TAG: 0.0.0-dev
+  SHELF_CHART_URL: oci://shelf-registry:5000/shelf/charts/shelf-app
+  SHELF_DOMAIN: dev.local
+  SHELF_INSECURE_REGISTRY: "true"
+kind: ConfigMap
+metadata:
+  name: shelf-config
+  namespace: flux-system
+---
+apiVersion: v1
+data:
+  .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJkRzlpYVRwdWIzUXRZUzF5WldGc0xYUnZhMlZ1IiwicGFzc3dvcmQiOiJub3QtYS1yZWFsLXRva2VuIiwidXNlcm5hbWUiOiJ0b2JpIn19fQ==
+kind: Secret
+metadata:
+  name: registry
+  namespace: shelf-system
+type: kubernetes.io/dockerconfigjson
+---
+apiVersion: v1
+data:
+  .dockerconfigjson: eyJhdXRocyI6e319
+kind: Secret
+metadata:
+  name: registry
+  namespace: shelf-system
+type: kubernetes.io/dockerconfigjson
+---
+apiVersion: v1
+data:
+  db-password: bm90LWEtcmVhbC1wYXNzd29yZA==
+kind: Secret
+metadata:
+  labels:
+    shelf.dev/app: hello
+  name: app-hello
+  namespace: shelf-system
+type: Opaque
+---
+apiVersion: v1
+data: {}
+kind: Secret
+metadata:
+  labels:
+    shelf.dev/app: empty
+  name: app-empty
+  namespace: shelf-system
+type: Opaque
+---
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  labels:
+    shelf.dev/app: hello
+  name: hello
+  namespace: shelf-system
+spec:
+  defaultValues:
+    insecure: false
+    name: hello
+    tag: main
+    url: oci://ghcr.io/tweinmann/hello-deploy
+  type: Static

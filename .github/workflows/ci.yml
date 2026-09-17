@@ -1,5 +1,5 @@
-# Level-1 checks. They run inside the devcontainer image, so CI uses exactly the tool versions
-# pinned in .devcontainer/Dockerfile.
+# Level-1 checks, and level-2 smoke tests against k3d. Both run inside the devcontainer image, so
+# CI uses exactly the tool versions pinned in .devcontainer/Dockerfile.
 name: ci
 
 on:
@@ -22,3 +22,21 @@ jobs:
         with:
           push: never
           runCmd: just test
+
+  # Level-2 checks against a k3d cluster inside the devcontainer, as locally.
+  cluster:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Smoke tests against k3d (in the devcontainer)
+        uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: |
+            set -e
+            just cluster-up
+            just smoke-secrets
+            just smoke-chart
+            just smoke-init
+            just smoke-apps

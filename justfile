@@ -65,9 +65,15 @@ cluster-reset: cluster-down cluster-up
 platform-push:
     hack/platform-push.sh
 
+# Push charts/shelf-app to the dev registry as version 0.0.0-dev
+chart-push:
+    hack/chart-push.sh
+
 # Install Flux and the platform into the dev cluster from the dev registry
 init-cluster *flags:
-    go run ./cmd/shelf init cluster --platform oci://shelf-registry:5000/shelf/platform:dev --insecure-registry {{flags}}
+    go run ./cmd/shelf init cluster --domain dev.local --insecure-registry \
+      --platform oci://shelf-registry:5000/shelf/platform:dev \
+      --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
 
 # Smoke test: $(VAR) expansion from secretKeyRef in env and args
 smoke-secrets:
@@ -80,6 +86,14 @@ smoke-chart:
 # Check shelf init cluster and routing through Traefik (run just cluster-reset first)
 smoke-init:
     hack/smoke/init.sh
+
+# Check shelf app add/rm, rollout by polling and isolation against the dev registry
+smoke-apps:
+    hack/smoke/apps.sh
+
+# Phase 4 acceptance with a real tenant repository and GHCR (asks for the GHCR login)
+smoke-tenant app artifact:
+    hack/smoke/tenant.sh {{app}} {{artifact}}
 
 # Smoke test: pull a private GHCR image through an imagePullSecret
 smoke-registry image:

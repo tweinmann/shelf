@@ -1,0 +1,18 @@
+# Builds web, renders app.yaml and pushes the deploy artifact ghcr.io/tweinmann/greeter-deploy.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  shelf:
+    uses: tweinmann/shelf/.github/workflows/build.yml@main
+    with:
+      images: |
+        web=web

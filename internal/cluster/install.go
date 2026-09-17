@@ -16,7 +16,11 @@ import (
 
 // Options configure Install.
 type Options struct {
-	Platform Platform
+	Platform Artifact
+	Settings Settings
+	// Registry replaces the stored registry credential when set. When nil, an existing
+	// credential is kept, and an empty one is created if there is none.
+	Registry *RegistryAuth
 	// Timeout bounds the whole installation, including all waits.
 	Timeout time.Duration
 	// Out receives progress messages.
@@ -74,7 +78,18 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 		return err
 	}
 
-	instance := FluxInstance(opts.Platform)
+	for _, obj := range ConfigObjects(opts.Settings) {
+		action, err := c.apply(ctx, obj)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s: %s\n", describe(obj), action)
+	}
+	if err := c.ensureRegistrySecret(ctx, out, opts.Registry); err != nil {
+		return err
+	}
+
+	instance := FluxInstance(opts.Platform, opts.Settings.InsecureRegistry)
 	action, err := c.apply(ctx, instance)
 	if err != nil {
 		return err
@@ -91,6 +106,35 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	return c.step(ctx, out, "the platform", func(ctx context.Context) (string, error) {
 		return c.waitForPlatform(ctx, opts.Platform)
 	})
+}
+
+// ensureRegistrySecret writes the registry credential if one is given or none exists yet. It
+// never prints the credential.
+func (c *client) ensureRegistrySecret(ctx context.Context, out io.Writer, auth *RegistryAuth) error {
+	secret, err := RegistrySecret(auth)
+	if err != nil {
+		return err
+	}
+	if auth == nil {
+		existing, err := c.get(ctx, refOf(secret))
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			fmt.Fprintf(out, "%s: kept (no GHCR_TOKEN given)\n", describe(secret))
+			return nil
+		}
+	}
+	action, err := c.apply(ctx, secret)
+	if err != nil {
+		return err
+	}
+	login := "without a login"
+	if auth != nil {
+		login = "for " + auth.Username + "@" + RegistryHost
+	}
+	fmt.Fprintf(out, "%s: %s, %s\n", describe(secret), action, login)
+	return nil
 }
 
 func (c *client) applyAll(ctx context.Context, objs []*unstructured.Unstructured, actions map[Action]int) error {
@@ -123,9 +167,9 @@ func (c *client) step(ctx context.Context, out io.Writer, what string, wait func
 	}
 	elapsed := time.Since(start).Round(time.Second)
 	if detail != "" {
-		fmt.Fprintf(out, "ready after %s: %s\n", elapsed, detail)
+		fmt.Fprintf(out, "done after %s: %s\n", elapsed, detail)
 	} else {
-		fmt.Fprintf(out, "ready after %s\n", elapsed)
+		fmt.Fprintf(out, "done after %s\n", elapsed)
 	}
 	return nil
 }
@@ -140,7 +184,7 @@ const reconcileAnnotation = "reconcile.fluxcd.io/requestedAt"
 // A tag can move (the dev registry reuses "dev"), so shelf requests a reconciliation of the
 // OCIRepository and waits until Flux handled that request. Checking the applied revision keeps
 // a Kustomization that is still ready from an earlier artifact from passing.
-func (c *client) waitForPlatform(ctx context.Context, p Platform) (string, error) {
+func (c *client) waitForPlatform(ctx context.Context, p Artifact) (string, error) {
 	repo := ref{gvk: ociRepositoryGVK, namespace: FluxNamespace, name: PlatformSyncName}
 	err := c.waitFor(ctx, repo, func(obj *unstructured.Unstructured) (bool, string, error) {
 		url, _, _ := unstructured.NestedString(obj.Object, "spec", "url")
@@ -153,26 +197,9 @@ func (c *client) waitForPlatform(ctx context.Context, p Platform) (string, error
 	if err != nil {
 		return "", err
 	}
-	token := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := c.annotate(ctx, repo, reconcileAnnotation, token); err != nil {
-		return "", err
-	}
-	err = c.waitFor(ctx, repo, func(obj *unstructured.Unstructured) (bool, string, error) {
-		handled, _, _ := unstructured.NestedString(obj.Object, "status", "lastHandledReconcileAt")
-		if handled != token {
-			return false, "waiting for Flux to fetch the artifact", nil
-		}
-		return readyCondition(obj)
-	})
+	obj, err := c.reconcileAndWait(ctx, repo)
 	if err != nil {
 		return "", err
-	}
-	obj, err := c.get(ctx, repo)
-	if err != nil {
-		return "", err
-	}
-	if obj == nil {
-		return "", fmt.Errorf("%s disappeared", repo)
 	}
 	revision, _, _ := unstructured.NestedString(obj.Object, "status", "artifact", "revision")
 	if revision == "" {
@@ -180,16 +207,22 @@ func (c *client) waitForPlatform(ctx context.Context, p Platform) (string, error
 	}
 
 	ks := ref{gvk: kustomizationGVK, namespace: FluxNamespace, name: PlatformSyncName}
-	err = c.waitFor(ctx, ks, func(obj *unstructured.Unstructured) (bool, string, error) {
+	err = c.waitFor(ctx, ks, appliedRevision(revision))
+	if err != nil {
+		return "", err
+	}
+	return "applied " + revision, nil
+}
+
+// appliedRevision is ready when a Kustomization is ready and has applied exactly revision, so a
+// Kustomization that is still ready from an earlier artifact does not pass.
+func appliedRevision(revision string) readyFunc {
+	return func(obj *unstructured.Unstructured) (bool, string, error) {
 		applied, _, _ := unstructured.NestedString(obj.Object, "status", "lastAppliedRevision")
 		ok, msg, err := readyCondition(obj)
 		if ok && applied != revision {
 			return false, "applied " + applied + ", waiting for " + revision, nil
 		}
 		return ok, msg, err
-	})
-	if err != nil {
-		return "", err
 	}
-	return "applied " + revision, nil
 }

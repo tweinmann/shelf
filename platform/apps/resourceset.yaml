@@ -1,0 +1,153 @@
+# Every app is a ResourceSetInputProvider in shelf-system, labelled shelf.dev/app, created by
+# `shelf app add` with the inputs name, url, tag and insecure. For each one this ResourceSet
+# generates the app namespace and everything Flux needs to deploy the app from its deploy
+# artifact. Deleting the provider deletes all of it, including the namespace.
+#
+# ${SHELF_...} is substituted by Flux from the ConfigMap flux-system/shelf-config, which
+# `shelf init cluster` writes. << inputs.* >> is filled in by the Flux Operator per app.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: apps
+  namespace: shelf-system
+spec:
+  inputsFrom:
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      selector:
+        matchExpressions:
+          - key: shelf.dev/app
+            operator: Exists
+  resources:
+    - apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: << inputs.name >>
+        labels:
+          shelf.dev/app: << inputs.name >>
+
+    # Generated secret values, maintained by `shelf app add` in shelf-system/app-<name>.
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: shelf-secrets
+        namespace: << inputs.name >>
+        annotations:
+          fluxcd.controlplane.io/copyFrom: shelf-system/app-<< inputs.name >>
+      type: Opaque
+
+    # The platform-wide registry credential, for images and the deploy artifact.
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: shelf-registry
+        namespace: << inputs.name >>
+        annotations:
+          fluxcd.controlplane.io/copyFrom: shelf-system/registry
+      type: kubernetes.io/dockerconfigjson
+
+    # The deploy Kustomization acts as this account, which may only manage ConfigMaps in the
+    # app namespace. A deploy artifact with anything else in it fails instead of being applied.
+    - apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: shelf-deploy
+        namespace: << inputs.name >>
+    - apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: shelf-deploy
+        namespace: << inputs.name >>
+      rules:
+        - apiGroups: [""]
+          resources: [configmaps]
+          verbs: [get, list, watch, create, update, patch, delete]
+    - apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: shelf-deploy
+        namespace: << inputs.name >>
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: shelf-deploy
+      subjects:
+        - kind: ServiceAccount
+          name: shelf-deploy
+          namespace: << inputs.name >>
+
+    - apiVersion: source.toolkit.fluxcd.io/v1
+      kind: OCIRepository
+      metadata:
+        name: deploy
+        namespace: << inputs.name >>
+      spec:
+        interval: 1m
+        url: << inputs.url >>
+        ref:
+          tag: << inputs.tag >>
+        insecure: << inputs.insecure >>
+        secretRef:
+          name: shelf-registry
+    - apiVersion: kustomize.toolkit.fluxcd.io/v1
+      kind: Kustomization
+      metadata:
+        name: deploy
+        namespace: << inputs.name >>
+      spec:
+        interval: 10m
+        sourceRef:
+          kind: OCIRepository
+          name: deploy
+        path: ./
+        prune: true
+        wait: true
+        timeout: 2m
+        targetNamespace: << inputs.name >>
+        serviceAccountName: shelf-deploy
+        commonMetadata:
+          labels:
+            shelf.dev/app: << inputs.name >>
+            # helm-controller reconciles the HelmRelease when this ConfigMap changes.
+            reconcile.fluxcd.io/watch: Enabled
+
+    # The chart belongs to the platform; its version comes with the platform configuration.
+    - apiVersion: source.toolkit.fluxcd.io/v1
+      kind: OCIRepository
+      metadata:
+        name: shelf-app
+        namespace: << inputs.name >>
+      spec:
+        interval: 1h
+        url: ${SHELF_CHART_URL}
+        ref:
+          tag: ${SHELF_CHART_TAG}
+        insecure: ${SHELF_INSECURE_REGISTRY:=false}
+        layerSelector:
+          mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+          operation: copy
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      metadata:
+        name: << inputs.name >>
+        namespace: << inputs.name >>
+      spec:
+        interval: 10m
+        chartRef:
+          kind: OCIRepository
+          name: shelf-app
+        valuesFrom:
+          - kind: ConfigMap
+            name: << inputs.name >>-values
+            valuesKey: app.yaml
+        values:
+          platform:
+            domain: ${SHELF_DOMAIN}
+            imagePullSecret: shelf-registry
+        install:
+          remediation:
+            retries: 3
+        upgrade:
+          remediation:
+            retries: 3
+            remediateLastFailure: true

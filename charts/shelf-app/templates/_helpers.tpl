@@ -9,11 +9,12 @@ shelf.dev/component: {{ .component }}
 
 {{/*
 Labels of every object. Argument: dict "root" "app" "component".
+Flux appends the chart digest to the version (0.1.0+abc...); "+" is not allowed in label values.
 */}}
 {{- define "shelf-app.labels" -}}
 {{ include "shelf-app.selectorLabels" . }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
-helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version }}
+helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end -}}
 
 {{/*

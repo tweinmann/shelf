@@ -2,11 +2,12 @@
 
 readonly SHELF_CLUSTER=shelf-dev
 readonly SHELF_KUBECONFIG=/home/vscode/.kube/shelf-dev.yaml
-# The dev registry for the platform artifact, created with the cluster. Pods reach it as
-# shelf-registry:5000, this container as localhost:5050.
+# The dev registry for platform, chart and deploy artifacts, created with the cluster. Pods and
+# this container both reach it as shelf-registry:5000 (plain HTTP), so one reference works for
+# pushing, for shelf and for Flux.
 readonly SHELF_REGISTRY=shelf-registry
-readonly SHELF_REGISTRY_IN_CLUSTER=shelf-registry:5000
-readonly SHELF_REGISTRY_LOCAL=localhost:5050
+readonly SHELF_REGISTRY_PORT=5000
+readonly SHELF_REGISTRY_HOST="$SHELF_REGISTRY:$SHELF_REGISTRY_PORT"
 
 die() {
   echo "error: $*" >&2
@@ -28,4 +29,11 @@ require_devcontainer() {
     || die "no Docker daemon reachable; is the docker-in-docker daemon running?"
   [[ "$daemon" == "$(hostname)" ]] \
     || die "docker talks to daemon '$daemon', not to the one in this container ($(hostname))"
+}
+
+# create_namespace <name>: creates a namespace and waits for its default ServiceAccount, which
+# Kubernetes adds a moment later; a pod created before that is rejected.
+create_namespace() {
+  kubectl create namespace "$1" >/dev/null
+  kubectl -n "$1" wait --for=create serviceaccount/default --timeout=60s >/dev/null
 }

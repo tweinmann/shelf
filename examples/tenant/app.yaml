@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/tweinmann/shelf/main/schema/app.schema.json
+#
+# A tenant app: one web component built from ./web by the shelf workflow. Change MESSAGE and
+# push to see the platform roll out the new version by itself.
+apiVersion: shelf.dev/v1alpha1
+name: greeter
+
+components:
+  web:
+    # Built and pushed by the workflow; shelf render pins the tag to the digest just pushed.
+    image: ghcr.io/tweinmann/shelf-hello-web:main
+    port: 8080
+    route: /
+    health: { path: /healthz }
+    env:
+      MESSAGE: Hello from shelf
+      TOKEN: ${secrets.token}
+    resources: { cpu: 10m, memory: 16Mi }
+
+secrets:
+  token: { generate: true }

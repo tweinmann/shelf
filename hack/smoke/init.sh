@@ -48,16 +48,18 @@ trap cleanup EXIT
 step "build shelf"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 init_cluster() {
-  "$work/shelf" init cluster --yes --insecure-registry \
-    --platform "oci://$SHELF_REGISTRY_IN_CLUSTER/shelf/platform:dev"
+  "$work/shelf" init cluster --yes --insecure-registry --domain dev.local \
+    --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
+    --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev"
 }
 
 if kubectl get namespace flux-system >/dev/null 2>&1; then
   echo "note: flux-system exists, so this is not a fresh cluster"
 fi
 
-step "push the platform artifact"
-"$repo/hack/platform-push.sh" >/dev/null
+step "push the platform artifact and the chart"
+"$repo/hack/platform-push.sh" >/dev/null 2>&1
+"$repo/hack/chart-push.sh" >/dev/null 2>&1
 
 step "shelf init cluster, first run"
 start=$SECONDS
@@ -72,6 +74,10 @@ grep -Eq '(created|configured)' "$work/second.txt" && die "the second run change
 grep -q 'objects, [0-9]* unchanged$' "$work/second.txt" || die "the second run did not report the operator objects"
 grep -q '(FluxInstance flux-system/flux): unchanged$' "$work/second.txt" \
   || die "the second run did not report the FluxInstance as unchanged"
+grep -q '^ConfigMap flux-system/shelf-config: unchanged$' "$work/second.txt" \
+  || die "the second run did not report the settings as unchanged"
+grep -q '^Secret shelf-system/registry: kept' "$work/second.txt" \
+  || die "the second run did not keep the registry login"
 
 step "a new platform artifact under the same tag is applied at once"
 digest="$("$repo/hack/platform-push.sh" 2>&1 | sed -n 's/.*pushed to .*@\(sha256:[0-9a-f]*\).*/\1/p')"

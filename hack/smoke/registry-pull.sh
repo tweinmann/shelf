@@ -21,7 +21,7 @@ ns=shelf-smoke-registry
 pod=registry-pull
 trap 'kubectl delete namespace "$ns" --ignore-not-found --wait=false >/dev/null' EXIT
 
-kubectl create namespace "$ns" >/dev/null
+create_namespace "$ns"
 
 # The credentials only travel through shell builtins and stdin, never through command arguments,
 # so they do not show up in a process listing.

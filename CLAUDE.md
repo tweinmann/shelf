@@ -17,7 +17,11 @@ Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart
 `just smoke-chart`. Results and decisions in docs/plan.md.
 Phase 3 complete: `shelf init cluster` (Flux Operator, FluxInstance, platform artifact with
 Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md.
-In progress: Phase 4 (delivery: deploy artifact, `shelf app add`/`rm`).
+In progress: Phase 4 (delivery). Steps 1–5 and 7 green: dev registry as `shelf-registry:5000`,
+`init cluster --domain` with GHCR login, ResourceSet `apps`, `shelf app add`/`rm`,
+`just smoke-apps`, level 2 in CI. Open: step 6, the acceptance with the real tenant repo
+`tweinmann/shelf-hello` (maintainer: make shelf public, create the repo from
+`examples/tenant`, run `just smoke-tenant`), see docs/plan.md.
 
 ## Working agreements
 
@@ -51,17 +55,20 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
-| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry`, write kubeconfig (run after every container restart or rebuild) |
+| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry:5000` (added to `/etc/hosts`), write kubeconfig (run after every container restart or rebuild) |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
-| `just platform-push` | devcontainer | push `platform/` to the dev registry (`oci://shelf-registry:5000/shelf/platform:dev` in the cluster) |
-| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform artifact |
+| `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
+| `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
+| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart, domain `dev.local` |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
 | `just smoke-chart` | devcontainer | install `examples/hello` with the chart, check the Phase 2 acceptance criteria (needs Docker Hub) |
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
+| `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
+| `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -80,7 +87,11 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   `GOOS=darwin GOARCH=arm64`.
 - `internal/host` (brew, pmset, colima) cannot run in the devcontainer. Test it through the
   fake command runner.
-- Secret values never appear in rendered manifests, logs or golden files.
+- Secret values never appear in rendered manifests, logs or golden files (golden files may
+  hold obviously fake values such as `not-a-real-token`). The GHCR token is read from
+  `GHCR_TOKEN` only, never from a flag.
+- `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
+  this session.
 
 ## Conventions
 

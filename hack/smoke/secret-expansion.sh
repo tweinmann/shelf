@@ -8,6 +8,7 @@ ns=shelf-smoke-secrets
 pod=secret-expansion
 trap 'kubectl delete namespace "$ns" --ignore-not-found --wait=false >/dev/null' EXIT
 
+create_namespace "$ns"
 kubectl apply -f "$(dirname "$0")/secret-expansion.yaml" >/dev/null
 
 phase=""

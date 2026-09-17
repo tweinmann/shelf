@@ -13,9 +13,9 @@ fi
 # Validate before pushing: Flux would only report a broken build in the cluster.
 kubectl kustomize "$repo/platform" >/dev/null
 
-flux push artifact "oci://$SHELF_REGISTRY_LOCAL/shelf/platform:dev" \
+flux push artifact "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --path "$repo/platform" \
   --source "local" \
   --revision "dev@sha1:$revision" \
   --insecure-registry
-echo "in the cluster: --platform oci://$SHELF_REGISTRY_IN_CLUSTER/shelf/platform:dev --insecure-registry"
+echo "use: shelf init cluster --platform oci://$SHELF_REGISTRY_HOST/shelf/platform:dev --insecure-registry"

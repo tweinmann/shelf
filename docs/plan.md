@@ -76,6 +76,16 @@ Decided in Phase 3 (2026-09-17):
 | Safety | `shelf init cluster` **shows context, API server and platform and asks** `Proceed? [y/N]`; `--yes` skips; `--context`/`--kubeconfig` pick the target explicitly. |
 | Dev artifact | **Local k3d registry** `shelf-registry`, created with the cluster. `just platform-push` pushes `platform/` as tag `dev`; in the cluster it is `oci://shelf-registry:5000/shelf/platform:dev`. Releases use `oci://ghcr.io/tweinmann/shelf/platform:<version>`, the default of `--platform`. |
 
+Decided in Phase 4 (2026-09-17):
+
+| Question | Decision |
+|---|---|
+| Example tenant | **Separate repo `tweinmann/shelf-hello`**, using `tweinmann/shelf/.github/workflows/build.yml@main` and building its own image, exactly like a real tenant. Its files are kept in `examples/tenant/`. |
+| shelf visibility | **The shelf repo becomes public**, so other repos can call the reusable workflow and `go install` shelf without a token. |
+| GHCR credential | **One classic PAT for the platform.** `shelf init cluster` stores it in `shelf-system`; the ResourceSet copies it into every app namespace (`copyFrom`) for images and the deploy artifact. |
+| shelf in tenant CI | **Built from source** (`go install …@<ref>`) in the reusable workflow; release binaries come later. |
+| Webhook receiver | **Moved to Phase 5**, where the tunnel makes it reachable and testable. Phase 4 relies on `OCIRepository` polling every minute. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -208,7 +218,7 @@ k3d cluster create shelf-dev \
   --image "$SHELF_K3S_IMAGE" \
   --k3s-arg "--disable=traefik@server:*" \
   --no-lb --api-port 127.0.0.1:6445 \
-  --registry-create shelf-registry:127.0.0.1:5050 \
+  --registry-create shelf-registry:127.0.0.1:5000 \
   --kubeconfig-update-default=false --kubeconfig-switch-context=false
 
 k3d kubeconfig get shelf-dev > "$KUBECONFIG"
@@ -216,9 +226,10 @@ k3d kubeconfig get shelf-dev > "$KUBECONFIG"
 
 If the cluster exists it is started instead of created. The API server is published on the
 devcontainer's own loopback, where `kubectl` runs, so the kubeconfig from k3d works unchanged.
-The registry `shelf-registry` holds the dev platform artifact. `flux push` reaches it as
-`localhost:5050`, pods as `shelf-registry:5000` (k3d adds the name to CoreDNS's `NodeHosts`;
-the entry takes a few seconds to become resolvable after cluster creation). It is plain HTTP
+The registry `shelf-registry` holds the dev platform, chart and deploy artifacts. Pods reach it
+as `shelf-registry:5000` (k3d adds the name to CoreDNS's `NodeHosts`; the entry takes a few
+seconds to become resolvable after cluster creation), and so does the devcontainer, where
+`cluster-up.sh` maps the name to the published loopback port in `/etc/hosts`. It is plain HTTP
 and is deleted together with the cluster, so after `just cluster-reset` run
 `just platform-push` again.
 `just cluster-down` (`hack/cluster-down.sh`) runs `k3d cluster delete shelf-dev` and removes the
@@ -557,7 +568,8 @@ cluster live and die together. On the mini, `~/.shelf/` is the real home directo
   [--kubeconfig …] [--yes] [--timeout 5m]` — shows the target and asks; prints what it
   created, changed or left unchanged, and how long each wait took
 - `shelf init expose` / `shelf init host` / `shelf init`
-- `shelf app add <name> <artifact-url>` / `shelf app rm <name>`
+- `shelf app add <name> <oci://…:tag> [--insecure-registry]` / `shelf app rm <name>`, both
+  with `--context`, `--kubeconfig`, `--timeout`; `rm` asks unless `--yes`
 - `shelf doctor` — preflight plus runtime (VM, tunnel, Flux status), reporting per layer
 - `shelf destroy` — remove profile, tunnel and DNS records
 
@@ -575,8 +587,10 @@ shelf/
     cluster-up.sh             create/start dev cluster and registry, write kubeconfig
     cluster-down.sh           delete dev cluster and registry
     platform-push.sh          push platform/ to the dev registry
+    chart-push.sh             push the chart to the dev registry
     nuke.sh                   host-side cleanup by exact name (POSIX sh)
-    smoke/                    smoke tests (Phase 0, chart install in Phase 2, init in Phase 3)
+    smoke/                    smoke tests (Phase 0, chart in Phase 2, init in Phase 3, apps and
+                              tenant in Phase 4)
   cmd/shelf/                  CLI entry point
   internal/
     cli/                      cobra commands
@@ -584,7 +598,8 @@ shelf/
     validate/                 validation rules
     render/                   app.yaml → resolved app.yaml → ConfigMap manifest; registry lookup
     chart/                    helm template golden-file tests for charts/shelf-app
-    secrets/                  secret value generation
+    secrets/                  secret value generation, merge, host backup
+    deploy/                   reading a deploy artifact from the registry
     testutil/                 golden-file helper
     preflight/                host checks
     host/                     brew, pmset, colima — behind a command-runner interface
@@ -594,12 +609,13 @@ shelf/
   charts/shelf-app/           the generic app chart
   platform/                   Flux-managed platform manifests (→ OCI artifact)
     traefik/                  Phase 3; cloudflared/ and external-dns/ follow in Phase 5
-    resourcesets/app.yaml     the ResourceSet
+    apps/                     the ResourceSet (Phase 4)
   .github/workflows/
-    ci.yml                    level-1 checks in the devcontainer image
+    ci.yml                    level-1 checks and level-2 smoke tests in the devcontainer image
     build.yml                 reusable tenant workflow
     release.yml               CLI binaries, chart push, platform artifact
   examples/hello/
+  examples/tenant/            files of the example tenant repo tweinmann/shelf-hello
   schema/app.schema.json
   docs/
     plan.md                   this plan
@@ -656,8 +672,8 @@ Results (2026-09-16):
   reference pointed at an undefined variable, which kubelet leaves alone anyway. It now
   references the defined `SHELF_SECRET_PASSWORD`, builds the expected value without `$$`/`$(`,
   and checks that the spec keeps the `$$` form. Verified negatively: without `$$` the test fails.
-- Step 5: green with a classic PAT against the private image
-  one of the maintainer's private GHCR images. Negative check: the same pod without
+- Step 5: green with a classic PAT against one of the maintainer's private GHCR images.
+  Negative check: the same pod without
   `imagePullSecrets` fails with `401 Unauthorized`, so the image is really private.
 - Step 6: `just cluster-reset` in 13 s.
 - Step 7, first attempt: failed. `nuke.sh` was started in a terminal inside the devcontainer,
@@ -707,7 +723,7 @@ cluster survives a devcontainer restart.
 
 Results (2026-09-17):
 
-- Step 1: done (commit `a1ea53d`); the rebuild also updated `devcontainer-lock.json` to
+- Step 1: done (commit `1eaea38`); the rebuild also updated `devcontainer-lock.json` to
   `docker-in-docker` 4.1.1.
 - Step 2: the container mounts `shelf-docker` on `/var/lib/docker` and `shelf-containerd` on
   `/var/lib/containerd`, so the mounts in `devcontainer.json` do replace the feature's own; no
@@ -722,13 +738,12 @@ Results (2026-09-17):
   nested k3s runs without extra flags. No Traefik; StorageClass `local-path` with
   `WaitForFirstConsumer`. `just smoke-secrets` green. While the cluster ran, `docker ps` on the
   Mac showed no k3d container. The guard rejects a missing marker, a foreign `KUBECONFIG` and an
-  unreachable daemon, and leaves the cluster alone. `just smoke-registry` green against the
-private one of the maintainer's private GHCR images (run by the maintainer, because it prompts
-for the PAT).
+  unreachable daemon, and leaves the cluster alone. `just smoke-registry` green against a
+private GHCR image (run by the maintainer, because it prompts for the PAT).
 - Step 5: after a rebuild of the devcontainer (new container, new host name) the node
   container was already running again, with the cluster 5 minutes old and the system pods
   restarted once. `~/.kube` was empty; `just cluster-up` rewrote the kubeconfig in 2 s.
-- Step 6: CI green with the privileged docker-in-docker devcontainer (commit `a3855a6`).
+- Step 6: CI green with the privileged docker-in-docker devcontainer (commit `d01173b`).
 - Step 7: green. `hack/nuke.sh --with-shared-images` run in a terminal on the Mac removed
   `shelf-devcontainer`, the volumes `shelf-gomodcache`, `shelf-gocache`, `shelf-claude-config`,
   `shelf-docker` and `shelf-containerd`, the devcontainer image and the base image. The
@@ -874,11 +889,116 @@ Results (2026-09-17):
 
 ### Phase 4 – Delivery
 Deploy artifact format, `ResourceSet` + `ResourceSetInputProvider`, `shelf app add`/`rm`,
-Flux `Receiver`, reusable workflow. From here, level-2 tests also run in CI
-(`ubuntu-24.04-arm`) — the same k3d as locally, so Flux and ResourceSet regressions surface in
-PRs.
+reusable workflow (the Flux `Receiver` moved to Phase 5, see decisions). From here, level-2
+tests also run in CI (`ubuntu-24.04-arm`) — the same k3d as locally, so Flux and ResourceSet
+regressions surface in PRs.
+
+Design:
+
+- `shelf init cluster` gains `--domain` and `--chart`, and reads `GHCR_USERNAME`/`GHCR_TOKEN`.
+  It creates the namespace `shelf-system` with the Secret `registry` (dockerconfigjson; empty
+  when no token is given, never overwritten by an empty one), and the ConfigMap `shelf-config`
+  in `flux-system`, which the sync Kustomization uses for `postBuild.substituteFrom`
+  (`SHELF_DOMAIN`, `SHELF_CHART_URL`, `SHELF_CHART_TAG`, `SHELF_INSECURE_REGISTRY`).
+- The platform gets the ResourceSet `apps` in `shelf-system`. For every
+  `ResourceSetInputProvider` labelled `shelf.dev/app` it generates, in the app namespace: the
+  Namespace; Secrets `shelf-secrets` and `shelf-registry`, copied from `shelf-system`; a
+  ServiceAccount with a Role limited to ConfigMaps, which the deploy Kustomization
+  impersonates, so a tampered artifact cannot create anything else; the deploy
+  `OCIRepository` (1m) and `Kustomization` (`targetNamespace`, `prune`, `wait`, label
+  `reconcile.fluxcd.io/watch: Enabled` on the ConfigMap so helm-controller reacts to it); the
+  chart `OCIRepository`; the `HelmRelease` with `valuesFrom` the ConfigMap and the `platform`
+  values.
+- `shelf app add <name> <oci://…:tag>` reads the artifact from the registry (Docker keychain),
+  checks `apiVersion` and name, generates missing secrets and stores them in the Secret
+  `app-<name>` in `shelf-system` and in `~/.shelf/apps/<name>/secrets.yaml` (0600); a backup
+  restores values after a cluster rebuild. It creates the provider and waits for the
+  HelmRelease. Running it again adds new secrets and keeps existing ones.
+- `shelf app rm <name>` asks, deletes the provider and waits until the namespace is gone,
+  then deletes `app-<name>`. The host backup stays.
+- Deploy artifact: `shelf render` output pushed with `flux push artifact` as
+  `ghcr.io/<owner>/<app>-deploy:sha-<short>`, tagged `main` on the default branch.
+- Dev registry: reachable as `shelf-registry:5000` from pods and from the devcontainer (an
+  `/etc/hosts` entry written by `cluster-up.sh`), so the same reference works for `flux push`,
+  `shelf app add` and Flux.
+
+Steps:
+
+1. Dev registry under one name; `just chart-push` pushes the chart to it
+2. `shelf init cluster`: `shelf-system`, registry Secret, `shelf-config`, substitution
+3. Platform: ResourceSet `apps`
+4. `shelf app add` / `shelf app rm`
+5. Level 1 tests; level 2 `just smoke-apps`: add, route, update by polling, isolation, rm,
+   restore from backup
+6. Reusable workflow `build.yml`, example tenant files, repo `tweinmann/shelf-hello` created by
+   the maintainer, acceptance with GHCR
+7. Level 2 in CI
 **Acceptance:** a push to an example repo → the app in the dev cluster updates without manual
 intervention; `shelf app rm` cleans up completely.
+
+Results (2026-09-17, steps 1–5 and 7):
+
+- Step 1: `cluster-up.sh` publishes the registry on `127.0.0.1:5000` and adds
+  `127.0.0.1 shelf-registry` to the devcontainer's `/etc/hosts`, so every tool uses
+  `shelf-registry:5000`. `just chart-push` pushes the chart as `0.0.0-dev` (`helm push
+  --plain-http`).
+- Step 2: `shelf init cluster` requires `--domain`, takes `--chart` (release default
+  `oci://ghcr.io/tweinmann/shelf/charts/shelf-app:<version without v>`), and prints the
+  registry login it will store. The system namespace carries the label
+  `app.kubernetes.io/managed-by: shelf`: without any field of its own, server-side apply
+  dropped shelf's field manager, and the next run reported the namespace as changed.
+- Step 3: checked by hand before writing Go: `copyFrom` copies both Secrets, the chart and the
+  deploy artifact are fetched, deleting the provider removes the namespace including the
+  volume (38 s). Found a chart bug on the way: Flux sets the chart version to
+  `0.0.0-dev+<digest>`, and `+` is not allowed in the `helm.sh/chart` label, so every install
+  failed. The label now replaces `+` with `_` and is cut to 63 characters, as `helm create`
+  does; a chart test packages the chart with such a version. An artifact with a
+  `ClusterRoleBinding` in it fails with "forbidden" for `system:serviceaccount:<app>:shelf-deploy`
+  and creates nothing.
+- Step 4: `internal/deploy` reads the artifact (Flux content layer), requires exactly one
+  ConfigMap with `app.yaml`, the supported `apiVersion` and a valid app; `internal/secrets`
+  merges cluster, backup and generated values (cluster wins, backup restores, nothing is
+  dropped) and writes the backup atomically with 0600/0700; `internal/cluster` applies the
+  Secret `app-<name>` and the provider, then asks Flux to reconcile the deploy
+  `OCIRepository` and the `HelmRelease` and waits for each, with the Kustomization in between
+  checked for the exact revision. A `Stalled` condition ends a wait at once. `shelf app rm`
+  asks, deletes the provider in the foreground, waits for the namespace (refusing a namespace
+  without the app label) and deletes the Secret; it fails for an unknown app.
+- Step 5, level 1: golden files for the settings, registry Secret (with a fake token), app
+  Secret and provider; artifact decoding (other files, multi-document YAML, zero or two apps,
+  wrong `apiVersion`, invalid app, broken YAML) and fetching from an in-memory registry;
+  secret merge and backup (modes, atomic replace, a backup of another app); CLI for `init
+  cluster` settings (domain, chart, GHCR variables, the token never printed) and `app
+  add`/`rm` with fakes (generate, keep, add a new secret, restore after a rebuild, no backup
+  without secrets, name mismatch, fetch errors, confirm, decline, unknown app).
+- Step 5, level 2, `just smoke-apps` (about 3 min): add in 10–16 s; the generated password
+  reaches `DATABASE_URL` and is not printed; `hello.dev.local` is routed; a new artifact under
+  `main` is rolled out by polling alone after 43–49 s; a second add reports the Secret and the
+  provider unchanged; the tampered artifact is refused; `rm` takes 20–44 s and leaves no
+  namespace, Secret, provider or PV, only the backup; removing again fails; a new add restores
+  the password from the backup.
+- Step 6 prepared: `.github/workflows/build.yml` (reusable: installs shelf with `go install`,
+  builds the images natively on `ubuntu-24.04-arm` and pushes them with the tags `sha-<short>`
+  and `main` on the default branch only, validates, renders, pushes the artifact with
+  `flux push artifact` and tags it `main`, writes the `shelf app add` line to the job
+  summary); `examples/tenant` (app `greeter`, a small Go server built from `web/`, the calling
+  workflow); `just smoke-tenant <app> <artifact>` stores the GHCR login, adds the app and waits
+  for a pushed change to show up. The app is called `greeter` because app names must not start
+  with `shelf-`. The web image builds and answers locally.
+- Step 7: CI job `cluster` runs `cluster-up`, `smoke-secrets`, `smoke-chart`, `smoke-init`
+  and `smoke-apps` in the devcontainer. The same sequence on a fresh local cluster takes about
+  8 minutes. Running it exposed a race in `smoke-secrets` and `smoke-registry`: a pod created
+  right after its namespace is rejected until the namespace's `default` ServiceAccount
+  exists; `create_namespace` in `hack/lib.sh` now waits for it.
+- Before publishing: the repository history was rewritten (`git filter-branch`) to remove the
+  names of the maintainer's private projects and the machine path from `docs/plan.md`, and to
+  replace the author address with `tweinmann@users.noreply.github.com`; `user.email` is set to
+  that address for this repository. Commit hashes changed, and the two references to commits in
+  this document were updated. The schema example is now a neutral `shop` app.
+- Open (step 6, needs the maintainer): make the shelf repo public, push, check both CI jobs;
+  create `tweinmann/shelf-hello` from `examples/tenant`; `just smoke-tenant greeter
+  oci://ghcr.io/tweinmann/greeter-deploy:main`, push a changed `MESSAGE` while it waits; then
+  `shelf app rm greeter`.
 
 ### Phase 5 – `shelf init expose`
 Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and
@@ -899,7 +1019,8 @@ real only on the mini.
 `shelf init` works; kubectl from the devcontainer through the SSH forward.
 
 ### Phase 7 – Reference apps
-`examples/hello`, then the maintainer's own apps as the first real tenant, shop after that.
+`examples/hello` and `examples/tenant`, then the maintainer's own apps as the first real
+tenants.
 
 ## Open items
 
