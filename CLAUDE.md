@@ -17,11 +17,11 @@ Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart
 `just smoke-chart`. Results and decisions in docs/plan.md.
 Phase 3 complete: `shelf init cluster` (Flux Operator, FluxInstance, platform artifact with
 Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md.
-In progress: Phase 4 (delivery). Steps 1–5 and 7 green: dev registry as `shelf-registry:5000`,
-`init cluster --domain` with GHCR login, ResourceSet `apps`, `shelf app add`/`rm`,
-`just smoke-apps`, level 2 in CI. Open: step 6, the acceptance with the real tenant repo
-`tweinmann/shelf-hello` (maintainer: make shelf public, create the repo from
-`examples/tenant`, run `just smoke-tenant`), see docs/plan.md.
+Phase 4 complete (awaiting approval): deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`,
+reusable workflow `build.yml`, level 2 in CI. Accepted end to end with the tenant repo
+`tweinmann/shelf-hello`: a push reached the app in 173 s. Results in docs/plan.md.
+Next: Phase 5 (`shelf init expose`: Cloudflare Tunnel, DNS, and the Flux Receiver moved here),
+once the maintainer approves it.
 
 ## Working agreements
 

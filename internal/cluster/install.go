@@ -197,7 +197,7 @@ func (c *client) waitForPlatform(ctx context.Context, p Artifact) (string, error
 	if err != nil {
 		return "", err
 	}
-	obj, err := c.reconcileAndWait(ctx, repo)
+	obj, err := c.reconcileAndWait(ctx, repo, failOnAuthError(readyCondition))
 	if err != nil {
 		return "", err
 	}

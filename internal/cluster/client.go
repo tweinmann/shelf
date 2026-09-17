@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -178,6 +179,24 @@ func readyCondition(obj *unstructured.Unstructured) (bool, string, error) {
 		return false, "waiting for the controller to observe the latest change", nil
 	}
 	return ready["status"] == "True", msg, nil
+}
+
+// authProblem matches what a registry says when it refuses a login. Such a wait will not fix
+// itself, so it ends with an error instead of running into the timeout.
+var authProblem = regexp.MustCompile(`(?i)\b(denied|unauthorized|forbidden|authentication required)\b`)
+
+// failOnAuthError turns a registry authentication failure into an error that names the cause.
+func failOnAuthError(ready readyFunc) readyFunc {
+	return func(obj *unstructured.Unstructured) (bool, string, error) {
+		ok, msg, err := ready(obj)
+		if err == nil && !ok && authProblem.MatchString(msg) {
+			return false, msg, fmt.Errorf("%s cannot read the registry: %s\n"+
+				"the login the cluster uses is in the Secret %s/%s; store a working one with "+
+				"GHCR_USERNAME and GHCR_TOKEN set and `shelf init cluster`",
+				describe(obj), msg, SystemNamespace, RegistrySecretName)
+		}
+		return ok, msg, err
+	}
 }
 
 // waitFor polls until ready reports true or the context ends. A missing object counts as not

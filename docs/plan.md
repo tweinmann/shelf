@@ -977,7 +977,25 @@ Results (2026-09-17, steps 1–5 and 7):
   provider unchanged; the tampered artifact is refused; `rm` takes 20–44 s and leaves no
   namespace, Secret, provider or PV, only the backup; removing again fails; a new add restores
   the password from the backup.
-- Step 6 prepared: `.github/workflows/build.yml` (reusable: installs shelf with `go install`,
+- Step 6: green, with the real tenant repository `tweinmann/shelf-hello` (private) and GHCR.
+  A push of a changed `MESSAGE` reached the app after 173 s without any command: about two
+  minutes for the tenant workflow, the rest for the `OCIRepository` poll. Three things came
+  out of this run:
+  - The platform ResourceSet copies the registry credential into the app namespaces, but only
+    on its own interval, which defaults to one hour. A corrected token therefore never arrived,
+    and Flux kept failing with `DENIED: denied` while `shelf-system` already held a working
+    one. Both source Secrets now carry the label `reconcile.fluxcd.io/watch: Enabled`, which
+    makes the operator copy a change at once, and the ResourceSet reconciles every 10m.
+  - A wait for a registry that refuses the login ran into the five-minute timeout. Such a
+    message (`denied`, `unauthorized`, `forbidden`) now ends the wait immediately and names the
+    Secret to fix.
+  - `just smoke-tenant` accepted any changed answer as success, including the `Gateway Timeout`
+    that Traefik returned during a rollout. It now requires HTTP 200 and the same answer twice
+    in a row. It also checks the GHCR login before touching the cluster, against
+    `ghcr.io/token?scope=repository:<repo>:pull` (the `/v2/` endpoint answers 401 whatever is
+    sent, so it says nothing), and writes the login into a Docker config of its own instead of
+    running `docker login`, which had failed in the Docker-in-Docker daemon.
+- Step 6 artifacts: `.github/workflows/build.yml` (reusable: installs shelf with `go install`,
   builds the images natively on `ubuntu-24.04-arm` and pushes them with the tags `sha-<short>`
   and `main` on the default branch only, validates, renders, pushes the artifact with
   `flux push artifact` and tags it `main`, writes the `shelf app add` line to the job
@@ -998,10 +1016,11 @@ Results (2026-09-17, steps 1–5 and 7):
   replace the author address with `tweinmann@users.noreply.github.com`; `user.email` is set to
   that address for this repository. Commit hashes changed, and the two references to commits in
   this document were updated. The schema example is now a neutral `shop` app.
-- Open (step 6, needs the maintainer): make the shelf repo public, push, check both CI jobs;
-  create `tweinmann/shelf-hello` from `examples/tenant`; `just smoke-tenant greeter
-  oci://ghcr.io/tweinmann/greeter-deploy:main`, push a changed `MESSAGE` while it waits; then
-  `shelf app rm greeter`.
+- The shelf repository is public, both CI jobs are green, and the history was rewritten before
+  publishing (see above).
+- Open for later: during one rollout of a single-instance app Traefik answered 504 for a
+  moment, although a Deployment starts the new pod before it stops the old one; in a second
+  run this did not happen. Worth a look when the platform is exposed for real (Phase 5).
 
 ### Phase 5 – `shelf init expose`
 Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and

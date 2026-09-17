@@ -22,6 +22,8 @@ data:
   .dockerconfigjson: eyJhdXRocyI6eyJnaGNyLmlvIjp7ImF1dGgiOiJkRzlpYVRwdWIzUXRZUzF5WldGc0xYUnZhMlZ1IiwicGFzc3dvcmQiOiJub3QtYS1yZWFsLXRva2VuIiwidXNlcm5hbWUiOiJ0b2JpIn19fQ==
 kind: Secret
 metadata:
+  labels:
+    reconcile.fluxcd.io/watch: Enabled
   name: registry
   namespace: shelf-system
 type: kubernetes.io/dockerconfigjson
@@ -31,6 +33,8 @@ data:
   .dockerconfigjson: eyJhdXRocyI6e319
 kind: Secret
 metadata:
+  labels:
+    reconcile.fluxcd.io/watch: Enabled
   name: registry
   namespace: shelf-system
 type: kubernetes.io/dockerconfigjson
@@ -41,6 +45,7 @@ data:
 kind: Secret
 metadata:
   labels:
+    reconcile.fluxcd.io/watch: Enabled
     shelf.dev/app: hello
   name: app-hello
   namespace: shelf-system
@@ -51,6 +56,7 @@ data: {}
 kind: Secret
 metadata:
   labels:
+    reconcile.fluxcd.io/watch: Enabled
     shelf.dev/app: empty
   name: app-empty
   namespace: shelf-system

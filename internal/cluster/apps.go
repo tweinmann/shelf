@@ -58,7 +58,10 @@ func AppSecret(app string, values map[string]string) *unstructured.Unstructured 
 		"metadata": map[string]any{
 			"name":      AppSecretName(app),
 			"namespace": SystemNamespace,
-			"labels":    map[string]any{AppLabel: app},
+			"labels": map[string]any{
+				AppLabel:   app,
+				WatchLabel: "Enabled",
+			},
 		},
 		"type": "Opaque",
 		"data": data,
@@ -143,7 +146,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		if err != nil {
 			return "", err
 		}
-		obj, err := c.reconcileAndWait(ctx, repo)
+		obj, err := c.reconcileAndWait(ctx, repo, failOnAuthError(readyCondition))
 		if err != nil {
 			return "", err
 		}
@@ -168,7 +171,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		if err := c.waitFor(ctx, chart, readyCondition); err != nil {
 			return "", err
 		}
-		obj, err := c.reconcileAndWait(ctx, release)
+		obj, err := c.reconcileAndWait(ctx, release, readyCondition)
 		if err != nil {
 			return "", err
 		}
@@ -235,7 +238,7 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 
 // reconcileAndWait asks the controller of a Flux object to reconcile now and waits until it has
 // handled that request and is ready. It returns the object in that state.
-func (c *client) reconcileAndWait(ctx context.Context, r ref) (*unstructured.Unstructured, error) {
+func (c *client) reconcileAndWait(ctx context.Context, r ref, ready readyFunc) (*unstructured.Unstructured, error) {
 	token := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := c.annotate(ctx, r, reconcileAnnotation, token); err != nil {
 		return nil, err
@@ -247,7 +250,7 @@ func (c *client) reconcileAndWait(ctx context.Context, r ref) (*unstructured.Uns
 			return false, "waiting for Flux to handle the change", nil
 		}
 		last = obj
-		return readyCondition(obj)
+		return ready(obj)
 	})
 	return last, err
 }

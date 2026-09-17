@@ -10,6 +10,10 @@ kind: ResourceSet
 metadata:
   name: apps
   namespace: shelf-system
+  annotations:
+    # Copied Secrets are refreshed at this interval; a change to a Secret labelled
+    # reconcile.fluxcd.io/watch is picked up at once.
+    fluxcd.controlplane.io/reconcileEvery: 10m
 spec:
   inputsFrom:
     - apiVersion: fluxcd.controlplane.io/v1

@@ -19,6 +19,9 @@ const (
 	RegistrySecretName = "registry"
 	// RegistryHost is the registry the credential is for.
 	RegistryHost = "ghcr.io"
+	// WatchLabel makes the platform ResourceSet copy a Secret into the app namespaces as soon
+	// as it changes, instead of at its next interval.
+	WatchLabel = "reconcile.fluxcd.io/watch"
 )
 
 // Settings are the per-cluster values the platform needs.
@@ -82,8 +85,12 @@ func RegistrySecret(auth *RegistryAuth) (*unstructured.Unstructured, error) {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Secret",
-		"metadata":   map[string]any{"name": RegistrySecretName, "namespace": SystemNamespace},
-		"type":       "kubernetes.io/dockerconfigjson",
+		"metadata": map[string]any{
+			"name":      RegistrySecretName,
+			"namespace": SystemNamespace,
+			"labels":    map[string]any{WatchLabel: "Enabled"},
+		},
+		"type": "kubernetes.io/dockerconfigjson",
 		"data": map[string]any{
 			".dockerconfigjson": base64.StdEncoding.EncodeToString(config),
 		},

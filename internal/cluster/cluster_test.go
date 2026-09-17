@@ -233,3 +233,40 @@ func TestPlatformObjects(t *testing.T) {
 	}
 	testutil.Golden(t, filepath.Join("testdata", "objects.yaml"), out)
 }
+
+func TestFailOnAuthError(t *testing.T) {
+	obj := func(status, message string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetKind("OCIRepository")
+		u.SetName("deploy")
+		u.SetGeneration(1)
+		_ = unstructured.SetNestedField(u.Object, int64(1), "status", "observedGeneration")
+		_ = unstructured.SetNestedSlice(u.Object, []any{
+			map[string]any{"type": "Ready", "status": status, "message": message},
+		}, "status", "conditions")
+		return u
+	}
+	denied := "failed to determine artifact digest: GET https://ghcr.io/token?scope=x: DENIED: denied"
+	tests := []struct {
+		name    string
+		obj     *unstructured.Unstructured
+		wantErr bool
+	}{
+		{"login refused", obj("False", denied), true},
+		{"not found yet", obj("False", "failed to pull artifact: manifest unknown"), false},
+		{"ready", obj("True", "stored artifact"), false},
+		// A ready object whose message mentions a past failure must not fail the wait.
+		{"ready after a refusal", obj("True", denied), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := failOnAuthError(readyCondition)(tt.obj)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error %v, want error %v", err, tt.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "shelf init cluster") {
+				t.Errorf("the error does not say what to do: %v", err)
+			}
+		})
+	}
+}
