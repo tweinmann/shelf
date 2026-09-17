@@ -1066,8 +1066,18 @@ Results (2026-09-17):
 - `tweinmann/shelf-hello` now holds only `app.yaml` (with `build: ./web`) and a workflow that
   is the same for every app. A push reached the app after **81 s**, less than half of the 173 s
   in Phase 4, because the workflow downloads the release binary instead of building shelf.
-- The rendered `app.yaml` carries `ghcr.io/tweinmann/shelf-hello-web@sha256:…`. The workflow now
-  passes `<image>:sha-<short>@<digest>`, so the commit that built the image stays visible.
+- Package naming was inconsistent at first: the artifact was named after the app
+  (`greeter-deploy`), the image after the repository (`shelf-hello-web`), so nothing showed that
+  they belong together. Everything of an app now lives under its name: the deploy artifact is
+  `ghcr.io/<owner>/<app>`, an image `ghcr.io/<owner>/<app>/<component>`. A registry serves both
+  names side by side (checked against the dev registry). `shelf build-plan` therefore reports
+  `{app, builds}`; the workflow needs the name before it builds.
+- Release `v0.2.0` carried that change. The tenant repository needed no edit at all: `@v0` moved
+  to the new workflow, and the next push published `greeter` and `greeter/web`.
+  `shelf app add greeter oci://ghcr.io/tweinmann/greeter:main` moved the running app over, and
+  the rendered `app.yaml` now reads
+  `ghcr.io/tweinmann/greeter/web:sha-905acce@sha256:…`, so the commit that built the image is
+  visible in front of the digest.
 
 ### Phase 5 – `shelf init expose`
 Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and
