@@ -49,11 +49,12 @@ flowchart LR
     B --> R[(GHCR)]
     I --> R
     subgraph mini["Mac mini (k3s)"]
-        F[Flux] -->|watches| R
-        F --> H[Helm chart shelf-app]
+        F[Flux] --> H[Helm chart shelf-app]
         H --> K[Deployments, StatefulSets,<br/>Services, Ingress, PVCs]
+        K --> X[Traefik]
     end
-    K --> T[Cloudflare Tunnel] --> U(("https://app.example.com"))
+    F -->|watches| R
+    X --> T[Cloudflare Tunnel] --> U(("https://app.example.com"))
 ```
 
 1. Your workflow builds the images and runs `shelf render` on your `app.yaml`. This pins every
@@ -75,7 +76,7 @@ one starts.
 |---|---|---|
 | 0 | Devcontainer, local k3d cluster, smoke tests | ✅ done |
 | 1 | `app.yaml` schema, `shelf validate`, `shelf render`, CI | ✅ done |
-| 0b | Switch the devcontainer to Docker-in-Docker | 🔧 in progress |
+| 0b | Switch the devcontainer to Docker-in-Docker | ✅ done |
 | 2 | Helm chart `shelf-app` | ⏳ next |
 | 3 | `shelf init cluster`: Flux, Traefik | planned |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | planned |
