@@ -10,11 +10,12 @@ architecture.
 ## Status
 
 Phase 0 complete: devcontainer, dev cluster, smoke tests, `hack/nuke.sh`.
-Phase 1 complete (awaiting approval): `shelf validate`, `shelf render`, `shelf schema`, JSON
-Schema, `examples/hello`, `just test`, CI. Results and decisions in docs/plan.md.
-Phase 0b complete and approved: switch from Docker-outside-of-Docker to
-Docker-in-Docker. Results in docs/plan.md.
-Next: Phase 2 (chart `shelf-app`), once the maintainer approves it.
+Phase 0b complete and approved: switch from Docker-outside-of-Docker to Docker-in-Docker.
+Phase 1 complete: `shelf validate`, `shelf render`, `shelf schema`, JSON Schema,
+`examples/hello`, `just test`, CI.
+Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart`,
+`just smoke-chart`. Results and decisions in docs/plan.md.
+In progress: Phase 3 (`shelf init cluster`).
 
 ## Working agreements
 
@@ -45,7 +46,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 
 | Command | Run from | Purpose |
 |---|---|---|
-| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, kubeconform, examples) |
+| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
 | `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev`, write kubeconfig (run after every container restart or rebuild) |
@@ -54,6 +55,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
+| `just smoke-chart` | devcontainer | install `examples/hello` with the chart, check the Phase 2 acceptance criteria (needs Docker Hub) |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -77,10 +79,14 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 ## Conventions
 
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
-- Secret env prefix `SHELF_SECRET_<NAME>`; label `shelf.dev/app`; OCI annotations `dev.shelf.*`
+- Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
+  the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
+  OCI annotations `dev.shelf.*`
 - Go: standard layout (`cmd/`, `internal/`), table-driven tests, golden files in `testdata/`
   (`-update` via `just golden`); the registry is behind `render.Resolver`, so tests never need
   the network
+- Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
+  themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):
   `GOPATH=$HOME/go GOMODCACHE=/go/pkg/mod go get …`
 - Shell: `hack/*.sh` use bash with `set -euo pipefail` and source `hack/lib.sh`;

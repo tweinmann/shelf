@@ -1,0 +1,38 @@
+# Exercises the chart paths the hello example does not: several ports, stripPrefix, probe
+# delay, secret references in command, args and env, literal $, a secret referenced only in
+# escaped form, several instances with volumes, and a StatefulSet without ports.
+apiVersion: shelf.dev/v1alpha1
+name: features
+
+components:
+  api:
+    image: ghcr.io/example/api:1.0
+    ports: { http: 8080, metrics: 9090 }
+    route: { path: /api, port: http, stripPrefix: true }
+    health: { path: /healthz, port: http, initialDelay: 15 }
+    command: [/bin/api, "--token=${secrets.api-token}"]
+    args: ["--db=${db.host}:${db.port}", "--price=$5", "--literal=$${secrets.unused}"]
+    env:
+      PORT: 8080
+      SESSION: ${secrets.session-key}-${secrets.api-token}
+      HOME_DIR: $HOME
+    instances: 2
+
+  db:
+    image: postgres:16
+    port: 5432
+    instances: 3
+    volumes:
+      data: { path: /var/lib/postgresql/data, size: 5Gi }
+      backup: { path: /backup, size: 1Gi }
+
+  worker:
+    image: ghcr.io/example/worker:1.0
+    volumes:
+      cache: { path: /cache, size: 1Gi }
+    resources: { cpu: 250m }
+
+secrets:
+  api-token: { generate: true }
+  session-key: { generate: true }
+  unused: { generate: true }

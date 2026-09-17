@@ -1,0 +1,46 @@
+{{- /*
+One Ingress per routed component, all on the host <app>.<domain>. Traefik attaches middlewares
+to a whole Ingress, so a separate object per component keeps stripPrefix per route.
+*/ -}}
+{{- range $compName, $comp := .Values.components }}
+{{- $ctx := dict "root" $ "app" $.Values.name "component" $compName }}
+{{- with $comp.route }}
+{{- if .stripPrefix }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $compName }}
+  labels:
+    {{- include "shelf-app.labels" $ctx | nindent 4 }}
+spec:
+  stripPrefix:
+    prefixes:
+      - {{ .path | quote }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $compName }}
+  labels:
+    {{- include "shelf-app.labels" $ctx | nindent 4 }}
+  {{- if .stripPrefix }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s@kubernetescrd" $.Release.Namespace $compName }}
+  {{- end }}
+spec:
+  ingressClassName: {{ $.Values.platform.ingressClassName }}
+  rules:
+    - host: {{ printf "%s.%s" $.Values.name $.Values.platform.domain }}
+      http:
+        paths:
+          - path: {{ .path | quote }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $compName }}
+                port:
+                  name: {{ .port }}
+{{- end }}
+{{- end }}

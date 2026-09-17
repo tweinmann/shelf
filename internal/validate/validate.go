@@ -26,6 +26,10 @@ var (
 // reservedComponentNames would be ambiguous in ${...} references or clash with platform names.
 var reservedComponentNames = []string{"secrets", "app", "shelf"}
 
+// headlessSuffix names the extra headless Service of a StatefulSet component, so no component
+// name may end with it.
+const headlessSuffix = "-headless"
+
 // reservedAppNames are namespaces the platform or Kubernetes already uses.
 var reservedAppNames = []string{"default", "flux-system", "traefik", "cloudflared", "external-dns"}
 
@@ -105,6 +109,9 @@ func (c *checker) checkComponent(app *schema.App, compName string) {
 			"with a letter and end with a letter or digit", compName)
 	case slices.Contains(reservedComponentNames, compName):
 		c.errorf(p, "component name %q is reserved", compName)
+	case strings.HasSuffix(compName, headlessSuffix):
+		c.errorf(p, "component name %q must not end with %q, which is reserved for the platform",
+			compName, headlessSuffix)
 	}
 	if comp == nil {
 		c.errorf(p, "component is empty; image is required")

@@ -1,0 +1,50 @@
+{{- /*
+Every component with ports gets a ClusterIP Service named after it, whether it runs as a
+Deployment or a StatefulSet, so ${<component>.host} never changes. A StatefulSet also gets the
+headless Service it requires, <component>-headless.
+*/ -}}
+{{- range $compName, $comp := .Values.components }}
+{{- $ctx := dict "root" $ "app" $.Values.name "component" $compName }}
+{{- if $comp.ports }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $compName }}
+  labels:
+    {{- include "shelf-app.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "shelf-app.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    {{- range $name, $port := $comp.ports }}
+    - name: {{ $name }}
+      port: {{ $port }}
+      targetPort: {{ $name }}
+      protocol: TCP
+    {{- end }}
+{{- end }}
+{{- if $comp.volumes }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $compName }}-headless
+  labels:
+    {{- include "shelf-app.labels" $ctx | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "shelf-app.selectorLabels" $ctx | nindent 4 }}
+  {{- with $comp.ports }}
+  ports:
+    {{- range $name, $port := . }}
+    - name: {{ $name }}
+      port: {{ $port }}
+      targetPort: {{ $name }}
+      protocol: TCP
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

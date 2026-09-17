@@ -1,0 +1,116 @@
+{{- /*
+One Deployment per component, or a StatefulSet if the component has volumes.
+*/ -}}
+{{- $secrets := .Values.secrets | default dict }}
+{{- range $compName, $comp := .Values.components }}
+{{- $ctx := dict "root" $ "app" $.Values.name "component" $compName }}
+{{- $stateful := not (empty $comp.volumes) }}
+{{- $resources := $comp.resources | default dict }}
+{{- $refs := include "shelf-app.referencedSecrets" (dict "comp" $comp "secrets" $secrets) | fromJsonArray }}
+---
+apiVersion: apps/v1
+kind: {{ ternary "StatefulSet" "Deployment" $stateful }}
+metadata:
+  name: {{ $compName }}
+  labels:
+    {{- include "shelf-app.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $comp.instances | default 1 }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "shelf-app.selectorLabels" $ctx | nindent 6 }}
+  {{- if $stateful }}
+  serviceName: {{ $compName }}-headless
+  # Instances do not form a cluster, so they need not start one after the other.
+  podManagementPolicy: Parallel
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Retain
+    whenDeleted: Delete
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "shelf-app.selectorLabels" $ctx | nindent 8 }}
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      {{- with $.Values.platform.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
+      containers:
+        - name: {{ $compName }}
+          image: {{ $comp.image | quote }}
+          {{- with $comp.command }}
+          command:
+            {{- range . }}
+            - {{ include "shelf-app.expand" (dict "s" (toString .) "secrets" $secrets) | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with $comp.args }}
+          args:
+            {{- range . }}
+            - {{ include "shelf-app.expand" (dict "s" (toString .) "secrets" $secrets) | quote }}
+            {{- end }}
+          {{- end }}
+          {{- if or $refs $comp.env }}
+          env:
+            {{- /* Secrets first: kubelet only expands $(VAR) of variables defined earlier. */}}
+            {{- range $refs }}
+            - name: {{ include "shelf-app.secretEnv" . }}
+              valueFrom:
+                secretKeyRef:
+                  name: shelf-secrets
+                  key: {{ . }}
+            {{- end }}
+            {{- range $name, $value := $comp.env }}
+            - name: {{ $name }}
+              value: {{ include "shelf-app.expand" (dict "s" (toString $value) "secrets" $secrets) | quote }}
+            {{- end }}
+          {{- end }}
+          {{- with $comp.ports }}
+          ports:
+            {{- range $name, $port := . }}
+            - name: {{ $name }}
+              containerPort: {{ $port }}
+              protocol: TCP
+            {{- end }}
+          {{- end }}
+          {{- with $comp.health }}
+          readinessProbe:
+            {{- include "shelf-app.probe" (dict "health" . "failureThreshold" 3) | nindent 12 }}
+          livenessProbe:
+            {{- include "shelf-app.probe" (dict "health" . "failureThreshold" 6) | nindent 12 }}
+          {{- end }}
+          resources:
+            requests:
+              cpu: {{ $resources.cpu | default "50m" | quote }}
+              memory: {{ $resources.memory | default "64Mi" | quote }}
+            {{- with $resources.memory }}
+            limits:
+              memory: {{ . | quote }}
+            {{- end }}
+          {{- with $comp.volumes }}
+          volumeMounts:
+            {{- range $name, $volume := . }}
+            - name: {{ $name }}
+              mountPath: {{ $volume.path | quote }}
+            {{- end }}
+          {{- end }}
+  {{- if $stateful }}
+  volumeClaimTemplates:
+    {{- range $name, $volume := $comp.volumes }}
+    - metadata:
+        name: {{ $name }}
+        labels:
+          {{- include "shelf-app.selectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ $volume.size | quote }}
+    {{- end }}
+  {{- end }}
+{{- end }}

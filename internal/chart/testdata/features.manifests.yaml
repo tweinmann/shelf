@@ -1,0 +1,341 @@
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: api
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  type: ClusterIP
+  selector:
+    shelf.dev/app: features
+    shelf.dev/component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: db
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  type: ClusterIP
+  selector:
+    shelf.dev/app: features
+    shelf.dev/component: db
+  ports:
+    - name: main
+      port: 5432
+      targetPort: main
+      protocol: TCP
+
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-headless
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: db
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  clusterIP: None
+  selector:
+    shelf.dev/app: features
+    shelf.dev/component: db
+  ports:
+    - name: main
+      port: 5432
+      targetPort: main
+      protocol: TCP
+
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-headless
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: worker
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  clusterIP: None
+  selector:
+    shelf.dev/app: features
+    shelf.dev/component: worker
+
+---
+# Source: shelf-app/templates/workloads.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: api
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      shelf.dev/app: features
+      shelf.dev/component: api
+  template:
+    metadata:
+      labels:
+        shelf.dev/app: features
+        shelf.dev/component: api
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: api
+          image: "ghcr.io/example/api:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          command:
+            - "/bin/api"
+            - "--token=$(SHELF_SECRET_API_TOKEN)"
+          args:
+            - "--db=db:5432"
+            - "--price=$$5"
+            - "--literal=$${secrets.unused}"
+          env:
+            - name: SHELF_SECRET_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: shelf-secrets
+                  key: api-token
+            - name: SHELF_SECRET_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shelf-secrets
+                  key: session-key
+            - name: HOME_DIR
+              value: "$$HOME"
+            - name: PORT
+              value: "8080"
+            - name: SESSION
+              value: "$(SHELF_SECRET_SESSION_KEY)-$(SHELF_SECRET_API_TOKEN)"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: "/healthz"
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: "/healthz"
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+
+---
+# Source: shelf-app/templates/workloads.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: db
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      shelf.dev/app: features
+      shelf.dev/component: db
+  serviceName: db-headless
+  # Instances do not form a cluster, so they need not start one after the other.
+  podManagementPolicy: Parallel
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Retain
+    whenDeleted: Delete
+  template:
+    metadata:
+      labels:
+        shelf.dev/app: features
+        shelf.dev/component: db
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: db
+          image: "postgres:16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ports:
+            - name: main
+              containerPort: 5432
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: backup
+              mountPath: "/backup"
+            - name: data
+              mountPath: "/var/lib/postgresql/data"
+  volumeClaimTemplates:
+    - metadata:
+        name: backup
+        labels:
+          shelf.dev/app: features
+          shelf.dev/component: db
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: "1Gi"
+    - metadata:
+        name: data
+        labels:
+          shelf.dev/app: features
+          shelf.dev/component: db
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: "5Gi"
+
+---
+# Source: shelf-app/templates/workloads.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: worker
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: worker
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      shelf.dev/app: features
+      shelf.dev/component: worker
+  serviceName: worker-headless
+  # Instances do not form a cluster, so they need not start one after the other.
+  podManagementPolicy: Parallel
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Retain
+    whenDeleted: Delete
+  template:
+    metadata:
+      labels:
+        shelf.dev/app: features
+        shelf.dev/component: worker
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: worker
+          image: "ghcr.io/example/worker:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: cache
+              mountPath: "/cache"
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+        labels:
+          shelf.dev/app: features
+          shelf.dev/component: worker
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: "1Gi"
+
+---
+# Source: shelf-app/templates/ingresses.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: api
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: features-api@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: features.example.com
+      http:
+        paths:
+          - path: "/api"
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+
+---
+# Source: shelf-app/templates/ingresses.yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: api
+  labels:
+    shelf.dev/app: features
+    shelf.dev/component: api
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  stripPrefix:
+    prefixes:
+      - "/api"

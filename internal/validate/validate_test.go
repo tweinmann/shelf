@@ -162,6 +162,7 @@ func TestErrors(t *testing.T) {
 		{"reserved component secrets", head + "components:\n  secrets: { image: nginx }\n", "components.secrets", "reserved"},
 		{"reserved component app", head + "components:\n  app: { image: nginx }\n", "components.app", "reserved"},
 		{"reserved component shelf", head + "components:\n  shelf: { image: nginx }\n", "components.shelf", "reserved"},
+		{"reserved component suffix headless", head + "components:\n  db-headless: { image: nginx }\n", "components.db-headless", "reserved"},
 		{"missing image", head + "components:\n  web: { port: 80 }\n", "components.web.image", "is required"},
 		{"invalid image", head + "components:\n  web: { image: 'Not An Image' }\n", "components.web.image", "invalid image reference"},
 		{"instances zero", head + "components:\n  web: { image: nginx, instances: 0 }\n", "components.web.instances", "at least 1"},

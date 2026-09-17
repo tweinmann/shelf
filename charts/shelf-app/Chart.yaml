@@ -1,0 +1,8 @@
+apiVersion: v2
+name: shelf-app
+description: >-
+  The generic shelf app chart. Its values are a resolved app.yaml (shelf render -o app) plus the
+  platform block.
+type: application
+version: 0.1.0
+kubeVersion: ">=1.33.0-0"

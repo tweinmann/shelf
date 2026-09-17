@@ -56,6 +56,16 @@ Decided in Phase 1 (2026-09-16):
 | Literal `$` | **docker compose rules**: `${…}` is a reference, `$$` is a literal `$`, any other `$` is literal too (`$HOME` works in shell commands) |
 | CI | **Inside the devcontainer image** (`devcontainers/ci`, `ubuntu-24.04-arm`), running `just test`; tool versions stay in the Dockerfile only |
 
+Decided in Phase 2 (2026-09-17):
+
+| Question | Decision |
+|---|---|
+| Workload kind | **Deployment without volumes, StatefulSet with volumes**, as planned. "Always StatefulSet" was considered and rejected: a StatefulSet replaces pods delete-first (every deploy of a single-instance component is a short outage), and after a broken rollout it waits for a manual pod delete ("forced rollback"), which breaks the auto-deploy chain. |
+| Services | **`<component>` is always a ClusterIP Service**, for Deployments and StatefulSets alike; a StatefulSet additionally gets **`<component>-headless`** as its `serviceName`. Adding or removing volumes therefore never touches `${<component>.host}`, and the upgrade does not fail on the immutable `clusterIP`. Component names must not end with `-headless`. |
+| Secret object | **`shelf-secrets`** in the app namespace, one key per secret name. The chart only references it; `shelf app add` creates it (Phase 4). |
+| Ingress | **One Ingress per routed component**, all on `<app>.<domain>`; Traefik attaches middlewares per Ingress, so `stripPrefix` stays per route. The Ingress is Traefik's routing table and external-dns's source, so it is needed despite the tunnel. |
+| Platform values | **`platform` block** next to the app values: `domain`, `ingressClassName` (default `traefik`), `imagePullSecret`. The ResourceSet sets it inline in the HelmRelease (Phase 4); later additions such as the external-dns target go here too. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -453,10 +463,11 @@ conservative defaults (`requests: 50m/64Mi`, no limit unless specified).
 ### Semantics
 - Without `volumes` → Deployment, rolling update
 - With `volumes` → StatefulSet, one `volumeClaimTemplate` per volume, plus a headless Service
-  (`db-0.db` addressable);
+  `<component>-headless` (pods addressable as `db-0.db-headless`);
   `persistentVolumeClaimRetentionPolicy: { whenScaled: Retain, whenDeleted: Delete }`;
   PVC name derives from the volume name, not the path
-- Every component with a port gets a Service named after it
+- Every component with a port gets a ClusterIP Service named after it, whether Deployment or
+  StatefulSet; adding or removing volumes keeps it unchanged (removing volumes deletes the PVCs)
 - Components with a `route` are externally reachable, all others internal only
 - `instances` does not form clusters — that remains the app's job
 - Generated secrets are created once per app and stay stable
@@ -475,7 +486,7 @@ Two pitfalls the renderer must handle:
 ### Validation (`shelf validate`, in CLI and CI)
 Errors: `route` without `port`/`ports`; multiple `ports` and `route` without a port;
 `${x.port}` on a component with multiple ports; reference to an unknown component/port/secret;
-reserved names `secrets`, `app`, `shelf`; duplicate volume names; overlapping paths; colliding
+reserved names `secrets`, `app`, `shelf` and the suffix `-headless`; duplicate volume names; overlapping paths; colliding
 `route` paths across components.
 
 Also errors: invalid names (see above), `port` together with `ports`, duplicate port numbers,
@@ -532,13 +543,14 @@ shelf/
     cluster-up.sh             create/start dev cluster, join network, write kubeconfig
     cluster-down.sh           detach and delete dev cluster
     nuke.sh                   host-side cleanup by exact name (POSIX sh)
-    smoke/                    Phase 0 smoke tests
+    smoke/                    smoke tests (Phase 0, chart install in Phase 2)
   cmd/shelf/                  CLI entry point
   internal/
     cli/                      cobra commands
     schema/                   app.yaml types, parser, ${…} syntax, JSON Schema generation
     validate/                 validation rules
     render/                   app.yaml → resolved app.yaml → ConfigMap manifest; registry lookup
+    chart/                    helm template golden-file tests for charts/shelf-app
     secrets/                  secret value generation
     testutil/                 golden-file helper
     preflight/                host checks
@@ -740,6 +752,47 @@ probes, resources. `helm template` golden files in CI.
 **Acceptance:** the example `app.yaml` installed via `helm install` in the dev cluster; Postgres
 data survives `kubectl delete pod`; the API reaches the DB through the generated `DATABASE_URL`;
 `kubectl exec … printenv` shows the expanded value, `kubectl get deploy -o yaml` does not.
+
+Results (2026-09-17):
+
+- Chart `charts/shelf-app` 0.1.0: values are the resolved app.yaml plus the `platform` block.
+  Templates: `workloads.yaml` (Deployment or StatefulSet), `services.yaml`, `ingresses.yaml`
+  (Ingress, and a Traefik `Middleware` for `stripPrefix`), `checks.yaml` (fails early on a
+  wrong `apiVersion`, missing values, a namespace other than the app name, a route without
+  `platform.domain`, and `stripPrefix` without the Middleware CRD).
+- Choices made without a separate decision: `enableServiceLinks: false` (otherwise a component
+  `db` would get `DB_PORT=tcp://…` injected everywhere), `automountServiceAccountToken: false`,
+  selector labels `shelf.dev/app` + `shelf.dev/component` only (chart labels stay out of the
+  pod template, so a chart upgrade alone restarts nothing), `revisionHistoryLimit: 3`,
+  StatefulSets with `podManagementPolicy: Parallel` (instances do not form a cluster),
+  readiness probe with `failureThreshold: 3` and liveness with `6`, both every 10 s, default
+  requests `50m`/`64Mi`, memory limit only when `resources.memory` is set.
+- Secret references: for every secret the chart splits each string on `$$` and replaces
+  `${secrets.<name>}` in the parts; a container gets `SHELF_SECRET_<NAME>` only for secrets it
+  references outside an escaped `$$`, before all other env entries.
+- Level 1: `internal/chart` renders `examples/hello` and `internal/chart/testdata/features.app.yaml`
+  (several ports, `stripPrefix`, probe delay, secrets in `command`/`args`/`env`, literal `$`,
+  a secret referenced only in escaped form, several instances with volumes, a StatefulSet
+  without ports) through the real renderer and `helm template`, against golden files; plus
+  targeted secret-reference checks, the error cases of `checks.yaml`, and "never
+  `LoadBalancer`". `just test` adds `helm lint --strict` and kubeconform on the golden files
+  (Middleware skipped: no schema in the default catalog). A server-side dry run in the dev
+  cluster accepted all objects, including a headless Service without ports. Breaking the `$$`
+  split makes the tests fail (checked). Found on the way: go test cached chart test results
+  across chart changes, because only the helm subprocess read the chart; the test now reads
+  the chart files itself (in the test, not in `TestMain`, which runs before go test starts
+  recording file access).
+- Level 2, `just smoke-chart` (about 2 min, mostly waiting for the `check` loop): installs
+  `examples/hello` with a real `shelf render` and a random secret, ready in 6–17 s. Checks:
+  `check` gets query results from `db` through the generated `DATABASE_URL`; `printenv` shows
+  the expanded URL while no Deployment, StatefulSet, Pod, Service or Ingress contains the
+  value and the Deployment keeps `$(SHELF_SECRET_DB_PASSWORD)`; `db` is ClusterIP and
+  `db-headless` headless; Ingress host `hello.dev.local`; `web` answers `/health` and `/`
+  through its Service; a marker row in Postgres survives `kubectl delete pod db-0`. Then the
+  example is upgraded without the db volume (StatefulSet → Deployment, `db-headless` and PVC
+  gone) and back (Deployment → StatefulSet): both upgrades succeed, Service `db` keeps its
+  cluster IP, and `check` reconnects each time.
+- Traefik itself is not installed yet (Phase 3), so the Ingress is only checked as an object.
 
 ### Phase 3 – `shelf init cluster`
 Flux Operator, `FluxInstance`, Traefik as ClusterIP, platform OCI artifact, all against the

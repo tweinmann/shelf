@@ -77,8 +77,8 @@ one starts.
 | 0 | Devcontainer, local k3d cluster, smoke tests | ✅ done |
 | 1 | `app.yaml` schema, `shelf validate`, `shelf render`, CI | ✅ done |
 | 0b | Switch the devcontainer to Docker-in-Docker | ✅ done |
-| 2 | Helm chart `shelf-app` | ⏳ next |
-| 3 | `shelf init cluster`: Flux, Traefik | planned |
+| 2 | Helm chart `shelf-app` | ✅ done |
+| 3 | `shelf init cluster`: Flux, Traefik | 🔧 in progress |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | planned |
 | 5 | `shelf init expose`: Cloudflare Tunnel, DNS | planned |
 | 6 | Installation on the Mac mini | planned |
@@ -208,9 +208,12 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
   capacity, so `size` is documentation. A component can fill the disk.
 - **Plan volumes up front.** Kubernetes does not allow changing the volumes of a StatefulSet in
   place, and the local storage cannot grow, so changing an existing volume later needs manual
-  steps.
+  steps. Giving a component its first volumes, or removing all of them, works: the component
+  restarts, and `${<component>.host}` keeps pointing at it. **Removing volumes deletes their
+  data.**
 - **Names:** app and component names use lowercase letters, digits and `-`, and are at most
-  40 characters long. `secrets`, `app` and `shelf` are reserved component names.
+  40 characters long. `secrets`, `app` and `shelf` are reserved component names, and component
+  names must not end with `-headless`.
 - **Secrets:** only generated secrets (`generate: true`) are supported for now. Generated
   values are URL-safe, so you can put them into connection strings as they are.
 
@@ -253,11 +256,11 @@ Useful commands:
 
 | Command | Purpose |
 |---|---|
-| `just test` | Formatting, `go vet`, unit tests, manifest validation, examples |
+| `just test` | Formatting, `go vet`, unit tests, chart lint and golden files, manifest validation, examples |
 | `just golden` | Rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
-| `just smoke-secrets`, `just smoke-registry <image>` | Smoke tests against the local cluster |
+| `just smoke-secrets`, `just smoke-registry <image>`, `just smoke-chart` | Smoke tests against the local cluster; `smoke-chart` installs `examples/hello` with the chart |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |
 
 On your machine's Docker daemon, shelf only creates the devcontainer with its image and

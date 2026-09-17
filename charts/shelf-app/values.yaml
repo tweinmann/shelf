@@ -1,0 +1,18 @@
+# The app part of the values is a resolved app.yaml, as printed by `shelf render -o app`
+# (apiVersion, name, components, secrets). Do not write it by hand: the chart relies on its
+# normalized shape and on every literal $ being escaped as $$.
+#
+# Secret values are never part of the values. Every name under `secrets` must be a key in the
+# Secret `shelf-secrets` in the app namespace.
+apiVersion: shelf.dev/v1alpha1
+name: ""
+components: {}
+secrets: {}
+
+# Set by the platform, not by the app.
+platform:
+  # Apps are reachable at <name>.<domain>. Required when a component has a route.
+  domain: ""
+  ingressClassName: traefik
+  # Name of a docker-registry Secret in the app namespace used to pull images; empty for none.
+  imagePullSecret: ""

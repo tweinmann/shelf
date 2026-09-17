@@ -1,0 +1,23 @@
+{{- /* Renders nothing; stops the release early on values the chart cannot handle. */ -}}
+{{- if ne .Values.apiVersion "shelf.dev/v1alpha1" }}
+{{- fail (printf "apiVersion must be shelf.dev/v1alpha1, got %q" .Values.apiVersion) }}
+{{- end }}
+{{- if not .Values.name }}
+{{- fail "name is required; the values must be a resolved app.yaml (shelf render -o app)" }}
+{{- end }}
+{{- if ne .Values.name .Release.Namespace }}
+{{- fail (printf "app %q must be installed into namespace %q, not %q" .Values.name .Values.name .Release.Namespace) }}
+{{- end }}
+{{- if not .Values.components }}
+{{- fail "components must not be empty" }}
+{{- end }}
+{{- range $compName, $comp := .Values.components }}
+{{- with $comp.route }}
+{{- if not $.Values.platform.domain }}
+{{- fail (printf "component %s has a route, but platform.domain is not set" $compName) }}
+{{- end }}
+{{- if and .stripPrefix (not ($.Capabilities.APIVersions.Has "traefik.io/v1alpha1/Middleware")) }}
+{{- fail (printf "component %s uses stripPrefix, which needs the Traefik Middleware CRD (traefik.io/v1alpha1)" $compName) }}
+{{- end }}
+{{- end }}
+{{- end }}
