@@ -12,10 +12,9 @@ architecture.
 Phase 0 complete: devcontainer, dev cluster, smoke tests, `hack/nuke.sh`.
 Phase 1 complete (awaiting approval): `shelf validate`, `shelf render`, `shelf schema`, JSON
 Schema, `examples/hello`, `just test`, CI. Results and decisions in docs/plan.md.
-In progress: Phase 0b, switch from Docker-outside-of-Docker to Docker-in-Docker. Steps 1–5
-green; open: step 6 (CI with the privileged devcontainer) and step 7 (`nuke.sh` and baseline
-comparison), see docs/plan.md.
-After that: Phase 2 (chart `shelf-app`), once the maintainer approves it.
+Phase 0b complete (awaiting approval): switch from Docker-outside-of-Docker to
+Docker-in-Docker. Results in docs/plan.md.
+Next: Phase 2 (chart `shelf-app`), once the maintainer approves it.
 
 ## Working agreements
 

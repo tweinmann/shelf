@@ -251,7 +251,9 @@ Deliberately left in place, and reported by the script:
 - **Build cache** from the devcontainer build. It cannot be removed selectively without `prune`,
   and Docker's build cache garbage collection keeps it bounded.
 - **Untagged intermediate images** from the build, if any. They cannot be attributed to shelf
-  reliably, so they are only pointed out.
+  reliably, so they are only pointed out. This includes earlier devcontainer images left
+  untagged by a rebuild; check `devcontainer.metadata` with `docker image inspect` for the
+  `shelf-*` mounts and remove a match by ID (seen in Phase 0b step 7).
 
 Three pitfalls:
 
@@ -680,7 +682,26 @@ for the PAT).
 - Step 5: after a rebuild of the devcontainer (new container, new host name) the node
   container was already running again, with the cluster 5 minutes old and the system pods
   restarted once. `~/.kube` was empty; `just cluster-up` rewrote the kubeconfig in 2 s.
-- Steps 6–7: pending.
+- Step 6: CI green with the privileged docker-in-docker devcontainer (commit `a3855a6`).
+- Step 7: green. `hack/nuke.sh --with-shared-images` run in a terminal on the Mac removed
+  `shelf-devcontainer`, the volumes `shelf-gomodcache`, `shelf-gocache`, `shelf-claude-config`,
+  `shelf-docker` and `shelf-containerd`, the devcontainer image and the base image. The
+  baseline was repeated before reopening the devcontainer, so no objects had to be discounted:
+  containers, networks and volumes are identical. Nothing from k3d ever reached the host
+  daemon, and the cluster went away with `shelf-docker`. The only difference was one untagged
+  image, `9ba5023c09d5`: the Phase 0 devcontainer image (built 2026-09-16, labels show
+  `docker-outside-of-docker` and the `shelf-*` mounts). The Phase 0b rebuild moved the
+  `vsc-shelf-…` tag to the new image and left the old one untagged, and `nuke.sh` resolves
+  only the image of the current container. It was identified with `docker image inspect` and
+  removed by exact ID. A second image comparison, taken after the devcontainer had been
+  reopened, differs from the baseline only by that devcontainer's images (the base image
+  `devcontainers/go:2-1.27-trixie` and `vsc-shelf-…`, rebuilt from cache with the same ID
+  `70085b94636e`). The SHA-256 of the
+  Mac's `~/.kube/config` is unchanged.
+
+Phase 0b is complete; all acceptance criteria are met. Lesson: every "Rebuild Container"
+can leave the previous devcontainer image untagged. It is recognizable by the `shelf-*`
+mounts in its `devcontainer.metadata` label and has to be removed by ID.
 
 ### Phase 1 – Scaffold, schema, renderer
 Repository layout, JSON Schema for `app.yaml` (editor autocomplete), `shelf validate`,
