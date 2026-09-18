@@ -34,8 +34,12 @@ retry() {
   return 1
 }
 
-# cf <path>: calls the Cloudflare API with the token.
-cf() { curl -sS -H "Authorization: Bearer $CF_API_TOKEN" "https://api.cloudflare.com/client/v4$1"; }
+# cf <path> [curl options...]: calls the Cloudflare API with the token.
+cf() {
+  local path="$1"
+  shift
+  curl -sS -H "Authorization: Bearer $CF_API_TOKEN" "$@" "https://api.cloudflare.com/client/v4$path"
+}
 
 settings="$(kubectl -n flux-system get configmap shelf-config -o json)"
 domain="$(jq -r '.data.SHELF_DOMAIN' <<<"$settings")"
@@ -78,11 +82,15 @@ curl -sS -o /dev/null --doh-url https://cloudflare-dns.com/dns-query \
   -w 'TLS: %{ssl_verify_result} (0 = valid), HTTP %{http_code} via %{scheme}\n' "https://$host/"
 
 step "shelf owns the record: a wrong target is corrected"
-cf "/zones/$zone/dns_records/$(jq -r '.id' <<<"$record")" -X PATCH -H 'Content-Type: application/json' \
-  --data '{"content":"wrong.cfargotunnel.com"}' >/dev/null
-"$work/shelf" app add "$app" "$(kubectl -n shelf-system get rsip "$app" -o jsonpath='{.spec.defaultValues.url}'):$(kubectl -n shelf-system get rsip "$app" -o jsonpath='{.spec.defaultValues.tag}')" \
-  | grep -E "^DNS $host" || die "shelf app add did not report the record"
+record_id="$(jq -r '.id' <<<"$record")"
+cf "/zones/$zone/dns_records/$record_id" -X PATCH -H 'Content-Type: application/json' \
+  --data '{"content":"wrong.cfargotunnel.com"}' | jq -e '.success' >/dev/null \
+  || die "could not change the record for the test"
+[[ "$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0].content')" == wrong.cfargotunnel.com ]] \
+  || die "the record was not changed for the test"
+"$work/shelf" init expose --yes | grep -E "^DNS $host .*: updated$" \
+  || die "shelf init expose did not correct the record"
 [[ "$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0].content')" == "$target" ]] \
-  || die "the record was not corrected"
+  || die "the record still points somewhere else"
 
 echo "PASS: tunnel up, record published and corrected by shelf, app reachable over HTTPS as $host"

@@ -8,9 +8,9 @@ at `<app>.<your-domain>`.
 
 > [!WARNING]
 > shelf is a learning project for platform engineering. It is **not meant for production**,
-> and it is **still under construction**: a push to your repository already deploys your app to
-> a Kubernetes cluster, but the app is not reachable from the internet yet, and the Mac mini
-> setup is missing. See [Status](#status).
+> and it is **still under construction**: a push to your repository deploys your app and makes
+> it reachable at `https://<app>.<your-domain>`, but the Mac mini setup is still missing. See
+> [Status](#status).
 
 ## Contents
 
@@ -84,7 +84,7 @@ one starts.
 | 3 | `shelf init cluster`: Flux, Traefik | ✅ done |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | ✅ done |
 | 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | ✅ done |
-| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | 🔧 in progress |
+| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | 🔍 in review |
 | 6 | Installation on the Mac mini | planned |
 | 7 | Reference apps | planned |
 

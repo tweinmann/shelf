@@ -1095,8 +1095,31 @@ Results (2026-09-17):
 Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and
 `cloudflare-proxied` annotations. Tested **from the dev cluster** against a test domain — the
 mini is not needed for this.
-**Acceptance:** the example app is reachable from outside over HTTPS from the dev cluster;
-`dig` shows a CNAME to `<uuid>.cfargotunnel.com`.
+**Acceptance:** the example app is reachable from outside over HTTPS from the dev cluster, and
+its DNS record is a proxied CNAME to `<uuid>.cfargotunnel.com`. (A proxied record answers with
+Cloudflare's addresses, so `dig` shows those; the CNAME itself is visible through the API, which
+is what `just smoke-expose` checks.)
+
+Results (2026-09-18):
+
+- Green with the tenant app `greeter` in the dev cluster: `shelf init expose` in 4 s on a repeat
+  run (33 s the first time, of which 8 s for the tunnel), the record is a proxied CNAME to the
+  tunnel, and `https://greeter-dev.<domain>/` answers 200 with a valid certificate. Deliberately
+  pointing the record somewhere else and running `shelf init expose` again corrects it.
+- external-dns was built first and then removed (see the decisions). What gave it away: the
+  chart wrote the annotation prefix `external-dns.alpha.kubernetes.io/`, while external-dns
+  0.22 reads `external-dns.kubernetes.io/`. Nothing failed; it simply reported "All records are
+  already up to date" and published nothing. The question why shelf needs a generic watcher at
+  all followed from that.
+- Two bugs came out of the same run: `shelf init expose` wrote the cluster settings back without
+  reading `SHELF_INSECURE_REGISTRY`, which silently reset it and broke the chart source of every
+  app; a round-trip test now covers the settings. And the platform only substitutes settings when
+  its Kustomization runs, so `init cluster` and `init expose` now request that reconciliation
+  instead of leaving a new domain or tunnel target to the next interval.
+- In the dev loop the chart tag `0.0.0-dev` never changes, so `just chart-push` asks the chart
+  source of every app to fetch again; without it a chart change waits an hour.
+- A name that is queried before it exists stays negative in resolvers for 30 minutes (the zone's
+  SOA minimum), which cost time twice. `just smoke-expose` therefore resolves through DoH.
 
 Design:
 

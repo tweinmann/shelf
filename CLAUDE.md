@@ -23,7 +23,10 @@ level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push rea
 Phase 4b complete: `build: ./web`, `shelf build-plan`, `shelf render --image`, `release.yml`;
 releases `v0.1.0` and `v0.2.0` published. A tenant repo holds `app.yaml` plus one boilerplate
 workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the registry.
-In progress: Phase 5 (`shelf init expose`: Cloudflare Tunnel, cloudflared, external-dns).
+Phase 5 complete (awaiting approval): `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
+records written by shelf), `just smoke-expose`. `greeter-dev.<domain>` is reachable over HTTPS
+from the dev cluster. Results in docs/plan.md.
+Next: Phase 6 (Mac mini), once the maintainer approves it.
 
 ## Working agreements
 
