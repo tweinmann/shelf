@@ -15,8 +15,6 @@ platform:
   domain: ""
   # Separates clusters that share a DNS zone, e.g. "-dev".
   hostSuffix: ""
-  # <tunnel-uuid>.cfargotunnel.com; when set, external-dns publishes the ingress hosts.
-  tunnelTarget: ""
   ingressClassName: traefik
   # Name of a docker-registry Secret in the app namespace used to pull images; empty for none.
   imagePullSecret: ""

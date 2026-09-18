@@ -49,28 +49,22 @@ step "build shelf and expose the cluster"
 start=$SECONDS
 "$work/shelf" init expose --yes | tee "$work/expose.txt"
 echo "expose: $((SECONDS - start)) s"
-target="$(sed -n 's/.*target *\(.*\.cfargotunnel\.com\).*/\1/p' "$work/expose.txt")"
+target="$(sed -n 's/.*target *\(.*\.cfargotunnel\.com\).*/\1/p' "$work/expose.txt" | head -1)"
 [[ -n "$target" ]] || die "could not read the tunnel target"
 
-step "the ingress of $app carries the tunnel as its target"
-annotated() {
-  kubectl -n "$app" get ingress -o jsonpath='{.items[*].metadata.annotations.external-dns\.kubernetes\.io/target}' \
-    | grep -q "$target"
-}
-retry 120 annotated || die "no ingress points at $target; the app has to be redeployed by Flux"
+step "the app is served under $host"
 kubectl -n "$app" get ingress -o jsonpath='{.items[*].spec.rules[*].host}' | grep -q "$host" \
   || die "no ingress serves $host"
 
-step "external-dns publishes $host"
+step "the DNS record points at the tunnel"
 zone="$(cf "/zones?name=$domain" | jq -r '.result[0].id')"
 [[ -n "$zone" && "$zone" != null ]] || die "zone $domain not found; does the token cover it?"
-record_target() { cf "/zones/$zone/dns_records?name=$host" | jq -r '.result[0].content // ""'; }
-record_ok() { [[ "$(record_target)" == "$target" ]]; }
-start=$SECONDS
-retry 180 record_ok || die "no DNS record $host -> $target after 3 minutes"
-echo "record after $((SECONDS - start)) s: $host -> $(record_target)"
-owner="$(cf "/zones/$zone/dns_records?type=TXT" | jq -r --arg h "$host" '.result[] | select(.name | contains($h)) | .content' | head -1)"
-[[ -n "$owner" ]] || die "external-dns left no ownership record for $host"
+record="$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0]')"
+[[ "$(jq -r '.content' <<<"$record")" == "$target" ]] \
+  || die "record $host points at $(jq -r '.content' <<<"$record"), not at $target"
+[[ "$(jq -r '.proxied' <<<"$record")" == true ]] \
+  || die "record $host is not proxied; a tunnel target only works through Cloudflare"
+echo "record: $host -> $target (proxied)"
 
 step "the app answers over HTTPS"
 # Resolve through Cloudflare's DoH endpoint: the container's resolver caches the answer from
@@ -83,4 +77,12 @@ head -1 "$work/answer.txt"
 curl -sS -o /dev/null --doh-url https://cloudflare-dns.com/dns-query \
   -w 'TLS: %{ssl_verify_result} (0 = valid), HTTP %{http_code} via %{scheme}\n' "https://$host/"
 
-echo "PASS: tunnel up, DNS record and TXT owner published, app reachable over HTTPS as $host"
+step "shelf owns the record: a wrong target is corrected"
+cf "/zones/$zone/dns_records/$(jq -r '.id' <<<"$record")" -X PATCH -H 'Content-Type: application/json' \
+  --data '{"content":"wrong.cfargotunnel.com"}' >/dev/null
+"$work/shelf" app add "$app" "$(kubectl -n shelf-system get rsip "$app" -o jsonpath='{.spec.defaultValues.url}'):$(kubectl -n shelf-system get rsip "$app" -o jsonpath='{.spec.defaultValues.tag}')" \
+  | grep -E "^DNS $host" || die "shelf app add did not report the record"
+[[ "$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0].content')" == "$target" ]] \
+  || die "the record was not corrected"
+
+echo "PASS: tunnel up, record published and corrected by shelf, app reachable over HTTPS as $host"

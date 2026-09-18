@@ -15,6 +15,8 @@ import (
 type fakeAPI struct {
 	t        *testing.T
 	accounts []Account
+	zones    []Zone
+	records  []Record
 	tunnels  []Tunnel
 	// requests records method and path of every call.
 	requests []string
@@ -40,6 +42,17 @@ func (f *fakeAPI) server() *httptest.Server {
 			f.reply(w, true, map[string]string{"status": "active"})
 		case r.URL.Path == "/accounts":
 			f.reply(w, true, f.accounts)
+		case r.URL.Path == "/zones":
+			name := r.URL.Query().Get("name")
+			var found []Zone
+			for _, z := range f.zones {
+				if z.Name == name {
+					found = append(found, z)
+				}
+			}
+			f.reply(w, true, found)
+		case strings.Contains(r.URL.Path, "/dns_records"):
+			f.records_(w, r)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/cfd_tunnel"):
 			name := r.URL.Query().Get("name")
 			var found []Tunnel
@@ -57,7 +70,7 @@ func (f *fakeAPI) server() *httptest.Server {
 			tunnel := Tunnel{ID: "tunnel-id", Name: f.created["name"].(string)}
 			f.tunnels = append(f.tunnels, tunnel)
 			f.reply(w, true, tunnel)
-		case r.Method == http.MethodDelete:
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/cfd_tunnel/"):
 			f.tunnels = nil
 			f.reply(w, true, nil)
 		default:
@@ -67,6 +80,54 @@ func (f *fakeAPI) server() *httptest.Server {
 	srv := httptest.NewServer(mux)
 	f.t.Cleanup(srv.Close)
 	return srv
+}
+
+// records_ answers the DNS record endpoints of one zone.
+func (f *fakeAPI) records_(w http.ResponseWriter, r *http.Request) {
+	id := ""
+	if parts := strings.Split(r.URL.Path, "/dns_records/"); len(parts) == 2 {
+		id = parts[1]
+	}
+	switch r.Method {
+	case http.MethodGet:
+		name, recordType := r.URL.Query().Get("name"), r.URL.Query().Get("type")
+		var found []Record
+		for _, rec := range f.records {
+			if rec.Name == name && rec.Type == recordType {
+				found = append(found, rec)
+			}
+		}
+		f.reply(w, true, found)
+	case http.MethodPost:
+		var rec Record
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			f.t.Fatal(err)
+		}
+		rec.ID = "record-" + rec.Name
+		f.records = append(f.records, rec)
+		f.reply(w, true, rec)
+	case http.MethodPut:
+		var rec Record
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			f.t.Fatal(err)
+		}
+		for i := range f.records {
+			if f.records[i].ID == id {
+				rec.ID = id
+				f.records[i] = rec
+			}
+		}
+		f.reply(w, true, rec)
+	case http.MethodDelete:
+		kept := f.records[:0]
+		for _, rec := range f.records {
+			if rec.ID != id {
+				kept = append(kept, rec)
+			}
+		}
+		f.records = kept
+		f.reply(w, true, map[string]string{"id": id})
+	}
 }
 
 func (f *fakeAPI) reply(w http.ResponseWriter, success bool, result any, errs ...apiError) {
@@ -221,5 +282,62 @@ func TestDeleteTunnel(t *testing.T) {
 	got, err := c.FindTunnel(context.Background(), "acc-1", "shelf")
 	if err != nil || got != nil {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestZoneFor(t *testing.T) {
+	c := newTestClient(t, &fakeAPI{zones: []Zone{{ID: "zone-1", Name: "example.com"}}})
+	ctx := context.Background()
+
+	for _, name := range []string{"example.com", "greeter-dev.example.com", "a.b.example.com"} {
+		zone, err := c.ZoneFor(ctx, name)
+		if err != nil || zone == nil || zone.ID != "zone-1" {
+			t.Errorf("%s: got %+v, %v", name, zone, err)
+		}
+	}
+	if _, err := c.ZoneFor(ctx, "app.elsewhere.org"); err == nil || !strings.Contains(err.Error(), "no Cloudflare zone") {
+		t.Errorf("error %v", err)
+	}
+}
+
+func TestEnsureAndDeleteRecord(t *testing.T) {
+	api := &fakeAPI{zones: []Zone{{ID: "zone-1", Name: "example.com"}}}
+	c := newTestClient(t, api)
+	ctx := context.Background()
+	const host = "greeter-dev.example.com"
+	const target = "tunnel-id.cfargotunnel.com"
+
+	action, err := c.EnsureRecord(ctx, "zone-1", host, target)
+	if err != nil || action != Created {
+		t.Fatalf("action %q, %v", action, err)
+	}
+	if len(api.records) != 1 || !api.records[0].Proxied || api.records[0].Content != target {
+		t.Fatalf("records %+v; a tunnel record has to be proxied", api.records)
+	}
+
+	if action, err := c.EnsureRecord(ctx, "zone-1", host, target); err != nil || action != Unchanged {
+		t.Errorf("action %q, %v", action, err)
+	}
+
+	// A new tunnel means a new target for the same name.
+	if action, err := c.EnsureRecord(ctx, "zone-1", host, "other.cfargotunnel.com"); err != nil || action != Updated {
+		t.Errorf("action %q, %v", action, err)
+	}
+	if len(api.records) != 1 || api.records[0].Content != "other.cfargotunnel.com" {
+		t.Errorf("records %+v", api.records)
+	}
+
+	// A record that someone turned off the proxy for is repaired.
+	api.records[0].Proxied = false
+	if action, err := c.EnsureRecord(ctx, "zone-1", host, "other.cfargotunnel.com"); err != nil || action != Updated {
+		t.Errorf("action %q, %v", action, err)
+	}
+
+	found, err := c.DeleteRecord(ctx, "zone-1", host)
+	if err != nil || !found || len(api.records) != 0 {
+		t.Errorf("found %v, %v, records %+v", found, err, api.records)
+	}
+	if found, err := c.DeleteRecord(ctx, "zone-1", host); err != nil || found {
+		t.Errorf("deleting a missing record must be no error: %v, %v", found, err)
 	}
 }

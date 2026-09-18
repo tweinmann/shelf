@@ -5,7 +5,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"slices"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -19,14 +22,10 @@ const (
 	ExposeLabel = "shelf.dev/expose"
 	// ExposeName is the provider, and the name of the Cloudflare tunnel's secret.
 	ExposeName = "expose"
-	// CloudflareSecretName holds the API token external-dns uses.
-	CloudflareSecretName = "cloudflare"
 	// TunnelSecretName holds the credentials cloudflared uses.
 	TunnelSecretName = "tunnel"
 	// CloudflaredName is the deployment that keeps the tunnel open.
 	CloudflaredName = "cloudflared"
-	// ExternalDNSName is the HelmRelease that publishes the DNS records.
-	ExternalDNSName = "external-dns"
 )
 
 var deploymentGVK = schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
@@ -37,13 +36,8 @@ type ExposeOptions struct {
 	TunnelID string
 	// Credentials is the credentials.json of that tunnel, or nil to keep the stored one.
 	Credentials []byte
-	// APIToken is the Cloudflare API token external-dns uses, or empty to keep the stored one.
-	APIToken string
-	// Owner tells external-dns which records belong to this cluster.
-	Owner   string
-	Domain  string
-	Timeout time.Duration
-	Out     io.Writer
+	Timeout     time.Duration
+	Out         io.Writer
 }
 
 // secret returns an opaque Secret in SystemNamespace that the platform watches.
@@ -79,8 +73,6 @@ func ExposeProvider(o ExposeOptions) *unstructured.Unstructured {
 			"type": "Static",
 			"defaultValues": map[string]any{
 				"tunnel": o.TunnelID,
-				"domain": o.Domain,
-				"owner":  o.Owner,
 			},
 		},
 	}}
@@ -101,12 +93,6 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 	if o.Credentials != nil {
 		if err := c.applyReport(ctx, out, secret(TunnelSecretName,
 			map[string]string{"credentials.json": string(o.Credentials)})); err != nil {
-			return err
-		}
-	}
-	if o.APIToken != "" {
-		if err := c.applyReport(ctx, out, secret(CloudflareSecretName,
-			map[string]string{"api-token": o.APIToken})); err != nil {
 			return err
 		}
 	}
@@ -134,21 +120,31 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 		return err
 	}
 
-	err = c.step(ctx, out, "the tunnel", func(ctx context.Context) (string, error) {
+	return c.step(ctx, out, "the tunnel", func(ctx context.Context) (string, error) {
 		return "", c.waitFor(ctx, ref{gvk: deploymentGVK, namespace: SystemNamespace, name: CloudflaredName}, current)
 	})
+}
+
+// AppNames returns the apps of this cluster, by the providers `shelf app add` created.
+func AppNames(ctx context.Context, cfg *rest.Config) ([]string, error) {
+	c, err := newClient(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return c.step(ctx, out, "DNS", func(ctx context.Context) (string, error) {
-		r := ref{gvk: helmReleaseGVK, namespace: SystemNamespace, name: ExternalDNSName}
-		obj, err := c.reconcileAndWait(ctx, r, readyCondition)
-		if err != nil {
-			return "", err
-		}
-		_, msg, _ := readyCondition(obj)
-		return msg, nil
-	})
+	ri, err := c.resource(providerGVK, SystemNamespace)
+	if err != nil {
+		return nil, err
+	}
+	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: AppLabel})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, item := range list.Items {
+		names = append(names, item.GetName())
+	}
+	slices.Sort(names)
+	return names, nil
 }
 
 // TunnelCredentials returns the stored credentials.json of the tunnel, or nil if there are none.

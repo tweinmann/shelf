@@ -19,6 +19,8 @@ import (
 
 // fakeApps replaces registry and cluster access for the app commands.
 type fakeApps struct {
+	settings cluster.Settings
+	api      *fakeCloudflare
 	app      *schema.App
 	fetchErr error
 	stored   map[string]string
@@ -32,7 +34,13 @@ type fakeApps struct {
 func (f *fakeApps) install(t *testing.T) {
 	t.Helper()
 	oldFetch, oldSecrets, oldAdd, oldRemove := fetchApp, appSecrets, addApp, removeApp
-	t.Cleanup(func() { fetchApp, appSecrets, addApp, removeApp = oldFetch, oldSecrets, oldAdd, oldRemove })
+	oldSettings, oldNew := clusterSettings, newCloudflare
+	t.Cleanup(func() {
+		fetchApp, appSecrets, addApp, removeApp = oldFetch, oldSecrets, oldAdd, oldRemove
+		clusterSettings, newCloudflare = oldSettings, oldNew
+	})
+	clusterSettings = func(context.Context, *rest.Config) (cluster.Settings, error) { return f.settings, nil }
+	newCloudflare = func(string) cloudflareAPI { return f.api }
 	fetchApp = func(_ context.Context, ref string, insecure bool) (*schema.App, error) {
 		f.ref, f.insecure = ref, insecure
 		return f.app, f.fetchErr
@@ -49,6 +57,12 @@ func (f *fakeApps) install(t *testing.T) {
 		f.removed = append(f.removed, name)
 		return f.found, nil
 	}
+}
+
+// exposedApps is a cluster whose apps are reachable from the internet.
+func exposedApps(f *fakeApps) {
+	f.settings = cluster.Settings{Domain: "example.com", HostSuffix: "-dev", TunnelTarget: "t-1.cfargotunnel.com"}
+	f.api = &fakeCloudflare{}
 }
 
 func appWithSecrets(name string, secretNames ...string) *schema.App {
@@ -224,6 +238,64 @@ func TestAppRm(t *testing.T) {
 			}
 			if tt.wantRemoved == 1 && !strings.Contains(out.String(), "including all its volumes") {
 				t.Errorf("the warning is missing:\n%s", out.String())
+			}
+		})
+	}
+}
+
+func TestAppAddAndRmPublishTheHostName(t *testing.T) {
+	kubeconfig, _ := appTestEnv(t)
+	fake := &fakeApps{app: appWithSecrets("greeter"), found: true}
+	exposedApps(fake)
+	fake.install(t)
+	t.Setenv(envCloudflareToken, "cf-secret-token")
+
+	stdout, stderr, code := run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main", "--kubeconfig", kubeconfig)
+	if code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr)
+	}
+	want := "greeter-dev.example.com -> t-1.cfargotunnel.com in zone-1"
+	if len(fake.api.records) != 1 || fake.api.records[0] != want {
+		t.Errorf("records %v, want %q", fake.api.records, want)
+	}
+	if !strings.Contains(stdout, "DNS greeter-dev.example.com -> t-1.cfargotunnel.com: created") {
+		t.Errorf("stdout lacks the record:\n%s", stdout)
+	}
+
+	if _, stderr, code = run(t, "app", "rm", "greeter", "--yes", "--kubeconfig", kubeconfig); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr)
+	}
+	if len(fake.api.deletedRecords) != 1 || fake.api.deletedRecords[0] != "greeter-dev.example.com" {
+		t.Errorf("deleted %v", fake.api.deletedRecords)
+	}
+}
+
+func TestAppAddWithoutExposure(t *testing.T) {
+	kubeconfig, _ := appTestEnv(t)
+	tests := map[string]struct {
+		setup   func(*fakeApps)
+		token   string
+		wantOut string
+	}{
+		"cluster not exposed": {setup: func(*fakeApps) {}, token: "cf-secret-token"},
+		"no token":            {setup: exposedApps, wantOut: "DNS: skipped"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeApps{app: appWithSecrets("greeter"), api: &fakeCloudflare{}}
+			tt.setup(fake)
+			fake.install(t)
+			t.Setenv(envCloudflareToken, tt.token)
+
+			stdout, stderr, code := run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main", "--kubeconfig", kubeconfig)
+			if code != 0 {
+				t.Fatalf("exit code %d: %s", code, stderr)
+			}
+			if len(fake.api.records) != 0 {
+				t.Errorf("no record may be written: %v", fake.api.records)
+			}
+			if tt.wantOut != "" && !strings.Contains(stdout, tt.wantOut) {
+				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
 			}
 		})
 	}

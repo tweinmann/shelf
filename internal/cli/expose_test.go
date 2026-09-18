@@ -16,12 +16,16 @@ import (
 
 // fakeCloudflare answers like the Cloudflare API without talking to it.
 type fakeCloudflare struct {
-	verifyErr error
-	accounts  []string
-	existing  *cloudflare.Tunnel
-	created   []string
-	deleted   []string
-	accountID string
+	verifyErr      error
+	zoneErr        error
+	zoneFor        []string
+	records        []string
+	deletedRecords []string
+	accounts       []string
+	existing       *cloudflare.Tunnel
+	created        []string
+	deleted        []string
+	accountID      string
 }
 
 func (f *fakeCloudflare) VerifyToken(context.Context) error { return f.verifyErr }
@@ -54,8 +58,27 @@ func (f *fakeCloudflare) DeleteTunnel(_ context.Context, _, id string) error {
 	return nil
 }
 
+func (f *fakeCloudflare) ZoneFor(_ context.Context, name string) (*cloudflare.Zone, error) {
+	if f.zoneErr != nil {
+		return nil, f.zoneErr
+	}
+	f.zoneFor = append(f.zoneFor, name)
+	return &cloudflare.Zone{ID: "zone-1", Name: name}, nil
+}
+
+func (f *fakeCloudflare) EnsureRecord(_ context.Context, zone, name, target string) (cloudflare.Action, error) {
+	f.records = append(f.records, name+" -> "+target+" in "+zone)
+	return cloudflare.Created, nil
+}
+
+func (f *fakeCloudflare) DeleteRecord(_ context.Context, _, name string) (bool, error) {
+	f.deletedRecords = append(f.deletedRecords, name)
+	return true, nil
+}
+
 // exposeEnv installs fakes for the cluster and Cloudflare and returns them.
 type exposeEnv struct {
+	apps        []string
 	api         *fakeCloudflare
 	settings    cluster.Settings
 	stored      []byte
@@ -83,6 +106,9 @@ func newExposeEnv(t *testing.T) *exposeEnv {
 		return env.settings, env.settingsErr
 	}
 	tunnelCredentials = func(context.Context, *rest.Config) ([]byte, error) { return env.stored, nil }
+	oldApps := appNames
+	t.Cleanup(func() { appNames = oldApps })
+	appNames = func(context.Context, *rest.Config) ([]string, error) { return env.apps, nil }
 	exposeCluster = func(_ context.Context, _ *rest.Config, o cluster.ExposeOptions) error {
 		env.calls = append(env.calls, o)
 		return nil
@@ -114,12 +140,11 @@ func TestInitExposeCreatesTunnel(t *testing.T) {
 		t.Fatalf("expose called %d times", len(env.calls))
 	}
 	got := env.calls[0]
-	if got.TunnelID != "new-tunnel" || got.Domain != "example.com" || got.Owner != "shelf-dev" ||
-		got.APIToken != "cf-secret-token" || string(got.Credentials) != `{"TunnelID":"new-tunnel"}` {
+	if got.TunnelID != "new-tunnel" || string(got.Credentials) != `{"TunnelID":"new-tunnel"}` {
 		t.Errorf("options %+v", got)
 	}
 	for _, want := range []string{"hosts     <app>-dev.example.com", "tunnel    shelf-dev",
-		"dns owner shelf-dev", "target    new-tunnel.cfargotunnel.com"} {
+		"target    new-tunnel.cfargotunnel.com"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
@@ -235,17 +260,42 @@ func TestInitExposeAccountFromEnvironment(t *testing.T) {
 	t.Setenv(envCloudflareToken, "cf-secret-token")
 	t.Setenv(envCloudflareAccount, "acc-2")
 
-	_, stderr, code := env.run(t, "--yes", "--tunnel", "my-tunnel", "--dns-owner", "my-owner")
+	_, stderr, code := env.run(t, "--yes", "--tunnel", "my-tunnel")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
 	if env.api.accountID != "acc-2" {
 		t.Errorf("account %q", env.api.accountID)
 	}
-	if got := env.calls[0]; got.Owner != "my-owner" {
-		t.Errorf("owner %q", got.Owner)
-	}
 	if len(env.api.created) != 1 || env.api.created[0] != "my-tunnel" {
 		t.Errorf("created %v", env.api.created)
+	}
+}
+
+// TestInitExposePublishesRunningApps checks that an exposure set up after the apps publishes
+// their host names, instead of waiting for the next `shelf app add`.
+func TestInitExposePublishesRunningApps(t *testing.T) {
+	env := newExposeEnv(t)
+	env.apps = []string{"greeter", "shop"}
+	t.Setenv(envCloudflareToken, "cf-secret-token")
+
+	stdout, stderr, code := env.run(t, "--yes")
+	if code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr)
+	}
+	want := []string{
+		"greeter-dev.example.com -> new-tunnel.cfargotunnel.com in zone-1",
+		"shop-dev.example.com -> new-tunnel.cfargotunnel.com in zone-1",
+	}
+	if len(env.api.records) != len(want) {
+		t.Fatalf("records %v, want %v", env.api.records, want)
+	}
+	for i, w := range want {
+		if env.api.records[i] != w {
+			t.Errorf("record %d = %q, want %q", i, env.api.records[i], w)
+		}
+	}
+	if !strings.Contains(stdout, "DNS greeter-dev.example.com") {
+		t.Errorf("stdout lacks the published host:\n%s", stdout)
 	}
 }

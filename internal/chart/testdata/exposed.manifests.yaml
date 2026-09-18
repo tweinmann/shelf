@@ -253,12 +253,6 @@ metadata:
     shelf.dev/component: web
     app.kubernetes.io/managed-by: Helm
     helm.sh/chart: shelf-app-0.1.0
-  annotations:
-    # The cluster has no load balancer, so external-dns publishes the tunnel instead. The
-    # platform pins external-dns to this annotation prefix; the older external-dns.alpha
-    # prefix is not read by the version shelf installs.
-    external-dns.kubernetes.io/target: "1234abcd.cfargotunnel.com"
-    external-dns.kubernetes.io/cloudflare-proxied: "true"
 spec:
   ingressClassName: traefik
   rules:

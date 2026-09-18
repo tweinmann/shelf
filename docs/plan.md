@@ -100,9 +100,9 @@ Decided in Phase 5 (2026-09-18):
 | Question | Decision |
 |---|---|
 | Host names | **`<app><host-suffix>.<domain>`**, with the suffix set per cluster (`-dev` in development, empty on the mini). Cloudflare's free Universal SSL covers `domain.tld` and `*.domain.tld`, but not `*.dev.domain.tld`, so a second level would need a paid certificate. The suffix keeps every host one level deep and lets both clusters share one zone. |
-| DNS ownership | **One external-dns per cluster**, with `txtOwnerId` and `domainFilters` from the cluster settings, so neither deletes the other's records. |
+| DNS records | **shelf writes them itself** through the Cloudflare API: `shelf app add` publishes `<app><suffix>.<domain>` as a proxied CNAME to the tunnel, `shelf app rm` removes it, and `shelf init expose` publishes the apps that already run. external-dns was installed first and then dropped: a host name belongs to exactly one app, and apps only come and go through shelf, so the generic watcher solved a problem shelf does not have — at the price of a token with DNS rights living in the cluster. Now that token stays on the operator's machine. The cost is drift when an app is removed past shelf; `shelf init expose` reconciles again. |
 | Tunnel | **Locally managed, created through the API** by `shelf init expose`, named `shelf<host-suffix>`. shelf generates the tunnel secret, keeps the credentials in the cluster, and never stores them elsewhere. A tunnel that exists without credentials in the cluster is replaced after asking, because Cloudflare hands out the secret only once. |
-| Exposure is optional | The platform carries cloudflared and external-dns in a **ResourceSet that stays empty** until `shelf init expose` creates its input provider, so a cluster runs unexposed until it is exposed. |
+| Exposure is optional | The platform carries cloudflared in a **ResourceSet that stays empty** until `shelf init expose` creates its input provider, so a cluster runs unexposed until it is exposed. |
 | Webhook receiver | **Dropped, not moved again.** Polling reaches the app in about 80 s end to end; a receiver would need a public endpoint with a token and two secrets in every tenant repository, which is the knowledge Phase 4b removed. |
 
 ## Validated assumptions
@@ -118,12 +118,11 @@ These close three of the four original spikes:
    counterexample (Azure/AKS#836) only shows that `kubectl describe` prints the spec.
 2. **Colima**: `--kubernetes-disable traefik --kubernetes-disable servicelb`.
    `--k3s-arg=--disable=…` is unreliable according to abiosoft/colima#1222.
-3. **external-dns + tunnel**: without servicelb, Traefik has no LB address and external-dns
-   would have nothing to publish. The Ingress must carry
-   `external-dns.kubernetes.io/target: <tunnel-uuid>.cfargotunnel.com` and
-   `external-dns.kubernetes.io/cloudflare-proxied: "true"`. (external-dns 0.22 reads the prefix
-   `external-dns.kubernetes.io/`; the older `external-dns.alpha.kubernetes.io/` from the
-   original draft is ignored. Both sides pin the prefix.)
+3. **DNS for a tunnel**: a record that points at `<tunnel-uuid>.cfargotunnel.com` only works
+   when it is proxied; the name does not resolve on its own, and the certificate comes from
+   Cloudflare. shelf therefore writes proxied CNAMEs (originally this was external-dns with the
+   annotations `external-dns.kubernetes.io/target` and `.../cloudflare-proxied`; see the Phase 5
+   decisions for why it was dropped).
 4. **GHCR fine-grained PATs** still lack package-read permission for Docker pulls
    (community discussion #177617, open as of January 2026) → classic PAT.
 5. **kro could iterate** (`forEach` since 0.9.x, Simple Schema supports `map[string]MyType`),
@@ -391,7 +390,7 @@ In development, k3d plays the same role — see the development environment abov
 | App registration | Flux Operator `ResourceSet` + `ResourceSetInputProvider` |
 | Ingress | Traefik (Helm, ClusterIP — no LoadBalancer) |
 | Exposure | `cloudflared` in-cluster, one catch-all rule pointing at Traefik |
-| DNS | external-dns, Cloudflare provider |
+| DNS | one proxied CNAME per app, written by the CLI through the Cloudflare API |
 
 Platform components are installed by Flux from an OCI artifact of the shelf release: the
 directory `platform/` (a kustomization), pushed with `flux push artifact`. `shelf init cluster`
@@ -635,8 +634,9 @@ shelf/
                               server-side apply and readiness waits
   charts/shelf-app/           the generic app chart
   platform/                   Flux-managed platform manifests (→ OCI artifact)
-    traefik/                  Phase 3; cloudflared/ and external-dns/ follow in Phase 5
-    apps/                     the ResourceSet (Phase 4)
+    traefik/                  Phase 3
+    apps/                     the ResourceSet for apps (Phase 4)
+    expose/                   the ResourceSet for cloudflared (Phase 5)
   .github/workflows/
     ci.yml                    level-1 checks and level-2 smoke tests in the devcontainer image
     build.yml                 reusable tenant workflow (build-plan, render, push artifact)

@@ -128,14 +128,21 @@ secrets that were added to app.yaml since, and keeps all existing values.`,
 				fmt.Fprintf(out, "secret backup: %s\n", backup.Path(name))
 			}
 
-			return addApp(cmd.Context(), t.config, cluster.AppOptions{
+			publisher, err := newDNS(cmd.Context(), t.config, out)
+			if err != nil {
+				return err
+			}
+			if err := addApp(cmd.Context(), t.config, cluster.AppOptions{
 				Name:     name,
 				Artifact: artifact,
 				Insecure: insecure,
 				Secrets:  values,
 				Timeout:  target.timeout,
 				Out:      out,
-			})
+			}); err != nil {
+				return err
+			}
+			return publisher.publish(cmd.Context(), name, out)
 		},
 	}
 	cmd.Flags().BoolVar(&insecure, "insecure-registry", false, "pull the deploy artifact without TLS (dev registry)")
@@ -172,8 +179,15 @@ cluster. The secret backup on this machine is kept.`,
 					return errAborted
 				}
 			}
+			publisher, err := newDNS(cmd.Context(), t.config, out)
+			if err != nil {
+				return err
+			}
 			found, err := removeApp(cmd.Context(), t.config, name, target.timeout, out)
 			if err != nil {
+				return err
+			}
+			if err := publisher.withdraw(cmd.Context(), name, out); err != nil {
 				return err
 			}
 			if !found {

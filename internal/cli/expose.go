@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -25,12 +26,16 @@ var (
 	clusterSettings   = cluster.ClusterSettings
 	tunnelCredentials = cluster.TunnelCredentials
 	exposeCluster     = cluster.Expose
+	appNames          = cluster.AppNames
 	newCloudflare     = func(token string) cloudflareAPI { return cloudflare.New(token) }
 )
 
 // cloudflareAPI is the part of the Cloudflare API shelf uses.
 type cloudflareAPI interface {
 	VerifyToken(ctx context.Context) error
+	ZoneFor(ctx context.Context, name string) (*cloudflare.Zone, error)
+	EnsureRecord(ctx context.Context, zone, name, target string) (cloudflare.Action, error)
+	DeleteRecord(ctx context.Context, zone, name string) (bool, error)
 	AccountID(ctx context.Context) (string, error)
 	FindTunnel(ctx context.Context, account, name string) (*cloudflare.Tunnel, error)
 	CreateTunnel(ctx context.Context, account, name string) (*cloudflare.Tunnel, []byte, error)
@@ -40,7 +45,6 @@ type cloudflareAPI interface {
 func newInitExposeCmd() *cobra.Command {
 	var (
 		tunnelName string
-		owner      string
 		target     clusterFlags
 	)
 	cmd := &cobra.Command{
@@ -76,16 +80,12 @@ holds its credentials.`,
 			if tunnelName == "" {
 				tunnelName = "shelf" + settings.HostSuffix
 			}
-			if owner == "" {
-				owner = tunnelName
-			}
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintln(out, "Exposing the apps of:")
 			t.print(out)
 			fmt.Fprintf(out, "  hosts     %s\n", "<app>"+settings.HostSuffix+"."+settings.Domain)
 			fmt.Fprintf(out, "  tunnel    %s\n", tunnelName)
-			fmt.Fprintf(out, "  dns owner %s\n", owner)
 
 			api := newCloudflare(token)
 			if err := api.VerifyToken(cmd.Context()); err != nil {
@@ -111,23 +111,49 @@ holds its credentials.`,
 					return errAborted
 				}
 			}
-			return exposeCluster(cmd.Context(), t.config, cluster.ExposeOptions{
+			if err := exposeCluster(cmd.Context(), t.config, cluster.ExposeOptions{
 				TunnelID:    tunnel.ID,
 				Credentials: credentials,
-				APIToken:    token,
-				Owner:       owner,
-				Domain:      settings.Domain,
 				Timeout:     target.timeout,
 				Out:         out,
-			})
+			}); err != nil {
+				return err
+			}
+			// The apps that already run get their host names now; later ones are published by
+			// `shelf app add`.
+			return publishApps(cmd.Context(), t.config, api, settings, tunnel.Target(), out)
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&tunnelName, "tunnel", "", "name of the Cloudflare tunnel (default: shelf<host suffix>)")
-	f.StringVar(&owner, "dns-owner", "",
-		"identifier external-dns writes into its TXT records, so clusters can share a zone (default: the tunnel name)")
 	target.register(f)
 	return cmd
+}
+
+// publishApps points the host name of every app in this cluster at the tunnel, so an exposure
+// that is set up or renewed later reaches the apps that are already running.
+func publishApps(ctx context.Context, cfg *rest.Config, api cloudflareAPI, settings cluster.Settings,
+	tunnelTarget string, out io.Writer) error {
+	apps, err := appNames(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if len(apps) == 0 {
+		return nil
+	}
+	zone, err := api.ZoneFor(ctx, settings.Domain)
+	if err != nil {
+		return err
+	}
+	for _, app := range apps {
+		host := appHost(settings, app)
+		action, err := api.EnsureRecord(ctx, zone.ID, host, tunnelTarget)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "DNS %s -> %s: %s\n", host, tunnelTarget, action)
+	}
+	return nil
 }
 
 // findOrCreateTunnel returns the tunnel to use and, if it was created, its credentials. A tunnel
