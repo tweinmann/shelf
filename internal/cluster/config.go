@@ -87,12 +87,20 @@ func (c *client) settings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
+	return ParseSettings(data), nil
+}
+
+// ParseSettings reads back what ConfigObjects wrote. Every command that writes the settings has
+// to read all of them first, or it would reset the ones it does not know about.
+func ParseSettings(data map[string]string) Settings {
+	insecure, _ := strconv.ParseBool(data["SHELF_INSECURE_REGISTRY"])
 	return Settings{
-		Domain:       data["SHELF_DOMAIN"],
-		HostSuffix:   data["SHELF_HOST_SUFFIX"],
-		TunnelTarget: data["SHELF_TUNNEL_TARGET"],
-		Chart:        Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
-	}, nil
+		Domain:           data["SHELF_DOMAIN"],
+		HostSuffix:       data["SHELF_HOST_SUFFIX"],
+		TunnelTarget:     data["SHELF_TUNNEL_TARGET"],
+		Chart:            Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
+		InsecureRegistry: insecure,
+	}
 }
 
 // RegistrySecret returns the registry credential. Without auth it holds no login, which still

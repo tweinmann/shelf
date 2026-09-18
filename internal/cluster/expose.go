@@ -124,6 +124,15 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 			return err
 		}
 	}
+	// Every app's ingress is annotated with the tunnel target, which the platform substitutes
+	// from the settings; without this the apps would follow only at the next interval.
+	err = c.step(ctx, out, "the platform", func(ctx context.Context) (string, error) {
+		_, err := c.reconcileAndWait(ctx, platformSync, readyCondition)
+		return "", err
+	})
+	if err != nil {
+		return err
+	}
 
 	err = c.step(ctx, out, "the tunnel", func(ctx context.Context) (string, error) {
 		return "", c.waitFor(ctx, ref{gvk: deploymentGVK, namespace: SystemNamespace, name: CloudflaredName}, current)

@@ -270,3 +270,32 @@ func TestFailOnAuthError(t *testing.T) {
 		})
 	}
 }
+
+// TestSettingsRoundTrip guards against a command resetting settings it does not know: whatever
+// ConfigObjects writes must come back unchanged.
+func TestSettingsRoundTrip(t *testing.T) {
+	chart, err := ParseArtifact("oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Settings{
+		Domain:           "example.com",
+		HostSuffix:       "-dev",
+		TunnelTarget:     "abc-123.cfargotunnel.com",
+		Chart:            chart,
+		InsecureRegistry: true,
+	}
+	var data map[string]string
+	for _, obj := range ConfigObjects(want) {
+		if obj.GetKind() != "ConfigMap" {
+			continue
+		}
+		data, _, _ = unstructured.NestedStringMap(obj.Object, "data")
+	}
+	if got := ParseSettings(data); got != want {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if got := ParseSettings(nil); got != (Settings{}) {
+		t.Errorf("a cluster without settings must read as zero, got %+v", got)
+	}
+}

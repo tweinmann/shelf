@@ -32,6 +32,10 @@ var (
 	kustomizationGVK = schema.GroupVersionKind{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"}
 )
 
+// platformSync is the Kustomization the Flux Operator creates for the platform artifact. It
+// substitutes the cluster settings, so it has to run again after they change.
+var platformSync = ref{gvk: kustomizationGVK, namespace: FluxNamespace, name: PlatformSyncName}
+
 // Install installs or updates the Flux Operator and the FluxInstance, and waits until Flux has
 // applied the platform artifact and everything in it is ready. It is idempotent: a second run
 // reports every object as unchanged.
@@ -217,8 +221,7 @@ func (c *client) waitForPlatform(ctx context.Context, p Artifact) (string, error
 
 	// The settings are substituted into the platform, so a changed ConfigMap has to be applied
 	// even when the artifact itself did not change.
-	ks := ref{gvk: kustomizationGVK, namespace: FluxNamespace, name: PlatformSyncName}
-	if _, err := c.reconcileAndWait(ctx, ks, appliedRevision(revision)); err != nil {
+	if _, err := c.reconcileAndWait(ctx, platformSync, appliedRevision(revision)); err != nil {
 		return "", err
 	}
 	return "applied " + revision, nil

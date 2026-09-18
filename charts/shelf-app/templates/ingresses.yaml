@@ -32,9 +32,11 @@ metadata:
     traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s@kubernetescrd" $.Release.Namespace $compName }}
     {{- end }}
     {{- with $.Values.platform.tunnelTarget }}
-    # The cluster has no load balancer, so external-dns publishes the tunnel instead.
-    external-dns.alpha.kubernetes.io/target: {{ . | quote }}
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    # The cluster has no load balancer, so external-dns publishes the tunnel instead. The
+    # platform pins external-dns to this annotation prefix; the older external-dns.alpha
+    # prefix is not read by the version shelf installs.
+    external-dns.kubernetes.io/target: {{ . | quote }}
+    external-dns.kubernetes.io/cloudflare-proxied: "true"
     {{- end }}
   {{- end }}
 spec:

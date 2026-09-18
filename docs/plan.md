@@ -120,8 +120,10 @@ These close three of the four original spikes:
    `--k3s-arg=--disable=…` is unreliable according to abiosoft/colima#1222.
 3. **external-dns + tunnel**: without servicelb, Traefik has no LB address and external-dns
    would have nothing to publish. The Ingress must carry
-   `external-dns.alpha.kubernetes.io/target: <tunnel-uuid>.cfargotunnel.com` and
-   `external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"`.
+   `external-dns.kubernetes.io/target: <tunnel-uuid>.cfargotunnel.com` and
+   `external-dns.kubernetes.io/cloudflare-proxied: "true"`. (external-dns 0.22 reads the prefix
+   `external-dns.kubernetes.io/`; the older `external-dns.alpha.kubernetes.io/` from the
+   original draft is ignored. Both sides pin the prefix.)
 4. **GHCR fine-grained PATs** still lack package-read permission for Docker pulls
    (community discussion #177617, open as of January 2026) → classic PAT.
 5. **kro could iterate** (`forEach` since 0.9.x, Simple Schema supports `map[string]MyType`),

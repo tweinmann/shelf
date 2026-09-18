@@ -131,6 +131,9 @@ spec:
                   name: cloudflare
                   key: api-token
           sources: [ingress]
+          # Pinned, so a new default in external-dns cannot silently ignore the annotations the
+          # shelf-app chart writes.
+          annotationPrefix: external-dns.kubernetes.io/
           policy: sync
           registry: txt
           # Every cluster owns only its own records, so clusters can share a zone.

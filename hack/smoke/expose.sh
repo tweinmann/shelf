@@ -54,7 +54,7 @@ target="$(sed -n 's/.*target *\(.*\.cfargotunnel\.com\).*/\1/p' "$work/expose.tx
 
 step "the ingress of $app carries the tunnel as its target"
 annotated() {
-  kubectl -n "$app" get ingress -o jsonpath='{.items[*].metadata.annotations.external-dns\.alpha\.kubernetes\.io/target}' \
+  kubectl -n "$app" get ingress -o jsonpath='{.items[*].metadata.annotations.external-dns\.kubernetes\.io/target}' \
     | grep -q "$target"
 }
 retry 120 annotated || die "no ingress points at $target; the app has to be redeployed by Flux"
@@ -73,11 +73,14 @@ owner="$(cf "/zones/$zone/dns_records?type=TXT" | jq -r --arg h "$host" '.result
 [[ -n "$owner" ]] || die "external-dns left no ownership record for $host"
 
 step "the app answers over HTTPS"
-answers() { curl -fsS --max-time 10 "https://$host/" >"$work/answer.txt"; }
+# Resolve through Cloudflare's DoH endpoint: the container's resolver caches the answer from
+# before the record existed, which would keep failing long after the name works.
+answers() { curl -fsS --max-time 10 --doh-url https://cloudflare-dns.com/dns-query "https://$host/" >"$work/answer.txt"; }
 start=$SECONDS
 retry 180 answers || die "https://$host/ did not answer within 3 minutes"
 echo "reachable after $((SECONDS - start)) s"
 head -1 "$work/answer.txt"
-curl -sS -o /dev/null -w 'TLS: %{ssl_verify_result} (0 = valid), HTTP %{http_code} via %{scheme}\n' "https://$host/"
+curl -sS -o /dev/null --doh-url https://cloudflare-dns.com/dns-query \
+  -w 'TLS: %{ssl_verify_result} (0 = valid), HTTP %{http_code} via %{scheme}\n' "https://$host/"
 
 echo "PASS: tunnel up, DNS record and TXT owner published, app reachable over HTTPS as $host"
