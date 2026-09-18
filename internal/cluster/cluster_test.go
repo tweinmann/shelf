@@ -299,3 +299,49 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Errorf("a cluster without settings must read as zero, got %+v", got)
 	}
 }
+
+func TestOldHostWarning(t *testing.T) {
+	dev := Settings{Domain: "example.com", HostSuffix: "-dev"}
+	apps := []string{"greeter", "shop"}
+	tests := []struct {
+		name   string
+		before Settings
+		after  Settings
+		apps   []string
+		want   []string
+	}{
+		{
+			name:   "domain changed",
+			before: dev,
+			after:  Settings{Domain: "other.example", HostSuffix: "-dev"},
+			apps:   apps,
+			want:   []string{"greeter-dev.example.com", "shop-dev.example.com", "<app>-dev.other.example"},
+		},
+		{
+			name:   "suffix removed",
+			before: dev,
+			after:  Settings{Domain: "example.com"},
+			apps:   []string{"greeter"},
+			want:   []string{"greeter-dev.example.com"},
+		},
+		{name: "nothing changed", before: dev, after: dev, apps: apps},
+		{name: "no apps yet", before: dev, after: Settings{Domain: "other.example"}},
+		{name: "first run", before: Settings{}, after: dev, apps: apps},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := OldHostWarning(tt.before, tt.after, tt.apps)
+			if len(tt.want) == 0 {
+				if got != "" {
+					t.Fatalf("unexpected warning:\n%s", got)
+				}
+				return
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("warning lacks %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}

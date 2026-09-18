@@ -83,13 +83,16 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	}
 
 	settings := opts.Settings
+	current, err := c.settings(ctx)
+	if err != nil {
+		return err
+	}
 	if settings.TunnelTarget == "" {
 		// `shelf init expose` writes the tunnel target; a later `init cluster` keeps it.
-		current, err := c.settings(ctx)
-		if err != nil {
-			return err
-		}
 		settings.TunnelTarget = current.TunnelTarget
+	}
+	if err := c.warnAboutOldHosts(ctx, out, current, settings); err != nil {
+		return err
 	}
 	for _, obj := range ConfigObjects(settings) {
 		action, err := c.apply(ctx, obj)
@@ -148,6 +151,43 @@ func (c *client) ensureRegistrySecret(ctx context.Context, out io.Writer, auth *
 	}
 	fmt.Fprintf(out, "%s: %s, %s\n", describe(secret), action, login)
 	return nil
+}
+
+// warnAboutOldHosts points out the DNS records an app keeps under its previous name when the
+// domain or the host suffix changes.
+func (c *client) warnAboutOldHosts(ctx context.Context, out io.Writer, before, after Settings) error {
+	if !hostsChange(before, after) {
+		return nil
+	}
+	apps, err := c.appNames(ctx)
+	if err != nil {
+		return err
+	}
+	if warning := OldHostWarning(before, after, apps); warning != "" {
+		fmt.Fprint(out, warning)
+	}
+	return nil
+}
+
+// hostsChange reports whether apps answer under a different name after the change.
+func hostsChange(before, after Settings) bool {
+	return before.Domain != "" && (before.Domain != after.Domain || before.HostSuffix != after.HostSuffix)
+}
+
+// OldHostWarning names the DNS records the apps keep under their previous host names. shelf
+// only knows the current names, so it cannot remove those records by itself.
+func OldHostWarning(before, after Settings, apps []string) string {
+	if !hostsChange(before, after) || len(apps) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The apps move from %s to %s.\n",
+		"<app>"+before.HostSuffix+"."+before.Domain, "<app>"+after.HostSuffix+"."+after.Domain)
+	fmt.Fprintln(&b, "Their records under the old name stay behind; delete them in Cloudflare:")
+	for _, app := range apps {
+		fmt.Fprintf(&b, "  %s%s.%s\n", app, before.HostSuffix, before.Domain)
+	}
+	return b.String()
 }
 
 func (c *client) applyAll(ctx context.Context, objs []*unstructured.Unstructured, actions map[Action]int) error {

@@ -283,6 +283,9 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
   names must not end with `-headless`.
 - **Secrets:** only generated secrets (`generate: true`) are supported for now. Generated
   values are URL-safe, so you can put them into connection strings as they are.
+- **Changing the domain** of a cluster renames every app: `shelf init cluster --domain <new>`
+  moves them to `<app>.<new>` and lists the DNS records that stay behind under the old name, so
+  you can delete them. Running `shelf app rm` for each app before the change avoids that.
 
 ## CLI reference
 

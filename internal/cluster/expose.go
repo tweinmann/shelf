@@ -131,6 +131,10 @@ func AppNames(ctx context.Context, cfg *rest.Config) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.appNames(ctx)
+}
+
+func (c *client) appNames(ctx context.Context) ([]string, error) {
 	ri, err := c.resource(providerGVK, SystemNamespace)
 	if err != nil {
 		return nil, err

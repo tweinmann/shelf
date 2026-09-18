@@ -1120,6 +1120,10 @@ Results (2026-09-18):
   source of every app to fetch again; without it a chart change waits an hour.
 - A name that is queried before it exists stays negative in resolvers for 30 minutes (the zone's
   SOA minimum), which cost time twice. `just smoke-expose` therefore resolves through DoH.
+- Changing the domain or the host suffix of a cluster moves every app to a new name, and the
+  records under the old name stay behind: shelf writes records for the names it knows, and it no
+  longer knows the old ones. `shelf init cluster` therefore lists them and says to delete them.
+  Removing the apps before the change avoids the leftovers altogether.
 - Found by CI afterwards: a cluster without `--host-suffix` stores an empty setting, which the
   platform substitutes as an empty value and YAML reads as null, so the chart rendered
   `hello%!s(<nil>).dev.local` and every install failed. Locally the suffix was always set, so
