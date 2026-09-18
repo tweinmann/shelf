@@ -1120,6 +1120,11 @@ Results (2026-09-18):
   source of every app to fetch again; without it a chart change waits an hour.
 - A name that is queried before it exists stays negative in resolvers for 30 minutes (the zone's
   SOA minimum), which cost time twice. `just smoke-expose` therefore resolves through DoH.
+- Found by CI afterwards: a cluster without `--host-suffix` stores an empty setting, which the
+  platform substitutes as an empty value and YAML reads as null, so the chart rendered
+  `hello%!s(<nil>).dev.local` and every install failed. Locally the suffix was always set, so
+  only the `cluster` job saw it. The substitution is quoted and the chart defaults the suffix
+  now, with a chart test for the null case.
 
 Design:
 
