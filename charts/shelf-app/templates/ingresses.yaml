@@ -2,7 +2,8 @@
 One Ingress per routed component, all on the host <app><hostSuffix>.<domain>. Traefik attaches
 middlewares to a whole Ingress, so a separate object per component keeps stripPrefix per route.
 */ -}}
-{{- $host := printf "%s%s.%s" .Values.name .Values.platform.hostSuffix .Values.platform.domain }}
+{{- /* The suffix may arrive as null when the platform substitutes an empty setting. */ -}}
+{{- $host := printf "%s%s.%s" .Values.name (.Values.platform.hostSuffix | default "") .Values.platform.domain }}
 {{- range $compName, $comp := .Values.components }}
 {{- $ctx := dict "root" $ "app" $.Values.name "component" $compName }}
 {{- with $comp.route }}

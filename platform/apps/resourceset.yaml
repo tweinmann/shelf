@@ -147,7 +147,9 @@ spec:
         values:
           platform:
             domain: ${SHELF_DOMAIN}
-            hostSuffix: ${SHELF_HOST_SUFFIX:=}
+            # Quoted: an empty setting would otherwise become null, and the chart would render
+            # the host name with a "<nil>" in it.
+            hostSuffix: "${SHELF_HOST_SUFFIX:=}"
             imagePullSecret: shelf-registry
         install:
           remediation:

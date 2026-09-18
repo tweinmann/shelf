@@ -111,6 +111,13 @@ func TestTemplate(t *testing.T) {
 			platform: "platform:\n  domain: dev.local\n",
 		},
 		{
+			// The platform substitutes an unset host suffix as an empty value, which YAML
+			// reads as null; the host name must not carry a "<nil>" then.
+			name:     "empty-host-suffix",
+			app:      "../../examples/hello/app.yaml",
+			platform: "platform:\n  domain: dev.local\n  hostSuffix:\n",
+		},
+		{
 			name:     "exposed",
 			app:      "../../examples/hello/app.yaml",
 			platform: "platform:\n  domain: example.com\n  hostSuffix: -dev\n  tunnelTarget: 1234abcd.cfargotunnel.com\n",
