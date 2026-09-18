@@ -83,8 +83,8 @@ one starts.
 | 2 | Helm chart `shelf-app` | ✅ done |
 | 3 | `shelf init cluster`: Flux, Traefik | ✅ done |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | ✅ done |
-| 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | 🔍 in review |
-| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | planned |
+| 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | ✅ done |
+| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | 🔧 in progress |
 | 6 | Installation on the Mac mini | planned |
 | 7 | Reference apps | planned |
 
@@ -292,9 +292,10 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 | `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <component>=<reference>` supplies the image of a component with a `build` directory. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
 | `shelf build-plan <app.yaml>` | Prints the app name and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
-| `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
+| `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. `--host-suffix -dev` separates clusters that share a DNS zone: apps are then reachable at `<app>-dev.<domain>`. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
 | `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes and secrets, after asking. The secret backup stays. |
+| `shelf init expose` | Connects the cluster to Cloudflare: finds or creates the tunnel, runs cloudflared with one rule to Traefik, and lets external-dns publish one DNS record per app. The API token comes from `CF_API_TOKEN`. |
 | `shelf version` | Prints the version. |
 
 Example of an error message:
@@ -333,7 +334,7 @@ Useful commands:
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
 | `just platform-push`, `just chart-push`, `just init-cluster` | Push `platform/` and the chart to the local registry and install them with `shelf init cluster` |
 | `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, and `shelf app add`/`rm` with rollouts from the local registry |
-| `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>` | Smoke tests that need a GHCR login: a private image pull, and a real tenant repository end to end |
+| `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>`, `just smoke-expose <app>` | Smoke tests that need credentials: a private image pull, a real tenant repository end to end, and the Cloudflare tunnel |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |
 
 On your machine's Docker daemon, shelf only creates the devcontainer with its image and

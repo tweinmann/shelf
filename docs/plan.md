@@ -95,6 +95,16 @@ Decided in Phase 4b (2026-09-17), after the Phase 4 acceptance:
 | shelf in the tenant CI | **Stays, but as a release binary.** `release.yml` publishes binaries, the chart and the platform artifact per tag; the workflow downloads the pinned binary in seconds instead of building it. Rendering in the cluster was considered and rejected: it would move a tested renderer into Helm templates, lose the checks in the pull request, and rebuild digest pinning in shell, without reducing what the tenant repository knows. |
 | Workflow reference | **A moving major tag** (`@v0`, later `@v1`), maintained by the release, so tenants do not track versions. |
 
+Decided in Phase 5 (2026-09-18):
+
+| Question | Decision |
+|---|---|
+| Host names | **`<app><host-suffix>.<domain>`**, with the suffix set per cluster (`-dev` in development, empty on the mini). Cloudflare's free Universal SSL covers `domain.tld` and `*.domain.tld`, but not `*.dev.domain.tld`, so a second level would need a paid certificate. The suffix keeps every host one level deep and lets both clusters share one zone. |
+| DNS ownership | **One external-dns per cluster**, with `txtOwnerId` and `domainFilters` from the cluster settings, so neither deletes the other's records. |
+| Tunnel | **Locally managed, created through the API** by `shelf init expose`, named `shelf<host-suffix>`. shelf generates the tunnel secret, keeps the credentials in the cluster, and never stores them elsewhere. A tunnel that exists without credentials in the cluster is replaced after asking, because Cloudflare hands out the secret only once. |
+| Exposure is optional | The platform carries cloudflared and external-dns in a **ResourceSet that stays empty** until `shelf init expose` creates its input provider, so a cluster runs unexposed until it is exposed. |
+| Webhook receiver | **Dropped, not moved again.** Polling reaches the app in about 80 s end to end; a receiver would need a public endpoint with a token and two secrets in every tenant repository, which is the knowledge Phase 4b removed. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -1085,6 +1095,29 @@ Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with 
 mini is not needed for this.
 **Acceptance:** the example app is reachable from outside over HTTPS from the dev cluster;
 `dig` shows a CNAME to `<uuid>.cfargotunnel.com`.
+
+Design:
+
+- `shelf init cluster` gains `--host-suffix`; the settings carry `SHELF_HOST_SUFFIX` and
+  `SHELF_TUNNEL_TARGET`, and the chart renders the host `<app><suffix>.<domain>` plus the
+  external-dns annotations (`target`, `cloudflare-proxied`) whenever a target is set. A later
+  `init cluster` keeps the tunnel target that `init expose` wrote.
+- `internal/cloudflare` is a small API client (no SDK): accounts, find, create and delete
+  tunnels. `shelf init expose` reads `CF_API_TOKEN` (and `CF_ACCOUNT_ID` when the token sees
+  several accounts), stores the tunnel credentials and the token as Secrets in `shelf-system`,
+  writes the tunnel target into the settings and creates the input provider `expose`.
+- `platform/expose` turns that provider into cloudflared (one rule to
+  `traefik.traefik.svc.cluster.local:80`, credentials from the Secret, restarted through
+  `checksumFrom` when they change) and an external-dns HelmRelease (chart 1.22.0 from the
+  upstream Helm repository, provider cloudflare, `sources: [ingress]`, `policy: sync`).
+
+Steps:
+
+1. Host suffix and tunnel target in settings, chart and ResourceSet
+2. `internal/cloudflare`, `shelf init expose`, `platform/expose`
+3. Level 1 tests; the platform without the provider generates nothing (checked in the dev
+   cluster)
+4. `just smoke-expose <app>`: expose, then DNS record, ownership record and HTTPS
 
 ### Phase 6 – Mac mini
 `shelf init host`: preflight (Apple Silicon, RAM, disk, macOS version, Rosetta, Homebrew, tool

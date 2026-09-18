@@ -20,10 +20,10 @@ Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md
 Phase 4 complete: deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`, reusable workflow,
 level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push reached the app in
 173 s.
-Phase 4b complete (awaiting approval): `build: ./web`, `shelf build-plan`,
-`shelf render --image`, `release.yml`. Release `v0.1.0` published; a push in the tenant repo
-reached the app in 81 s. A tenant repo now holds `app.yaml` plus one boilerplate workflow.
-Next: Phase 5 (`shelf init expose`: Cloudflare Tunnel, DNS, Flux Receiver), once approved.
+Phase 4b complete: `build: ./web`, `shelf build-plan`, `shelf render --image`, `release.yml`;
+releases `v0.1.0` and `v0.2.0` published. A tenant repo holds `app.yaml` plus one boilerplate
+workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the registry.
+In progress: Phase 5 (`shelf init expose`: Cloudflare Tunnel, cloudflared, external-dns).
 
 ## Working agreements
 
@@ -71,6 +71,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
+| `just smoke-expose <app>` | devcontainer | Phase 5 acceptance: `shelf init expose`, DNS record and HTTPS; asks for the Cloudflare API token |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules

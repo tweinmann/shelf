@@ -147,6 +147,8 @@ spec:
         values:
           platform:
             domain: ${SHELF_DOMAIN}
+            hostSuffix: ${SHELF_HOST_SUFFIX:=}
+            tunnelTarget: ${SHELF_TUNNEL_TARGET:=}
             imagePullSecret: shelf-registry
         install:
           remediation:

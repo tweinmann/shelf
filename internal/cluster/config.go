@@ -1,12 +1,16 @@
 package cluster
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+var configMapGVK = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 
 const (
 	// SystemNamespace holds the app providers, their secrets and the registry credential.
@@ -26,8 +30,15 @@ const (
 
 // Settings are the per-cluster values the platform needs.
 type Settings struct {
-	// Domain: apps are reachable at <app>.<domain>.
+	// Domain: apps are reachable at <app><HostSuffix>.<domain>.
 	Domain string
+	// HostSuffix separates clusters that share a zone, e.g. "-dev". Cloudflare's free
+	// certificate covers one level of subdomain, so the suffix goes into the app label rather
+	// than into another level.
+	HostSuffix string
+	// TunnelTarget is what external-dns points the DNS records at,
+	// <tunnel-uuid>.cfargotunnel.com. Empty until `shelf init expose` ran.
+	TunnelTarget string
 	// Chart is the shelf-app chart every app is installed with.
 	Chart Artifact
 	// InsecureRegistry allows platform and chart registries without TLS.
@@ -59,12 +70,29 @@ func ConfigObjects(s Settings) []*unstructured.Unstructured {
 			"metadata":   map[string]any{"name": ConfigName, "namespace": FluxNamespace},
 			"data": map[string]any{
 				"SHELF_DOMAIN":            s.Domain,
+				"SHELF_HOST_SUFFIX":       s.HostSuffix,
+				"SHELF_TUNNEL_TARGET":     s.TunnelTarget,
 				"SHELF_CHART_URL":         s.Chart.URL,
 				"SHELF_CHART_TAG":         s.Chart.Tag,
 				"SHELF_INSECURE_REGISTRY": strconv.FormatBool(s.InsecureRegistry),
 			},
 		}},
 	}
+}
+
+// settings returns the cluster settings stored in the cluster, or zero values if there are none.
+func (c *client) settings(ctx context.Context) (Settings, error) {
+	obj, err := c.get(ctx, ref{gvk: configMapGVK, namespace: FluxNamespace, name: ConfigName})
+	if err != nil || obj == nil {
+		return Settings{}, err
+	}
+	data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
+	return Settings{
+		Domain:       data["SHELF_DOMAIN"],
+		HostSuffix:   data["SHELF_HOST_SUFFIX"],
+		TunnelTarget: data["SHELF_TUNNEL_TARGET"],
+		Chart:        Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
+	}, nil
 }
 
 // RegistrySecret returns the registry credential. Without auth it holds no login, which still

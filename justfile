@@ -91,6 +91,10 @@ smoke-init:
 smoke-apps:
     hack/smoke/apps.sh
 
+# Phase 5 acceptance: expose the dev cluster through Cloudflare (asks for the API token)
+smoke-expose app:
+    hack/smoke/expose.sh {{app}}
+
 # Phase 4 acceptance with a real tenant repository and GHCR (asks for the GHCR login)
 smoke-tenant app artifact:
     hack/smoke/tenant.sh {{app}} {{artifact}}

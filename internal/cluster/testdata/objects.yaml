@@ -11,7 +11,9 @@ data:
   SHELF_CHART_TAG: 0.0.0-dev
   SHELF_CHART_URL: oci://shelf-registry:5000/shelf/charts/shelf-app
   SHELF_DOMAIN: dev.local
+  SHELF_HOST_SUFFIX: ""
   SHELF_INSECURE_REGISTRY: "true"
+  SHELF_TUNNEL_TARGET: ""
 kind: ConfigMap
 metadata:
   name: shelf-config

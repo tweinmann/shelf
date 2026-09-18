@@ -78,7 +78,16 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 		return err
 	}
 
-	for _, obj := range ConfigObjects(opts.Settings) {
+	settings := opts.Settings
+	if settings.TunnelTarget == "" {
+		// `shelf init expose` writes the tunnel target; a later `init cluster` keeps it.
+		current, err := c.settings(ctx)
+		if err != nil {
+			return err
+		}
+		settings.TunnelTarget = current.TunnelTarget
+	}
+	for _, obj := range ConfigObjects(settings) {
 		action, err := c.apply(ctx, obj)
 		if err != nil {
 			return err

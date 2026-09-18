@@ -90,7 +90,7 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Set up the platform",
 	}
-	cmd.AddCommand(newInitClusterCmd())
+	cmd.AddCommand(newInitClusterCmd(), newInitExposeCmd())
 	return cmd
 }
 
@@ -122,11 +122,12 @@ func registryAuth() (*cluster.RegistryAuth, error) {
 
 func newInitClusterCmd() *cobra.Command {
 	var (
-		platform string
-		chart    string
-		domain   string
-		insecure bool
-		target   clusterFlags
+		platform   string
+		chart      string
+		domain     string
+		hostSuffix string
+		insecure   bool
+		target     clusterFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "cluster",
@@ -152,6 +153,10 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			if domain == "" || len(k8svalidation.IsDNS1123Subdomain(domain)) > 0 {
 				return fmt.Errorf("--domain must be a DNS name such as example.com")
 			}
+			// The suffix becomes part of a DNS label: <app><suffix>.<domain>.
+			if hostSuffix != "" && len(k8svalidation.IsDNS1123Label("a"+hostSuffix)) > 0 {
+				return fmt.Errorf("--host-suffix %q must fit into a host name, such as -dev", hostSuffix)
+			}
 			auth, err := registryAuth()
 			if err != nil {
 				return err
@@ -166,7 +171,7 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			t.print(out)
 			fmt.Fprintf(out, "  platform  %s\n", p)
 			fmt.Fprintf(out, "  chart     %s\n", c)
-			fmt.Fprintf(out, "  domain    %s\n", domain)
+			fmt.Fprintf(out, "  hosts     %s\n", "<app>"+hostSuffix+"."+domain)
 			if auth != nil {
 				fmt.Fprintf(out, "  registry  %s as %s\n", cluster.RegistryHost, auth.Username)
 			} else {
@@ -183,7 +188,13 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			}
 			return installCluster(cmd.Context(), t.config, cluster.Options{
 				Platform: p,
-				Settings: cluster.Settings{Domain: domain, Chart: c, InsecureRegistry: insecure},
+				// The tunnel target is written by `shelf init expose` and kept as it is here.
+				Settings: cluster.Settings{
+					Domain:           domain,
+					HostSuffix:       hostSuffix,
+					Chart:            c,
+					InsecureRegistry: insecure,
+				},
 				Registry: auth,
 				Timeout:  target.timeout,
 				Out:      out,
@@ -195,7 +206,9 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 		"platform artifact, oci://<registry>/<repository>:<tag> (default: "+DefaultPlatformRepository+":<shelf version>)")
 	f.StringVar(&chart, "chart", "",
 		"shelf-app chart, oci://<registry>/<repository>:<version> (default: "+DefaultChartRepository+":<shelf version>)")
-	f.StringVar(&domain, "domain", "", "apps are reachable at <app>.<domain> (required)")
+	f.StringVar(&domain, "domain", "", "apps are reachable at <app><host-suffix>.<domain> (required)")
+	f.StringVar(&hostSuffix, "host-suffix", "",
+		"suffix in the app's host name, e.g. -dev, to separate clusters that share a DNS zone")
 	f.BoolVar(&insecure, "insecure-registry", false, "pull platform and chart without TLS (dev registry)")
 	target.register(f)
 	return cmd

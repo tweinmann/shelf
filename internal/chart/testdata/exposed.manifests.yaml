@@ -1,0 +1,272 @@
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: db
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  type: ClusterIP
+  selector:
+    shelf.dev/app: hello
+    shelf.dev/component: db
+  ports:
+    - name: main
+      port: 5432
+      targetPort: main
+      protocol: TCP
+
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-headless
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: db
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  clusterIP: None
+  selector:
+    shelf.dev/app: hello
+    shelf.dev/component: db
+  ports:
+    - name: main
+      port: 5432
+      targetPort: main
+      protocol: TCP
+
+---
+# Source: shelf-app/templates/services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: web
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  type: ClusterIP
+  selector:
+    shelf.dev/app: hello
+    shelf.dev/component: web
+  ports:
+    - name: main
+      port: 80
+      targetPort: main
+      protocol: TCP
+
+---
+# Source: shelf-app/templates/workloads.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: check
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: check
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      shelf.dev/app: hello
+      shelf.dev/component: check
+  template:
+    metadata:
+      labels:
+        shelf.dev/app: hello
+        shelf.dev/component: check
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: check
+          image: "postgres:16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          command:
+            - "sh"
+            - "-c"
+          args:
+            - "while true; do psql \"$$DATABASE_URL\" -tAc 'select 1' && sleep 30 || sleep 5; done"
+          env:
+            - name: SHELF_SECRET_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shelf-secrets
+                  key: db-password
+            - name: DATABASE_URL
+              value: "postgres://app:$(SHELF_SECRET_DB_PASSWORD)@db:5432/hello"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              memory: "64Mi"
+
+---
+# Source: shelf-app/templates/workloads.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: web
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      shelf.dev/app: hello
+      shelf.dev/component: web
+  template:
+    metadata:
+      labels:
+        shelf.dev/app: hello
+        shelf.dev/component: web
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: web
+          image: "traefik/whoami:v1.11.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          ports:
+            - name: main
+              containerPort: 80
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: "/health"
+              port: main
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: "/health"
+              port: main
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              memory: "32Mi"
+
+---
+# Source: shelf-app/templates/workloads.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: db
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      shelf.dev/app: hello
+      shelf.dev/component: db
+  serviceName: db-headless
+  # Instances do not form a cluster, so they need not start one after the other.
+  podManagementPolicy: Parallel
+  persistentVolumeClaimRetentionPolicy:
+    whenScaled: Retain
+    whenDeleted: Delete
+  template:
+    metadata:
+      labels:
+        shelf.dev/app: hello
+        shelf.dev/component: db
+    spec:
+      # Service links would inject variables such as DB_PORT=tcp://... into every container.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: db
+          image: "postgres:16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          env:
+            - name: SHELF_SECRET_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shelf-secrets
+                  key: db-password
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+            - name: POSTGRES_DB
+              value: "hello"
+            - name: POSTGRES_PASSWORD
+              value: "$(SHELF_SECRET_DB_PASSWORD)"
+            - name: POSTGRES_USER
+              value: "app"
+          ports:
+            - name: main
+              containerPort: 5432
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "256Mi"
+          volumeMounts:
+            - name: data
+              mountPath: "/var/lib/postgresql/data"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          shelf.dev/app: hello
+          shelf.dev/component: db
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: "1Gi"
+
+---
+# Source: shelf-app/templates/ingresses.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  labels:
+    shelf.dev/app: hello
+    shelf.dev/component: web
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+  annotations:
+    # The cluster has no load balancer, so external-dns publishes the tunnel instead.
+    external-dns.alpha.kubernetes.io/target: "1234abcd.cfargotunnel.com"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: hello-dev.example.com
+      http:
+        paths:
+          - path: "/"
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: main

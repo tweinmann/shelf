@@ -1,7 +1,8 @@
 {{- /*
-One Ingress per routed component, all on the host <app>.<domain>. Traefik attaches middlewares
-to a whole Ingress, so a separate object per component keeps stripPrefix per route.
+One Ingress per routed component, all on the host <app><hostSuffix>.<domain>. Traefik attaches
+middlewares to a whole Ingress, so a separate object per component keeps stripPrefix per route.
 */ -}}
+{{- $host := printf "%s%s.%s" .Values.name .Values.platform.hostSuffix .Values.platform.domain }}
 {{- range $compName, $comp := .Values.components }}
 {{- $ctx := dict "root" $ "app" $.Values.name "component" $compName }}
 {{- with $comp.route }}
@@ -25,14 +26,21 @@ metadata:
   name: {{ $compName }}
   labels:
     {{- include "shelf-app.labels" $ctx | nindent 4 }}
-  {{- if .stripPrefix }}
+  {{- if or .stripPrefix $.Values.platform.tunnelTarget }}
   annotations:
+    {{- if .stripPrefix }}
     traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s@kubernetescrd" $.Release.Namespace $compName }}
+    {{- end }}
+    {{- with $.Values.platform.tunnelTarget }}
+    # The cluster has no load balancer, so external-dns publishes the tunnel instead.
+    external-dns.alpha.kubernetes.io/target: {{ . | quote }}
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    {{- end }}
   {{- end }}
 spec:
   ingressClassName: {{ $.Values.platform.ingressClassName }}
   rules:
-    - host: {{ printf "%s.%s" $.Values.name $.Values.platform.domain }}
+    - host: {{ $host }}
       http:
         paths:
           - path: {{ .path | quote }}

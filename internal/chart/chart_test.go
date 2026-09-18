@@ -111,6 +111,11 @@ func TestTemplate(t *testing.T) {
 			platform: "platform:\n  domain: dev.local\n",
 		},
 		{
+			name:     "exposed",
+			app:      "../../examples/hello/app.yaml",
+			platform: "platform:\n  domain: example.com\n  hostSuffix: -dev\n  tunnelTarget: 1234abcd.cfargotunnel.com\n",
+		},
+		{
 			name:     "features",
 			app:      "testdata/features.app.yaml",
 			platform: "platform:\n  domain: example.com\n  imagePullSecret: ghcr-pull\n",
@@ -123,7 +128,11 @@ func TestTemplate(t *testing.T) {
 			for _, api := range tt.apis {
 				args = append(args, "--api-versions", api)
 			}
-			out, err := helmTemplate(t, tt.name, args...)
+			namespace := tt.name
+			if tt.app == "../../examples/hello/app.yaml" {
+				namespace = "hello"
+			}
+			out, err := helmTemplate(t, namespace, args...)
 			if err != nil {
 				t.Fatal(err)
 			}

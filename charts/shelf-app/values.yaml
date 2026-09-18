@@ -11,8 +11,12 @@ secrets: {}
 
 # Set by the platform, not by the app.
 platform:
-  # Apps are reachable at <name>.<domain>. Required when a component has a route.
+  # Apps are reachable at <name><hostSuffix>.<domain>. Required when a component has a route.
   domain: ""
+  # Separates clusters that share a DNS zone, e.g. "-dev".
+  hostSuffix: ""
+  # <tunnel-uuid>.cfargotunnel.com; when set, external-dns publishes the ingress hosts.
+  tunnelTarget: ""
   ingressClassName: traefik
   # Name of a docker-registry Secret in the app namespace used to pull images; empty for none.
   imagePullSecret: ""
