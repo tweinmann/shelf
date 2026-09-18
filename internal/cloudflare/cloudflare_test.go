@@ -36,6 +36,8 @@ func (f *fakeAPI) server() *httptest.Server {
 			return
 		}
 		switch {
+		case r.URL.Path == "/user/tokens/verify":
+			f.reply(w, true, map[string]string{"status": "active"})
 		case r.URL.Path == "/accounts":
 			f.reply(w, true, f.accounts)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/cfd_tunnel"):
@@ -85,6 +87,25 @@ func newTestClient(t *testing.T, api *fakeAPI) *Client {
 	api.t = t
 	srv := api.server()
 	return &Client{Token: "test-token", BaseURL: srv.URL, HTTP: srv.Client()}
+}
+
+func TestVerifyToken(t *testing.T) {
+	c := newTestClient(t, &fakeAPI{})
+	if err := c.VerifyToken(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// A Global API Key is not a bearer token; Cloudflare rejects the header itself.
+	wrong := &Client{Token: "global-api-key", BaseURL: c.BaseURL, HTTP: c.HTTP}
+	err := wrong.VerifyToken(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Global API Key") {
+		t.Errorf("error %v, want the hint about the token kind", err)
+	}
+}
+
+func TestTokenWhitespaceIsTrimmed(t *testing.T) {
+	if got := New("  token\n").Token; got != "token" {
+		t.Errorf("token %q", got)
+	}
 }
 
 func TestAccountID(t *testing.T) {

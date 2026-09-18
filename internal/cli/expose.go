@@ -30,6 +30,7 @@ var (
 
 // cloudflareAPI is the part of the Cloudflare API shelf uses.
 type cloudflareAPI interface {
+	VerifyToken(ctx context.Context) error
 	AccountID(ctx context.Context) (string, error)
 	FindTunnel(ctx context.Context, account, name string) (*cloudflare.Tunnel, error)
 	CreateTunnel(ctx context.Context, account, name string) (*cloudflare.Tunnel, []byte, error)
@@ -56,7 +57,7 @@ It is idempotent: an existing tunnel of the same name is reused as long as the c
 holds its credentials.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			token := os.Getenv(envCloudflareToken)
+			token := strings.TrimSpace(os.Getenv(envCloudflareToken))
 			if token == "" {
 				return fmt.Errorf("%s is not set; it needs Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit",
 					envCloudflareToken)
@@ -87,7 +88,10 @@ holds its credentials.`,
 			fmt.Fprintf(out, "  dns owner %s\n", owner)
 
 			api := newCloudflare(token)
-			account := os.Getenv(envCloudflareAccount)
+			if err := api.VerifyToken(cmd.Context()); err != nil {
+				return fmt.Errorf("%s was refused: %w", envCloudflareToken, err)
+			}
+			account := strings.TrimSpace(os.Getenv(envCloudflareAccount))
 			if account == "" {
 				if account, err = api.AccountID(cmd.Context()); err != nil {
 					return err

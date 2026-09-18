@@ -30,9 +30,14 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-// New returns a client for the given API token.
+// New returns a client for the given API token. Surrounding whitespace, which a copied token
+// easily carries, would make Cloudflare reject the header as malformed.
 func New(token string) *Client {
-	return &Client{Token: token, BaseURL: DefaultBaseURL, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{
+		Token:   strings.TrimSpace(token),
+		BaseURL: DefaultBaseURL,
+		HTTP:    &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 // Tunnel is a Cloudflare tunnel.
@@ -119,10 +124,25 @@ func (c *Client) do(ctx context.Context, method, path string, body, result any) 
 	return json.Unmarshal(env.Result, result)
 }
 
+// VerifyToken checks that the token itself is valid, which tells a wrong kind of credential
+// apart from a missing permission.
+func (c *Client) VerifyToken(ctx context.Context) error {
+	var status struct {
+		Status string `json:"status"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/user/tokens/verify", nil, &status); err != nil {
+		return fmt.Errorf("%w\nUse an API token (Cloudflare profile, API Tokens), not the Global API Key", err)
+	}
+	if status.Status != "" && status.Status != "active" {
+		return fmt.Errorf("the API token is %s", status.Status)
+	}
+	return nil
+}
+
 // Accounts returns the accounts the token can see.
 func (c *Client) Accounts(ctx context.Context) ([]Account, error) {
 	var accounts []Account
-	if err := c.do(ctx, http.MethodGet, "/accounts", nil, &accounts); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/accounts?per_page=50", nil, &accounts); err != nil {
 		return nil, err
 	}
 	return accounts, nil
@@ -133,7 +153,8 @@ func (c *Client) Accounts(ctx context.Context) ([]Account, error) {
 func (c *Client) AccountID(ctx context.Context) (string, error) {
 	accounts, err := c.Accounts(ctx)
 	if err != nil {
-		return "", fmt.Errorf("looking up the account: %w; set CF_ACCOUNT_ID to skip this", err)
+		return "", fmt.Errorf("looking up the account: %w\nThe token needs Account Settings:Read for this; "+
+			"or set CF_ACCOUNT_ID to the account the tunnel belongs to", err)
 	}
 	switch len(accounts) {
 	case 0:

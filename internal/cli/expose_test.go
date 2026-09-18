@@ -16,12 +16,15 @@ import (
 
 // fakeCloudflare answers like the Cloudflare API without talking to it.
 type fakeCloudflare struct {
+	verifyErr error
 	accounts  []string
 	existing  *cloudflare.Tunnel
 	created   []string
 	deleted   []string
 	accountID string
 }
+
+func (f *fakeCloudflare) VerifyToken(context.Context) error { return f.verifyErr }
 
 func (f *fakeCloudflare) AccountID(context.Context) (string, error) {
 	if len(f.accounts) != 1 {
@@ -194,6 +197,12 @@ func TestInitExposeErrors(t *testing.T) {
 			token:   "cf-secret-token",
 			setup:   func(e *exposeEnv) { e.settings = cluster.Settings{} },
 			wantErr: "shelf init cluster",
+		},
+		{
+			name:    "token refused",
+			token:   "cf-secret-token",
+			setup:   func(e *exposeEnv) { e.api.verifyErr = errors.New("Invalid request headers (code 6003)") },
+			wantErr: "CF_API_TOKEN was refused",
 		},
 		{
 			name:    "several accounts",
