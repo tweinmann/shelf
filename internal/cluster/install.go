@@ -215,9 +215,10 @@ func (c *client) waitForPlatform(ctx context.Context, p Artifact) (string, error
 		return "", fmt.Errorf("%s has no artifact revision", repo)
 	}
 
+	// The settings are substituted into the platform, so a changed ConfigMap has to be applied
+	// even when the artifact itself did not change.
 	ks := ref{gvk: kustomizationGVK, namespace: FluxNamespace, name: PlatformSyncName}
-	err = c.waitFor(ctx, ks, appliedRevision(revision))
-	if err != nil {
+	if _, err := c.reconcileAndWait(ctx, ks, appliedRevision(revision)); err != nil {
 		return "", err
 	}
 	return "applied " + revision, nil
