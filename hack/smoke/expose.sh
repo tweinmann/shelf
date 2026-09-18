@@ -68,7 +68,7 @@ record="$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0
   || die "record $host points at $(jq -r '.content' <<<"$record"), not at $target"
 [[ "$(jq -r '.proxied' <<<"$record")" == true ]] \
   || die "record $host is not proxied; a tunnel target only works through Cloudflare"
-echo "record: $host -> $target (proxied)"
+echo "record: $host points at $target (proxied)"
 
 step "the app answers over HTTPS"
 # Resolve through Cloudflare's DoH endpoint: the container's resolver caches the answer from
@@ -88,7 +88,7 @@ cf "/zones/$zone/dns_records/$record_id" -X PATCH -H 'Content-Type: application/
   || die "could not change the record for the test"
 [[ "$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0].content')" == wrong.cfargotunnel.com ]] \
   || die "the record was not changed for the test"
-"$work/shelf" init expose --yes | grep -E "^DNS $host .*: updated$" \
+"$work/shelf" init expose --yes | grep -E "^DNS $host points at .*: updated$" \
   || die "shelf init expose did not correct the record"
 [[ "$(cf "/zones/$zone/dns_records?name=$host&type=CNAME" | jq -r '.result[0].content')" == "$target" ]] \
   || die "the record still points somewhere else"

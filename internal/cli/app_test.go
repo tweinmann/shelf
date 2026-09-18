@@ -258,7 +258,7 @@ func TestAppAddAndRmPublishTheHostName(t *testing.T) {
 	if len(fake.api.records) != 1 || fake.api.records[0] != want {
 		t.Errorf("records %v, want %q", fake.api.records, want)
 	}
-	if !strings.Contains(stdout, "DNS greeter-dev.example.com -> t-1.cfargotunnel.com: created") {
+	if !strings.Contains(stdout, "DNS greeter-dev.example.com points at t-1.cfargotunnel.com: created") {
 		t.Errorf("stdout lacks the record:\n%s", stdout)
 	}
 

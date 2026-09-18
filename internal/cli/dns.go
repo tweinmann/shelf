@@ -59,7 +59,8 @@ func (d *dns) publish(ctx context.Context, app string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "DNS %s -> %s: %s\n", host, d.settings.TunnelTarget, action)
+	// No arrow: the line invites copying, and a shell reads "->" as a redirection.
+	fmt.Fprintf(out, "DNS %s points at %s: %s\n", host, d.settings.TunnelTarget, action)
 	return nil
 }
 

@@ -151,7 +151,7 @@ func publishApps(ctx context.Context, cfg *rest.Config, api cloudflareAPI, setti
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "DNS %s -> %s: %s\n", host, tunnelTarget, action)
+		fmt.Fprintf(out, "DNS %s points at %s: %s\n", host, tunnelTarget, action)
 	}
 	return nil
 }
