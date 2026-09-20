@@ -63,8 +63,8 @@ Decided in Phase 2 (2026-09-17):
 | Workload kind | **Deployment without volumes, StatefulSet with volumes**, as planned. "Always StatefulSet" was considered and rejected: a StatefulSet replaces pods delete-first (every deploy of a single-instance component is a short outage), and after a broken rollout it waits for a manual pod delete ("forced rollback"), which breaks the auto-deploy chain. |
 | Services | **`<component>` is always a ClusterIP Service**, for Deployments and StatefulSets alike; a StatefulSet additionally gets **`<component>-headless`** as its `serviceName`. Adding or removing volumes therefore never touches `${<component>.host}`, and the upgrade does not fail on the immutable `clusterIP`. Component names must not end with `-headless`. |
 | Secret object | **`shelf-secrets`** in the app namespace, one key per secret name. The chart only references it; `shelf app add` creates it (Phase 4). |
-| Ingress | **One Ingress per routed component**, all on `<app>.<domain>`; Traefik attaches middlewares per Ingress, so `stripPrefix` stays per route. The Ingress is Traefik's routing table and external-dns's source, so it is needed despite the tunnel. |
-| Platform values | **`platform` block** next to the app values: `domain`, `ingressClassName` (default `traefik`), `imagePullSecret`. The ResourceSet sets it inline in the HelmRelease (Phase 4); later additions such as the external-dns target go here too. |
+| Ingress | **One Ingress per routed component**, all on `<app>.<domain>`; Traefik attaches middlewares per Ingress, so `stripPrefix` stays per route. The Ingress is Traefik's routing table, so it is needed despite the tunnel. (It was external-dns's source too, until Phase 5 dropped external-dns.) |
+| Platform values | **`platform` block** next to the app values: `domain`, `ingressClassName` (default `traefik`), `imagePullSecret`. The ResourceSet sets it inline in the HelmRelease (Phase 4); later additions such as the host suffix go here too. |
 
 Decided in Phase 3 (2026-09-17):
 
@@ -104,6 +104,7 @@ Decided in Phase 5 (2026-09-18):
 | Tunnel | **Locally managed, created through the API** by `shelf init expose`, named `shelf<host-suffix>`. shelf generates the tunnel secret, keeps the credentials in the cluster, and never stores them elsewhere. A tunnel that exists without credentials in the cluster is replaced after asking, because Cloudflare hands out the secret only once. |
 | Exposure is optional | The platform carries cloudflared in a **ResourceSet that stays empty** until `shelf init expose` creates its input provider, so a cluster runs unexposed until it is exposed. |
 | Webhook receiver | **Dropped, not moved again.** Polling reaches the app in about 80 s end to end; a receiver would need a public endpoint with a token and two secrets in every tenant repository, which is the knowledge Phase 4b removed. |
+| Test DNS isolation | **One zone for both clusters**, separated by the host suffix (`greeter-dev.<domain>` next to `greeter.<domain>`). The open question was whether a shared zone is safe; with external-dns it would have needed `--txt-owner-id` and `--domain-filter` per cluster, because each instance deletes records it considers orphaned. shelf only ever touches the record of the app it is working on, so a shared zone needs nothing else — and one zone keeps the free certificate, which covers `*.<domain>` but not a second level. |
 
 ## Validated assumptions
 
@@ -157,7 +158,7 @@ idempotent steps:
 ```
 shelf init host     # brew, pmset, Colima profile     → target Mac only (Phase 6)
 shelf init cluster  # Flux Operator, platform charts  → against the current kubecontext
-shelf init expose   # Cloudflare Tunnel, cloudflared, external-dns
+shelf init expose   # Cloudflare Tunnel, cloudflared, DNS records
 shelf init          # wrapper around all three
 ```
 
@@ -1047,7 +1048,7 @@ Results (2026-09-17, steps 1–5 and 7):
   publishing (see above).
 - Open for later: during one rollout of a single-instance app Traefik answered 504 for a
   moment, although a Deployment starts the new pod before it stops the old one; in a second
-  run this did not happen. Worth a look when the platform is exposed for real (Phase 5).
+  run this did not happen. Phase 5 did not see it again; it is under "Open items – Later" now.
 
 ### Phase 4b – Less shelf in the tenant repository
 Decided after the Phase 4 acceptance (rationale in the decisions table). A tenant repository
@@ -1092,9 +1093,10 @@ Results (2026-09-17):
   visible in front of the digest.
 
 ### Phase 5 – `shelf init expose`
-Cloudflare Tunnel via API, cloudflared with a catch-all rule, external-dns with `target` and
-`cloudflare-proxied` annotations. Tested **from the dev cluster** against a test domain — the
-mini is not needed for this.
+Cloudflare Tunnel via API, cloudflared with a catch-all rule, and one proxied CNAME per app.
+Planned with external-dns as the record writer; the results below say why shelf writes the
+records itself instead. Tested **from the dev cluster** against a test domain — the mini is not
+needed for this.
 **Acceptance:** the example app is reachable from outside over HTTPS from the dev cluster, and
 its DNS record is a proxied CNAME to `<uuid>.cfargotunnel.com`. (A proxied record answers with
 Cloudflare's addresses, so `dig` shows those; the CNAME itself is visible through the API, which
@@ -1130,20 +1132,27 @@ Results (2026-09-18):
   only the `cluster` job saw it. The substitution is quoted and the chart defaults the suffix
   now, with a chart test for the null case.
 
+Phase 5 is complete; all acceptance criteria are met. Approved on 2026-09-20. Closing it also
+removed the last references to external-dns from the code comments, the CLI help and the README,
+where the dropped design was still described.
+
 Design:
 
 - `shelf init cluster` gains `--host-suffix`; the settings carry `SHELF_HOST_SUFFIX` and
-  `SHELF_TUNNEL_TARGET`, and the chart renders the host `<app><suffix>.<domain>` plus the
-  external-dns annotations (`target`, `cloudflare-proxied`) whenever a target is set. A later
+  `SHELF_TUNNEL_TARGET`, and the chart renders the host `<app><suffix>.<domain>`. A later
   `init cluster` keeps the tunnel target that `init expose` wrote.
 - `internal/cloudflare` is a small API client (no SDK): accounts, find, create and delete
-  tunnels. `shelf init expose` reads `CF_API_TOKEN` (and `CF_ACCOUNT_ID` when the token sees
-  several accounts), stores the tunnel credentials and the token as Secrets in `shelf-system`,
-  writes the tunnel target into the settings and creates the input provider `expose`.
+  tunnels, and find, create, update and delete DNS records. `shelf init expose` reads
+  `CF_API_TOKEN` (and `CF_ACCOUNT_ID` when the token sees several accounts), stores the tunnel
+  credentials as a Secret in `shelf-system`, writes the tunnel target into the settings, creates
+  the input provider `expose` and publishes the apps that already run. The token itself stays on
+  the operator's machine.
+- `shelf app add` and `shelf app rm` write and remove the app's record, each through the same
+  client and only when the cluster carries a tunnel target and the token is set; without either,
+  the app still runs and is only not reachable from the internet.
 - `platform/expose` turns that provider into cloudflared (one rule to
   `traefik.traefik.svc.cluster.local:80`, credentials from the Secret, restarted through
-  `checksumFrom` when they change) and an external-dns HelmRelease (chart 1.22.0 from the
-  upstream Helm repository, provider cloudflare, `sources: [ingress]`, `policy: sync`).
+  `checksumFrom` when they change).
 
 Steps:
 
@@ -1151,7 +1160,7 @@ Steps:
 2. `internal/cloudflare`, `shelf init expose`, `platform/expose`
 3. Level 1 tests; the platform without the provider generates nothing (checked in the dev
    cluster)
-4. `just smoke-expose <app>`: expose, then DNS record, ownership record and HTTPS
+4. `just smoke-expose <app>`: expose, then DNS record and HTTPS, resolved through DoH
 
 ### Phase 6 – Mac mini
 `shelf init host`: preflight (Apple Silicon, RAM, disk, macOS version, Rosetta, Homebrew, tool
@@ -1170,11 +1179,6 @@ tenants.
 
 ## Open items
 
-Due in Phase 5:
-- **Test DNS isolation**: separate Cloudflare zone or a subdomain of the same zone? With the same
-  zone, dev and prod instances strictly need their own `--txt-owner-id` and `--domain-filter`,
-  otherwise each treats the other's records as orphaned and deletes them.
-
 Due in Phase 6:
 - **Mini hardware** (chip, RAM, macOS version) determines Colima sizing defaults and whether the
   "vanilla Mac" first run can be tested in a `tart` VM. Apple's Virtualization framework only
@@ -1182,6 +1186,9 @@ Due in Phase 6:
   `shelf destroy --purge` ("back to vanilla" instead of "start from vanilla").
 
 Later:
+- **Short 504 during a rollout** (seen once in Phase 4, not reproduced in Phase 5): Traefik
+  answered 504 for a moment while a single-instance app was replaced. Worth a look under real
+  traffic on the mini.
 - MongoDB with auth + replica set needs a keyfile → the schema would need secrets as file mounts
 - Build via `path`, CronJobs, init/migration jobs, `${app.url}`, secret rotation
 

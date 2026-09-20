@@ -36,8 +36,9 @@ type Settings struct {
 	// certificate covers one level of subdomain, so the suffix goes into the app label rather
 	// than into another level.
 	HostSuffix string
-	// TunnelTarget is what external-dns points the DNS records at,
-	// <tunnel-uuid>.cfargotunnel.com. Empty until `shelf init expose` ran.
+	// TunnelTarget is what shelf points an app's DNS record at,
+	// <tunnel-uuid>.cfargotunnel.com. Empty until `shelf init expose` ran, and the sign that
+	// this cluster is exposed at all.
 	TunnelTarget string
 	// Chart is the shelf-app chart every app is installed with.
 	Chart Artifact

@@ -59,7 +59,7 @@ func secret(name string, data map[string]string) *unstructured.Unstructured {
 	}}
 }
 
-// ExposeProvider returns the provider that makes the platform run cloudflared and external-dns.
+// ExposeProvider returns the provider that makes the platform run cloudflared.
 func ExposeProvider(o ExposeOptions) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "fluxcd.controlplane.io/v1",
@@ -78,9 +78,9 @@ func ExposeProvider(o ExposeOptions) *unstructured.Unstructured {
 	}}
 }
 
-// Expose stores the tunnel credentials and the API token, switches the platform's exposure on
-// and waits until cloudflared and external-dns run. It also records the tunnel target in the
-// cluster settings, so the chart annotates every ingress with it.
+// Expose stores the tunnel credentials, switches the platform's exposure on and waits until
+// cloudflared runs. It also records the tunnel target in the cluster settings, which is where
+// `shelf app add` later reads it to publish the app's DNS record.
 func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
@@ -110,8 +110,9 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 			return err
 		}
 	}
-	// Every app's ingress is annotated with the tunnel target, which the platform substitutes
-	// from the settings; without this the apps would follow only at the next interval.
+	// The expose ResourceSet generates cloudflared only once its provider exists. Reconciling
+	// the platform applies it again with the provider in place; without this the tunnel would
+	// come up only at the next interval.
 	err = c.step(ctx, out, "the platform", func(ctx context.Context) (string, error) {
 		_, err := c.reconcileAndWait(ctx, platformSync, readyCondition)
 		return "", err

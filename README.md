@@ -37,8 +37,8 @@ manifests, or a pile of `docker run` commands. shelf sits in between:
   interface.
 - **Secrets never show up in manifests.** Passwords are generated on the platform and
   referenced as `${secrets.db-password}`.
-- **Standard building blocks.** Flux, Helm, Traefik, Cloudflare Tunnel and external-dns do the
-  heavy lifting. shelf is mostly glue.
+- **Standard building blocks.** Flux, Helm, Traefik and Cloudflare Tunnel do the heavy lifting.
+  shelf is mostly glue.
 - **Apps are isolated.** Each app gets its own namespace, and nothing is shared between apps.
 
 ## How it works
@@ -84,7 +84,7 @@ one starts.
 | 3 | `shelf init cluster`: Flux, Traefik | ✅ done |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | ✅ done |
 | 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | ✅ done |
-| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | 🔍 in review |
+| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | ✅ done |
 | 6 | Installation on the Mac mini | planned |
 | 7 | Reference apps | planned |
 
@@ -296,9 +296,9 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
 | `shelf build-plan <app.yaml>` | Prints the app name and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
 | `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. `--host-suffix -dev` separates clusters that share a DNS zone: apps are then reachable at `<app>-dev.<domain>`. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
-| `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
-| `shelf app rm <app>` | Removes an app with its namespace, volumes and secrets, after asking. The secret backup stays. |
-| `shelf init expose` | Connects the cluster to Cloudflare: finds or creates the tunnel, runs cloudflared with one rule to Traefik, and lets external-dns publish one DNS record per app. The API token comes from `CF_API_TOKEN`. |
+| `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. On an exposed cluster it publishes the app's host name as a DNS record (`CF_API_TOKEN`). Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
+| `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets and DNS record, after asking. The secret backup stays. |
+| `shelf init expose` | Connects the cluster to Cloudflare: finds or creates the tunnel, runs cloudflared with one rule to Traefik, and publishes one DNS record per app that already runs. The API token comes from `CF_API_TOKEN`. |
 | `shelf version` | Prints the version. |
 
 Example of an error message:
@@ -307,8 +307,8 @@ Example of an error message:
 app.yaml:12: error: components.web.route: route needs a port; add port or ports to the component
 ```
 
-Commands for exposing apps (`shelf init expose`) and for the Mac mini (`shelf init host`)
-follow in later phases.
+The commands for the Mac mini (`shelf init host`, `shelf doctor`, `shelf destroy`) follow in a
+later phase.
 
 ## Developing shelf
 

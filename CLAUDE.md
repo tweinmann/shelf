@@ -23,10 +23,10 @@ level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push rea
 Phase 4b complete: `build: ./web`, `shelf build-plan`, `shelf render --image`, `release.yml`;
 releases `v0.1.0` and `v0.2.0` published. A tenant repo holds `app.yaml` plus one boilerplate
 workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the registry.
-Phase 5 complete (awaiting approval): `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
+Phase 5 complete and approved: `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
 records written by shelf), `just smoke-expose`. `greeter-dev.<domain>` is reachable over HTTPS
 from the dev cluster. Results in docs/plan.md.
-Next: Phase 6 (Mac mini), once the maintainer approves it.
+Next: Phase 6 (Mac mini).
 
 ## Working agreements
 
@@ -45,7 +45,7 @@ Next: Phase 6 (Mac mini), once the maintainer approves it.
   component.
 - Apps are isolated from each other; nothing is shared between apps.
 - Prefer standard building blocks used by larger platforms (Flux, Helm, Traefik,
-  external-dns) over custom code.
+  Cloudflare Tunnel) over custom code.
 - `shelf init cluster` must work against any kubecontext. No Colima or macOS assumptions
   outside `internal/host`.
 

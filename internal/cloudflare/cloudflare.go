@@ -1,5 +1,5 @@
 // Package cloudflare talks to the Cloudflare API: it finds or creates the tunnel that exposes a
-// cluster. DNS records are not managed here; external-dns does that in the cluster.
+// cluster, and writes the DNS record that points an app's host name at that tunnel.
 package cloudflare
 
 import (
@@ -23,7 +23,7 @@ const DefaultBaseURL = "https://api.cloudflare.com/client/v4"
 const TunnelDomain = "cfargotunnel.com"
 
 // Client calls the Cloudflare API with an API token. The token needs
-// Account:Cloudflare Tunnel:Edit, and Zone:DNS:Edit for the zone external-dns manages.
+// Account:Cloudflare Tunnel:Edit, and Zone:DNS:Edit for the zone the apps live in.
 type Client struct {
 	Token   string
 	BaseURL string

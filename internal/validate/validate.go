@@ -32,7 +32,7 @@ var reservedComponentNames = []string{"secrets", "app", "shelf"}
 const headlessSuffix = "-headless"
 
 // reservedAppNames are namespaces the platform or Kubernetes already uses.
-var reservedAppNames = []string{"default", "flux-system", "traefik", "cloudflared", "external-dns"}
+var reservedAppNames = []string{"default", "flux-system", "traefik", "cloudflared"}
 
 var reservedAppPrefixes = []string{"kube-", "shelf-"}
 

@@ -51,7 +51,8 @@ func newInitExposeCmd() *cobra.Command {
 		Use:   "expose",
 		Short: "Make the apps of this cluster reachable from the internet",
 		Long: `Connect the cluster to Cloudflare: find or create a tunnel, run cloudflared with a single
-rule that forwards everything to Traefik, and let external-dns publish one DNS record per app.
+rule that forwards everything to Traefik, and publish one DNS record per app that already runs.
+Apps added later get their record from ` + "`shelf app add`" + `.
 
 The Cloudflare API token comes from ` + envCloudflareToken + `; it needs Account:Cloudflare
 Tunnel:Edit and Zone:DNS:Edit for the zone. With several accounts, set ` + envCloudflareAccount + `.
