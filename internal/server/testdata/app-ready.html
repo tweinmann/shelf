@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>greeter · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
+<nav class="crumbs"><a href="/">Apps</a> / greeter</nav>
+
+<div class="app-head">
+<h1>greeter</h1>
+<span class="pill Ready">Ready</span>
+</div>
+
+
+
+<section class="card">
+<dl class="facts">
+<dt>Address</dt><dd><a href="https://greeter-dev.example.com/">greeter-dev.example.com</a></dd>
+
+<dt>Artifact</dt><dd>oci://ghcr.io/tweinmann/greeter:main</dd>
+<dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span></dd>
+<dt>Deployed</dt><dd>17 minutes ago</dd>
+</dl>
+<p class="muted">The app itself is described in the <code>app.yaml</code> of its repository. shelf deploys
+what the artifact above carries; to change ports, volumes or secrets, change that file and let your
+pipeline publish a new artifact.</p>
+</section>
+
+<h2>How it gets here</h2>
+<ol class="chain">
+
+<li class="Ready">
+<div class="app-head"><span class="name">the deploy artifact</span><span class="pill Ready">Ready</span></div>
+<pre>stored artifact for digest &#39;main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7&#39;</pre>
+
+<p class="muted">OCIRepository greeter/deploy · Succeeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the app values</span><span class="pill Ready">Ready</span></div>
+<pre>Applied revision: main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7</pre>
+
+<p class="muted">Kustomization greeter/deploy · ReconciliationSucceeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the chart</span><span class="pill Ready">Ready</span></div>
+<pre>stored artifact for digest &#39;0.1.0@sha256:8f5bfec4&#39;</pre>
+
+<p class="muted">OCIRepository greeter/shelf-app · Succeeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the app</span><span class="pill Ready">Ready</span></div>
+<pre>Helm install succeeded</pre>
+
+<p class="muted">HelmRelease greeter/greeter · InstallSucceeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the pods</span><span class="pill Ready">Ready</span></div>
+<pre>2 running</pre>
+
+<p class="muted">Pods</p>
+</li>
+
+</ol>
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

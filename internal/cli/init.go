@@ -41,9 +41,15 @@ type clusterFlags struct {
 	timeout    time.Duration
 }
 
-func (f *clusterFlags) register(fs *pflag.FlagSet) {
+// registerTarget adds the flags that pick the cluster, for a command that neither waits nor
+// asks.
+func (f *clusterFlags) registerTarget(fs *pflag.FlagSet) {
 	fs.StringVar(&f.kubeconfig, "kubeconfig", "", "kubeconfig file (default: $KUBECONFIG or ~/.kube/config)")
 	fs.StringVar(&f.context, "context", "", "kubeconfig context (default: the current context)")
+}
+
+func (f *clusterFlags) register(fs *pflag.FlagSet) {
+	f.registerTarget(fs)
 	fs.BoolVarP(&f.yes, "yes", "y", false, "do not ask for confirmation")
 	fs.DurationVar(&f.timeout, "timeout", 5*time.Minute, "how long to wait for everything to become ready")
 }

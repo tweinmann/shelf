@@ -31,12 +31,15 @@ Target product revised on 2026-09-20, after Phase 5: shelf becomes an appliance 
 phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions and the new
 phase plan in docs/plan.md; the work happens on the branch `appliance`, so `main` still carries
 the old path.
-Phase 6 complete (awaiting approval): `internal/ops` holds the operations both the CLI and the
-coming server call, `internal/progress` replaces the `io.Writer` progress pattern with typed
-events, `cli.New` takes injected dependencies instead of package variables, and the CLI tests
-run in parallel under `-race`. The output did not change: `just smoke-apps` and `just smoke-init`
-print what Phase 5 printed.
-Next: Phase 7 (`shelf serve`: server, login, read-only dashboard).
+Phase 6 complete: `internal/ops` holds the operations both the CLI and the server call,
+`internal/progress` replaces the `io.Writer` progress pattern with typed events, `cli.New` takes
+injected dependencies instead of package variables, and the CLI tests run in parallel under
+`-race`. The output did not change.
+Phase 7 complete (awaiting approval): `shelf serve` is the admin UI — claim with a setup code,
+password login, and a read-only dashboard that lists the apps and says which step is broken.
+`cluster.AppStates` and the five-stage diagnosis back both the pages and `shelf app status`.
+Results in docs/plan.md.
+Next: Phase 8 (mutating actions and the job model).
 
 ## Working agreements
 
@@ -79,6 +82,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
 | `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
 | `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
+| `just serve` | devcontainer | run the admin UI against the dev cluster on port 8080 (forwarded to the Mac's browser); prints the setup code on the first start |
 | `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart, domain `dev.local` |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
@@ -137,6 +141,11 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   field of `ops.Ops`. No package-level variable is a test seam — tests must be able to run in
   parallel, which also rules out `t.Setenv`: the CLI reads the environment through
   `cli.Options.Getenv`
+- `internal/server` renders `html/template` pages from `internal/server/ui`, embedded in the
+  binary; every page has a golden file in `internal/server/testdata`, rendered against a fake
+  `Platform` with a fixed clock, so its tests need neither cluster nor network
+- Files under `~/.shelf` belong to `internal/hostcfg`: mode 0600 in a 0700 directory, written
+  atomically. Passwords are PBKDF2-SHA256 with the algorithm in the stored string
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
   themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):

@@ -470,11 +470,13 @@ The service runs **as the logged-in user, not as root**: Colima is per-user (`~/
 plist, which is world-readable.
 
 `shelf serve` at startup loads its configuration, serves nothing but the claim page while the
-instance is unclaimed, binds its listener, and then keeps a status snapshot fresh in the
-background (Colima state, API server reachable, settings, app states). Requests read the
-snapshot, so no page ever blocks on a cluster call that hangs — which is what keeps the UI
-useful when the VM is down. With autostart enabled it also brings Colima up at login, which is
-what makes the platform survive a power cut.
+instance is unclaimed, and binds its listener. Every page then reads the cluster when it is
+asked for, under a timeout of a few seconds, so a cluster that does not answer becomes a page
+that says so instead of a request that hangs — which is what keeps the UI useful when the VM is
+down. (Phase 7 built this with a timeout rather than the background poller this paragraph
+described first: the poller would be a second source of truth, and its staleness would have to
+be shown on every page.) With autostart enabled the service also brings Colima up at login,
+which is what makes the platform survive a power cut.
 
 State on disk, all under `~/.shelf` (0700), each file 0600:
 
@@ -1362,9 +1364,11 @@ Design:
 
 - `internal/server` depends on an interface, not on `ops` directly, so its tests need neither
   network nor cluster. Every rendered page gets a golden-file test against a fake.
-- `cluster.AppStates` joins the input providers with the HelmReleases, Kustomizations and
-  OCIRepositories that carry the `shelf.dev/app` label — four cluster-wide list calls regardless
-  of how many apps there are.
+- `cluster.AppStates` joins the input providers with the HelmReleases, Kustomizations,
+  OCIRepositories and pods of the apps — five cluster-wide list calls regardless of how many
+  apps there are. The objects of an app are found by the namespace they are in, not by a label:
+  the ResourceSet stamps `shelf.dev/app` on what the deploy artifact carries, not on the
+  objects it generates itself.
 - `ops.Diagnose` walks the chain in order and reports the **first** stage that is not healthy:
   deploy `OCIRepository` (cannot pull, or authentication) → deploy `Kustomization` (artifact
   rejected by the downscoped `shelf-deploy` account) → chart `OCIRepository` → `HelmRelease` →
@@ -1380,6 +1384,31 @@ revision and state, and names the reason for an app that is broken on purpose; e
 the claim page and `/healthz` refuses an unauthenticated request; the claim cannot be completed
 without the printed token; every rendered page has a golden-file test; `go test ./internal/server`
 needs no network and no cluster.
+
+Results (2026-09-20):
+
+- All of it, against the dev cluster: the dashboard lists `greeter` as Ready with its host name
+  and revision, and an app whose tag was pointed at something that does not exist shows
+  `Failed`, the step that broke (`the deploy artifact`), the registry's own words
+  (`MANIFEST_UNKNOWN: manifest unknown`) and shelf's explanation of what that means. Eleven
+  golden files cover every page, including a cluster that does not answer and a platform that is
+  not installed.
+- The diagnosis is the piece worth keeping: five stages in the order things have to happen, and
+  the first one that is not ready is the answer. A later stage that is also broken is a
+  consequence — an app whose artifact cannot be pulled still has a Ready HelmRelease from the
+  last version, and showing that as the state would be a lie. `shelf app status` renders the
+  same chain as text, so the UI and the command line cannot drift.
+- Writing it turned up a real mistake: "forbidden" from the step that *applies* the artifact
+  means the downscoped `shelf-deploy` account refused an object, the opposite of a registry that
+  refuses a login. The registry hint is now limited to the two steps that talk to a registry.
+- A hand-written `ResourceSetInputProvider`, used to fake a broken app, took the whole `apps`
+  ResourceSet down: it copies a Secret that only `shelf app add` creates, and its absence fails
+  the reconciliation for *every* app. Deleting the provider fixed it within seconds. Worth
+  knowing before the UI lets anyone write providers in Phase 8: the two objects belong together.
+- Not built: the background status poller the architecture section described. A timeout on the
+  request does the same job without a second source of truth. The section now says so.
+- `cmd/shelf` now stops on SIGTERM as well as Ctrl-C. A service is stopped with SIGTERM, and
+  until now that killed the process instead of letting it shut down.
 
 ### Phase 8 – Mutating actions and the job model
 Add, retag, redeploy and remove apps from the browser.

@@ -1,0 +1,17 @@
+{{define "content"}}
+<section class="card narrow">
+<h1>Set up shelf</h1>
+<p>This shelf has no owner yet. The setup code was printed when the service started; paste it
+here and choose the password you will use from now on.</p>
+{{if .Error}}<p class="problem-line">{{.Error}}</p>{{end}}
+<form method="post" action="/setup">
+<label for="token">Setup code</label>
+<input id="token" name="token" value="{{.Token}}" autocomplete="off" autofocus required>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="new-password" required>
+<label for="confirm">Password again</label>
+<input id="confirm" name="confirm" type="password" autocomplete="new-password" required>
+<button type="submit">Claim this shelf</button>
+</form>
+</section>
+{{end}}

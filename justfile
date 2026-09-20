@@ -76,6 +76,11 @@ init-cluster *flags:
       --platform oci://shelf-registry:5000/shelf/platform:dev \
       --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
 
+# Run the admin UI against the dev cluster. The devcontainer forwards 8080, so the browser on
+# the Mac reaches it at http://localhost:8080; the setup code is printed on the first start.
+serve *flags:
+    go run ./cmd/shelf serve --listen :8080 {{flags}}
+
 # Smoke test: $(VAR) expansion from secretKeyRef in env and args
 smoke-secrets:
     hack/smoke/secret-expansion.sh

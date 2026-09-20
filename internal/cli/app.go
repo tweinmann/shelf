@@ -13,9 +13,9 @@ import (
 func newAppCmd(o Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "app",
-		Short: "Add and remove apps",
+		Short: "Add, inspect and remove apps",
 	}
-	cmd.AddCommand(newAppAddCmd(o), newAppRmCmd(o))
+	cmd.AddCommand(newAppAddCmd(o), newAppRmCmd(o), newAppStatusCmd(o))
 	return cmd
 }
 

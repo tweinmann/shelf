@@ -45,6 +45,8 @@ type fakeCluster struct {
 	stored      map[string]string
 	tunnelCreds []byte
 	apps        []string
+	states      []cluster.AppState
+	stages      []cluster.Stage
 	found       bool
 
 	installed []cluster.Options
@@ -83,6 +85,14 @@ func (f *fakeCluster) AppSecrets(_ context.Context, _ *rest.Config, _ string) (m
 }
 
 func (f *fakeCluster) AppNames(context.Context, *rest.Config) ([]string, error) { return f.apps, nil }
+
+func (f *fakeCluster) AppStates(context.Context, *rest.Config) ([]cluster.AppState, error) {
+	return f.states, nil
+}
+
+func (f *fakeCluster) AppDiagnosis(_ context.Context, _ *rest.Config, app string) (cluster.Diagnosis, error) {
+	return cluster.Diagnosis{Name: app, Stages: f.stages}, nil
+}
 
 func (f *fakeCluster) Settings(context.Context, *rest.Config) (cluster.Settings, error) {
 	return f.settings, f.settingsErr

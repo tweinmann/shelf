@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apps · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
+
+<section class="card">
+<dl class="facts">
+<dt>Cluster</dt><dd>k3d-shelf-dev <span class="muted">https://127.0.0.1:6445</span></dd>
+<dt>Apps answer at</dt><dd>&lt;app&gt;-dev.example.com</dd>
+<dt>Internet</dt>
+<dd>reachable through the Cloudflare tunnel</dd>
+</dl>
+</section>
+
+
+
+<section class="card problem">
+<h1>The apps cannot be listed</h1>
+<pre>listing OCIRepository: the server could not find the requested resource</pre>
+</section>
+
+
+
+<h1>Apps</h1>
+<p class="empty">No apps yet. Add one with <code>shelf app add &lt;name&gt; &lt;oci://…&gt;</code>.</p>
+
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

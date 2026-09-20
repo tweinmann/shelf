@@ -1,0 +1,42 @@
+{{define "content"}}
+<nav class="crumbs"><a href="/">Apps</a> / {{.App.Name}}</nav>
+
+<div class="app-head">
+<h1>{{.App.Name}}</h1>
+<span class="pill {{.App.Phase}}">{{.App.Phase}}</span>
+</div>
+
+{{with .Trouble}}
+<section class="card problem">
+<h2>{{.Name}}</h2>
+{{if .Message}}<pre>{{.Message}}</pre>{{end}}
+{{if .Hint}}<p>{{.Hint}}</p>{{end}}
+<p class="muted">{{.Object}}{{if .Reason}} · {{.Reason}}{{end}}</p>
+</section>
+{{end}}
+
+<section class="card">
+<dl class="facts">
+{{if .App.URL}}<dt>Address</dt><dd><a href="{{.App.URL}}">{{.App.Host}}</a></dd>
+{{else if .App.Host}}<dt>Address</dt><dd>{{.App.Host}} <span class="muted">not exposed</span></dd>{{end}}
+<dt>Artifact</dt><dd>{{.App.Artifact}}</dd>
+{{if .App.Revision}}<dt>Running</dt><dd><span title="{{.App.Revision}}">{{short .App.Revision}}</span></dd>{{end}}
+{{with ago .App.Deployed}}<dt>Deployed</dt><dd>{{.}}</dd>{{end}}
+</dl>
+<p class="muted">The app itself is described in the <code>app.yaml</code> of its repository. shelf deploys
+what the artifact above carries; to change ports, volumes or secrets, change that file and let your
+pipeline publish a new artifact.</p>
+</section>
+
+<h2>How it gets here</h2>
+<ol class="chain">
+{{range .Diagnosis.Stages}}
+<li class="{{.Phase}}">
+<div class="app-head"><span class="name">{{.Name}}</span><span class="pill {{.Phase}}">{{.Phase}}</span></div>
+{{if .Message}}<pre>{{.Message}}</pre>{{end}}
+{{if .Hint}}<p>{{.Hint}}</p>{{end}}
+<p class="muted">{{.Object}}{{if .Reason}} · {{.Reason}}{{end}}</p>
+</li>
+{{end}}
+</ol>
+{{end}}

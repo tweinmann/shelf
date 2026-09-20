@@ -91,6 +91,8 @@ type Cluster interface {
 	Expose(ctx context.Context, cfg *rest.Config, o cluster.ExposeOptions) error
 	AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]string, error)
 	AppNames(ctx context.Context, cfg *rest.Config) ([]string, error)
+	AppStates(ctx context.Context, cfg *rest.Config) ([]cluster.AppState, error)
+	AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
 	TunnelCredentials(ctx context.Context, cfg *rest.Config) ([]byte, error)
 }
@@ -121,6 +123,14 @@ func (liveCluster) AppSecrets(ctx context.Context, cfg *rest.Config, app string)
 
 func (liveCluster) AppNames(ctx context.Context, cfg *rest.Config) ([]string, error) {
 	return cluster.AppNames(ctx, cfg)
+}
+
+func (liveCluster) AppStates(ctx context.Context, cfg *rest.Config) ([]cluster.AppState, error) {
+	return cluster.AppStates(ctx, cfg)
+}
+
+func (liveCluster) AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error) {
+	return cluster.AppDiagnosis(ctx, cfg, app)
 }
 
 func (liveCluster) Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error) {
@@ -169,9 +179,4 @@ func CheckAppName(name string) error {
 		return fmt.Errorf("app name %q must be a DNS label of at most %d characters", name, schema.MaxAppNameLength)
 	}
 	return nil
-}
-
-// Apps returns the names of the apps registered in the cluster.
-func (o *Ops) Apps(ctx context.Context) ([]string, error) {
-	return o.Cluster.AppNames(ctx, o.config())
 }

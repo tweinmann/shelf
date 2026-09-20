@@ -1,0 +1,54 @@
+{{define "content"}}
+{{if not .Status.Reachable}}
+<section class="card problem">
+<h1>The cluster does not answer</h1>
+<p>shelf cannot reach {{.Status.Server}}. The apps may still be running; this page cannot say.</p>
+<pre>{{.Status.Error}}</pre>
+</section>
+{{else if not .Status.Installed}}
+<section class="card problem">
+<h1>The platform is not installed</h1>
+<p>This cluster answers, but shelf has not set it up yet. Run <code>shelf init cluster</code> against it.</p>
+</section>
+{{else}}
+<section class="card">
+<dl class="facts">
+<dt>Cluster</dt><dd>{{.Status.Context}} <span class="muted">{{.Status.Server}}</span></dd>
+<dt>Apps answer at</dt><dd>{{.Status.Hosts}}</dd>
+<dt>Internet</dt>
+<dd>{{if .Status.Exposed}}reachable through the Cloudflare tunnel{{else}}not exposed{{end}}</dd>
+</dl>
+</section>
+{{end}}
+
+{{if .Error}}
+<section class="card problem">
+<h1>The apps cannot be listed</h1>
+<pre>{{.Error}}</pre>
+</section>
+{{end}}
+
+{{if .Apps}}
+<h1>Apps</h1>
+<ul class="apps">
+{{range .Apps}}
+<li>
+<div class="app-head">
+<a class="name" href="/apps/{{.Name}}">{{.Name}}</a>
+<span class="pill {{.Phase}}">{{.Phase}}</span>
+</div>
+{{if .Reason}}<p class="reason">{{.Stage}}: {{.Reason}}</p>{{end}}
+<dl class="facts">
+{{if .URL}}<dt>Address</dt><dd><a href="{{.URL}}">{{.Host}}</a></dd>
+{{else if .Host}}<dt>Address</dt><dd>{{.Host}} <span class="muted">not exposed</span></dd>{{end}}
+{{if .Revision}}<dt>Running</dt><dd><span title="{{.Revision}}">{{short .Revision}}</span>
+{{with ago .Deployed}}<span class="muted">deployed {{.}}</span>{{end}}</dd>{{end}}
+</dl>
+</li>
+{{end}}
+</ul>
+{{else if .Status.Installed}}
+<h1>Apps</h1>
+<p class="empty">No apps yet. Add one with <code>shelf app add &lt;name&gt; &lt;oci://…&gt;</code>.</p>
+{{end}}
+{{end}}

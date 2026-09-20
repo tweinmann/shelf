@@ -107,6 +107,7 @@ func New(o Options) *cobra.Command {
 		newSchemaCmd(),
 		newInitCmd(o),
 		newAppCmd(o),
+		newServeCmd(o),
 		newVersionCmd(o),
 	)
 	return root

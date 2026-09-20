@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up shelf · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+</header>
+<main>
+
+<section class="card narrow">
+<h1>Set up shelf</h1>
+<p>This shelf has no owner yet. The setup code was printed when the service started; paste it
+here and choose the password you will use from now on.</p>
+
+<form method="post" action="/setup">
+<label for="token">Setup code</label>
+<input id="token" name="token" value="" autocomplete="off" autofocus required>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" autocomplete="new-password" required>
+<label for="confirm">Password again</label>
+<input id="confirm" name="confirm" type="password" autocomplete="new-password" required>
+<button type="submit">Claim this shelf</button>
+</form>
+</section>
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

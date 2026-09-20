@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apps · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
+
+<section class="card">
+<dl class="facts">
+<dt>Cluster</dt><dd>k3d-shelf-dev <span class="muted">https://127.0.0.1:6445</span></dd>
+<dt>Apps answer at</dt><dd>&lt;app&gt;-dev.example.com</dd>
+<dt>Internet</dt>
+<dd>reachable through the Cloudflare tunnel</dd>
+</dl>
+</section>
+
+
+
+
+
+<h1>Apps</h1>
+<ul class="apps">
+
+<li>
+<div class="app-head">
+<a class="name" href="/apps/greeter">greeter</a>
+<span class="pill Ready">Ready</span>
+</div>
+
+<dl class="facts">
+<dt>Address</dt><dd><a href="https://greeter-dev.example.com/">greeter-dev.example.com</a></dd>
+
+<dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span>
+<span class="muted">deployed 17 minutes ago</span></dd>
+</dl>
+</li>
+
+<li>
+<div class="app-head">
+<a class="name" href="/apps/shop">shop</a>
+<span class="pill Failed">Failed</span>
+</div>
+<p class="reason">the deploy artifact: MANIFEST_UNKNOWN: manifest unknown</p>
+<dl class="facts">
+<dt>Address</dt><dd><a href="https://shop-dev.example.com/">shop-dev.example.com</a></dd>
+
+<dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span>
+<span class="muted">deployed 3 hours ago</span></dd>
+</dl>
+</li>
+
+</ul>
+
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

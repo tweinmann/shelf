@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apps · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
+
+<section class="card problem">
+<h1>The cluster does not answer</h1>
+<p>shelf cannot reach https://127.0.0.1:6445. The apps may still be running; this page cannot say.</p>
+<pre>dial tcp 127.0.0.1:6445: connect: connection refused</pre>
+</section>
+
+
+
+
+
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

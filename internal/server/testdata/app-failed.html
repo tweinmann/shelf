@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shop · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
+<nav class="crumbs"><a href="/">Apps</a> / shop</nav>
+
+<div class="app-head">
+<h1>shop</h1>
+<span class="pill Failed">Failed</span>
+</div>
+
+
+<section class="card problem">
+<h2>the deploy artifact</h2>
+<pre>MANIFEST_UNKNOWN: manifest unknown</pre>
+<p>shelf cannot read the deploy artifact from the registry</p>
+<p class="muted">OCIRepository shop/deploy · OCIArtifactPullFailed</p>
+</section>
+
+
+<section class="card">
+<dl class="facts">
+<dt>Address</dt><dd><a href="https://shop-dev.example.com/">shop-dev.example.com</a></dd>
+
+<dt>Artifact</dt><dd>oci://ghcr.io/tweinmann/shop:no-such-tag</dd>
+<dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span></dd>
+<dt>Deployed</dt><dd>3 hours ago</dd>
+</dl>
+<p class="muted">The app itself is described in the <code>app.yaml</code> of its repository. shelf deploys
+what the artifact above carries; to change ports, volumes or secrets, change that file and let your
+pipeline publish a new artifact.</p>
+</section>
+
+<h2>How it gets here</h2>
+<ol class="chain">
+
+<li class="Failed">
+<div class="app-head"><span class="name">the deploy artifact</span><span class="pill Failed">Failed</span></div>
+<pre>MANIFEST_UNKNOWN: manifest unknown</pre>
+<p>shelf cannot read the deploy artifact from the registry</p>
+<p class="muted">OCIRepository shop/deploy · OCIArtifactPullFailed</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the app values</span><span class="pill Ready">Ready</span></div>
+<pre>Applied revision: main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7</pre>
+
+<p class="muted">Kustomization shop/deploy · ReconciliationSucceeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the chart</span><span class="pill Ready">Ready</span></div>
+<pre>stored artifact for digest &#39;0.1.0@sha256:8f5bfec4&#39;</pre>
+
+<p class="muted">OCIRepository shop/shelf-app · Succeeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the app</span><span class="pill Ready">Ready</span></div>
+<pre>Helm install succeeded</pre>
+
+<p class="muted">HelmRelease shop/shop · InstallSucceeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the pods</span><span class="pill Ready">Ready</span></div>
+<pre>1 running</pre>
+
+<p class="muted">Pods</p>
+</li>
+
+</ol>
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>
