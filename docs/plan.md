@@ -1068,8 +1068,8 @@ Design:
   `reconcile.fluxcd.io/watch: Enabled` on the ConfigMap so helm-controller reacts to it); the
   chart `OCIRepository`; the `HelmRelease` with `valuesFrom` the ConfigMap and the `platform`
   values.
-- `shelf app add <name> <oci://…:tag>` reads the artifact from the registry (Docker keychain),
-  checks `apiVersion` and name, generates missing secrets and stores them in the Secret
+- `shelf app add <name> <oci://…:tag>` reads the artifact from the registry (with the login the
+  cluster holds, falling back to the Docker keychain), checks `apiVersion` and name, generates missing secrets and stores them in the Secret
   `app-<name>` in `shelf-system` and in `~/.shelf/apps/<name>/secrets.yaml` (0600); a backup
   restores values after a cluster rebuild. It creates the provider and waits for the
   HelmRelease. Running it again adds new secrets and keeps existing ones.
@@ -1473,6 +1473,24 @@ route. `shelf app status <name>` prints the same three cases.
 - Whether a component gets a link is taken from the app's own URL rather than decided a second
   time from the settings. Two places deciding when a name is reachable is how a link to
   `greeter.dev.local` gets offered again.
+
+**A secret added to app.yaml needs shelf (2026-09-20).** A tenant added a component with a
+generated secret and pushed. Flux rolled the new artifact out by itself, as it should, and the
+pods failed with `couldn't find key db-password in Secret greeter/shelf-secrets`: generating a
+secret value is shelf's step, in `ops.AddApp`, and a rollout by Flux never takes it. The
+diagnosis now names that case instead of the general "usually a missing secret or config map" —
+it says which secret, and that deploying the app again writes it. The gap itself stays: the
+registry is the only interface, and shelf will not watch a tag to find out that an app.yaml grew
+a secret.
+
+**The login for reading a deploy artifact comes from the cluster (2026-09-20).** Closing the open
+item: `deploy.Fetch` fell back to the Docker keychain, so `shelf app add` failed to read a
+private artifact that the cluster itself pulls without trouble, and on the mini — where there is
+no `~/.docker/config.json` at all — it could never have worked. `ops.AddApp` now asks the cluster
+for the login `shelf init cluster` stored there. Precedence: an explicit `Env.Pull` wins, then
+the cluster's, then the Docker config. It is only offered to the registry it was stored for, so a
+ghcr.io credential is never sent to the dev registry. Whoever may register an app in a cluster can
+already read what that cluster pulls, so this hands out nothing new.
 
 **A warning is not a guard (2026-09-20).** During the Phase 6 acceptance, `just smoke-init` was
 run against the dev cluster, which was serving `greeter-dev.tobile.ch` from the Phase 5

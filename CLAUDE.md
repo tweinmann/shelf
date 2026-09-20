@@ -132,6 +132,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - A component has either `image:` or `build: ./dir`; package names are the workflow's business,
   never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<app>`, a built image
   `ghcr.io/<owner>/<app>/<component>`
+- Reading a deploy artifact uses the login the cluster stores in `shelf-system/registry`, and only
+  for the registry it was stored for; `ops.Env.Pull` overrides it, the Docker keychain is the last
+  resort. A machine running shelf as a service has no Docker config
 - Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
   the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
   OCI annotations `dev.shelf.*`

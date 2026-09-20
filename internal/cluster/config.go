@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 )
 
 var configMapGVK = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
@@ -102,6 +104,40 @@ func ParseSettings(data map[string]string) Settings {
 		Chart:            Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
 		InsecureRegistry: insecure,
 	}
+}
+
+// RegistryLogin returns the login stored in the cluster, or nil when there is none. It is what
+// `shelf init cluster` wrote, and it is what the cluster itself pulls deploy artifacts with, so
+// anything the cluster can read, the operator can read too — without a Docker config of their
+// own, which a machine running shelf as a service does not have.
+func RegistryLogin(ctx context.Context, cfg *rest.Config) (*RegistryAuth, error) {
+	c, err := newClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	obj, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: RegistrySecretName})
+	if err != nil || obj == nil {
+		return nil, err
+	}
+	encoded, found, err := unstructured.NestedString(obj.Object, "data", ".dockerconfigjson")
+	if err != nil || !found {
+		return nil, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("Secret %s/%s: %w", SystemNamespace, RegistrySecretName, err)
+	}
+	var config struct {
+		Auths map[string]struct{ Username, Password string } `json:"auths"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, fmt.Errorf("Secret %s/%s: %w", SystemNamespace, RegistrySecretName, err)
+	}
+	entry, ok := config.Auths[RegistryHost]
+	if !ok || entry.Username == "" || entry.Password == "" {
+		return nil, nil
+	}
+	return &RegistryAuth{Username: entry.Username, Token: entry.Password}, nil
 }
 
 // RegistrySecret returns the registry credential. Without auth it holds no login, which still

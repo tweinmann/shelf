@@ -39,6 +39,10 @@ const (
 // AppSecretName is the Secret in SystemNamespace holding an app's secret values.
 func AppSecretName(app string) string { return "app-" + app }
 
+// AppSecretsName is the Secret in the app's own namespace that the platform copies those values
+// into, and the one the chart hands to the containers.
+const AppSecretsName = "shelf-secrets"
+
 // AppOptions configure AddApp.
 type AppOptions struct {
 	Name     string

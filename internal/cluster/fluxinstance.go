@@ -34,6 +34,13 @@ func (a Artifact) String() string { return a.URL + ":" + a.Tag }
 // Reference returns the artifact without the oci:// scheme, as registry clients expect it.
 func (a Artifact) Reference() string { return strings.TrimPrefix(a.String(), "oci://") }
 
+// Registry is the host the artifact is served from, e.g. ghcr.io. ParseArtifact has already
+// insisted on one, so a credential can be matched against it.
+func (a Artifact) Registry() string {
+	host, _, _ := strings.Cut(a.Reference(), "/")
+	return host
+}
+
 // jsonPatch is a kustomize patch for one object created by the Flux Operator.
 func jsonPatch(kind, objName, patch string) map[string]any {
 	return map[string]any{

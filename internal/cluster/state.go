@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -318,7 +319,7 @@ func podStage(pods []*unstructured.Unstructured) Stage {
 		case PhaseFailed:
 			return Stage{
 				Name: "the pods", Object: "Pod " + pod.GetNamespace() + "/" + pod.GetName(),
-				Phase: PhaseFailed, Reason: reason, Message: message, Hint: podHint(reason),
+				Phase: PhaseFailed, Reason: reason, Message: message, Hint: podHint(reason, message),
 			}
 		case PhaseWorking:
 			working = append(working, pod.GetName())
@@ -376,7 +377,12 @@ func podTrouble(pod *unstructured.Unstructured) (Phase, string, string) {
 	return PhaseWorking, "", ""
 }
 
-func podHint(reason string) string {
+// missingSecret is what kubelet says when the chart asks for a secret value that is not in the
+// app's Secret. shelf generates those values, and only when an app is deployed: an app.yaml that
+// declares a new secret and is then rolled out by Flux alone leaves the key missing.
+var missingSecret = regexp.MustCompile(`couldn't find key (\S+) in Secret \S+/` + AppSecretsName)
+
+func podHint(reason, message string) string {
 	switch reason {
 	case "ImagePullBackOff", "ErrImagePull":
 		return "the image cannot be pulled; check the reference and whether the cluster may read that registry"
@@ -385,6 +391,10 @@ func podHint(reason string) string {
 	case "OOMKilled":
 		return "the container needs more memory than its limit allows"
 	case "CreateContainerConfigError":
+		if m := missingSecret.FindStringSubmatch(message); m != nil {
+			return "the app declares the secret " + m[1] + " and shelf has not generated it yet; " +
+				"deploy the app again (`shelf app add`, or Deploy on its page) so that it does"
+		}
 		return "the container cannot be configured, usually a missing secret or config map"
 	}
 	return ""

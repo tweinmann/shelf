@@ -26,7 +26,7 @@ func TestAppAdd(t *testing.T) {
 		t.Errorf("fetched %s insecure=%v", h.fetched, h.insecure)
 	}
 	if h.pull != nil {
-		t.Error("the command line takes the registry login from the Docker config")
+		t.Error("with no login to offer, the fetch is left to the Docker config")
 	}
 	if len(h.cluster.added) != 1 {
 		t.Fatalf("add called %d times", len(h.cluster.added))
@@ -288,6 +288,61 @@ func TestAppStatusComponents(t *testing.T) {
 			}
 			if tt.local && strings.Contains(stdout, "https://hello.dev.local") {
 				t.Errorf("a link to a name that cannot exist:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestAppAddUsesTheClusterLogin covers where the credential for reading a deploy artifact comes
+// from. The cluster already holds one, so a machine that registers an app needs no Docker config
+// of its own — which is the whole point on a mini, where there is none.
+func TestAppAddUsesTheClusterLogin(t *testing.T) {
+	t.Parallel()
+	login := &cluster.RegistryAuth{Username: "tobi", Token: "secret-token"}
+	tests := map[string]struct {
+		artifact string
+		login    *cluster.RegistryAuth
+		wantUser string
+	}{
+		"the registry the login is for": {
+			artifact: "oci://ghcr.io/tweinmann/hello:main", login: login, wantUser: "tobi",
+		},
+		"another registry gets nothing": {
+			artifact: helloArtifact, login: login,
+		},
+		"no login in the cluster": {
+			artifact: "oci://ghcr.io/tweinmann/hello:main",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.app = appWithSecrets("hello")
+			h.cluster.login = tt.login
+
+			stdout, stderr, code := h.run(t, "app", "add", "hello", tt.artifact, "--insecure-registry")
+			if code != 0 {
+				t.Fatalf("exit code %d: %s", code, stderr)
+			}
+			if strings.Contains(stdout+stderr, "secret-token") {
+				t.Fatal("the token appears in the output")
+			}
+			if tt.wantUser == "" {
+				if h.pull != nil {
+					t.Errorf("a credential was offered to %s", tt.artifact)
+				}
+				return
+			}
+			if h.pull == nil {
+				t.Fatal("the cluster's login was not used")
+			}
+			cfg, err := h.pull.Authorization()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Username != tt.wantUser || cfg.Password != login.Token {
+				t.Errorf("offered %s, want %s with its token", cfg.Username, tt.wantUser)
 			}
 		})
 	}

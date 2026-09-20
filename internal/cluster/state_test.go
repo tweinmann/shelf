@@ -134,6 +134,37 @@ func TestDiagnose(t *testing.T) {
 			wantHint:    "the image cannot be pulled; check the reference and whether the cluster may read that registry",
 		},
 		{
+			// A secret added to app.yaml and rolled out by Flux alone: the chart asks for a
+			// value only shelf can generate, and shelf was never asked to.
+			name: "a secret the app declares was never generated",
+			objects: func(o *appObjects) {
+				o.pods = []*unstructured.Unstructured{
+					pod("Pending", container(false, waiting("CreateContainerConfigError",
+						"couldn't find key db-password in Secret shop/shelf-secrets"))),
+				}
+			},
+			wantPhase:   PhaseFailed,
+			wantStage:   "the pods",
+			wantMessage: "couldn't find key db-password in Secret shop/shelf-secrets",
+			wantHint: "the app declares the secret db-password and shelf has not generated it yet; " +
+				"deploy the app again (`shelf app add`, or Deploy on its page) so that it does",
+		},
+		{
+			// Another config problem keeps the general hint; only the app's own Secret means
+			// the story above.
+			name: "a config map the app asks for is missing",
+			objects: func(o *appObjects) {
+				o.pods = []*unstructured.Unstructured{
+					pod("Pending", container(false, waiting("CreateContainerConfigError",
+						"configmap \"nope\" not found"))),
+				}
+			},
+			wantPhase:   PhaseFailed,
+			wantStage:   "the pods",
+			wantMessage: `configmap "nope" not found`,
+			wantHint:    "the container cannot be configured, usually a missing secret or config map",
+		},
+		{
 			name: "a pod is starting",
 			objects: func(o *appObjects) {
 				o.pods = []*unstructured.Unstructured{

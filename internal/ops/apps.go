@@ -7,11 +7,32 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+
 	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/deploy"
 	"github.com/tweinmann/shelf/internal/progress"
 	"github.com/tweinmann/shelf/internal/secrets"
 )
+
+// pullAuth is the login for reading a deploy artifact, in the order of what the caller knows
+// best. An explicit one wins. Otherwise the cluster's own login is used, because whoever is
+// allowed to register an app there can already read what that cluster pulls, and it spares the
+// machine running shelf a Docker config it may not have. It is only offered to the registry it
+// was stored for; a nil result leaves the Docker config to answer, as the command line expects.
+func (o *Ops) pullAuth(ctx context.Context, artifact cluster.Artifact) (authn.Authenticator, error) {
+	if o.Env.Pull != nil {
+		return o.Env.Pull, nil
+	}
+	if artifact.Registry() != cluster.RegistryHost {
+		return nil, nil
+	}
+	login, err := o.Cluster.RegistryLogin(ctx, o.config())
+	if err != nil || login == nil {
+		return nil, err
+	}
+	return authn.FromConfig(authn.AuthConfig{Username: login.Username, Password: login.Token}), nil
+}
 
 // AddOptions configure AddApp.
 type AddOptions struct {
@@ -28,7 +49,11 @@ type AddOptions struct {
 // every value that exists and generates the ones that were added to app.yaml since.
 func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Reporter) error {
 	rep := progress.OrDiscard(report)
-	app, err := o.Fetch(ctx, opts.Artifact.Reference(), o.Env.Pull, opts.Insecure)
+	auth, err := o.pullAuth(ctx, opts.Artifact)
+	if err != nil {
+		return err
+	}
+	app, err := o.Fetch(ctx, opts.Artifact.Reference(), auth, opts.Insecure)
 	if err != nil {
 		return err
 	}

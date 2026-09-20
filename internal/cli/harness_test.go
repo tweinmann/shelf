@@ -42,7 +42,9 @@ type fakeCluster struct {
 	settings    cluster.Settings
 	settingsErr error
 	// stored are the secret values of the app in the cluster.
-	stored      map[string]string
+	stored map[string]string
+	// login is the registry credential the cluster holds.
+	login       *cluster.RegistryAuth
 	tunnelCreds []byte
 	apps        []string
 	states      []cluster.AppState
@@ -108,6 +110,10 @@ func (f *fakeCluster) AppDiagnosis(_ context.Context, _ *rest.Config, app string
 
 func (f *fakeCluster) Settings(context.Context, *rest.Config) (cluster.Settings, error) {
 	return f.settings, f.settingsErr
+}
+
+func (f *fakeCluster) RegistryLogin(context.Context, *rest.Config) (*cluster.RegistryAuth, error) {
+	return f.login, nil
 }
 
 func (f *fakeCluster) TunnelCredentials(context.Context, *rest.Config) ([]byte, error) {

@@ -97,6 +97,7 @@ type Cluster interface {
 	AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]cluster.Component, error)
 	AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
+	RegistryLogin(ctx context.Context, cfg *rest.Config) (*cluster.RegistryAuth, error)
 	TunnelCredentials(ctx context.Context, cfg *rest.Config) ([]byte, error)
 }
 
@@ -147,6 +148,10 @@ func (liveCluster) AppDiagnosis(ctx context.Context, cfg *rest.Config, app strin
 
 func (liveCluster) Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error) {
 	return cluster.ClusterSettings(ctx, cfg)
+}
+
+func (liveCluster) RegistryLogin(ctx context.Context, cfg *rest.Config) (*cluster.RegistryAuth, error) {
+	return cluster.RegistryLogin(ctx, cfg)
 }
 
 func (liveCluster) TunnelCredentials(ctx context.Context, cfg *rest.Config) ([]byte, error) {
