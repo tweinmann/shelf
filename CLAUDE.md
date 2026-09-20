@@ -119,6 +119,11 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   never goes into the launchd plist, into a log line or into a rendered page.
 - `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
   this session.
+- `shelf init cluster` with a different `--domain` or `--host-suffix` moves every app to another
+  host name and strands its DNS records. It refuses to do that while apps exist unless
+  `--move-hosts` is passed. The smoke tests install `dev.local` and refuse to run against a
+  cluster that serves anything else — run `just cluster-reset` first, or restore the domain
+  afterwards.
 
 ## Conventions
 

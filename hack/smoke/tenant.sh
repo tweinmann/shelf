@@ -9,6 +9,7 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
+require_dev_domain
 
 app="${1:-}"
 artifact="${2:-}"

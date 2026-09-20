@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/tweinmann/shelf/internal/cluster"
 )
 
 func TestInitCluster(t *testing.T) {
@@ -179,6 +181,77 @@ func TestInitClusterSettings(t *testing.T) {
 				t.Errorf("unexpected login %+v", auth.Username)
 			case tt.wantLogin != "" && (auth == nil || auth.Username != tt.wantLogin || auth.Token != tt.token):
 				t.Errorf("login not passed on")
+			}
+		})
+	}
+}
+
+// TestInitClusterRefusesToMoveTheApps covers the mistake this guard exists for: a second
+// `init cluster` with a different domain takes every app off the name it answers under, and the
+// DNS records under the old names stay behind pointing at a tunnel that no longer routes them.
+func TestInitClusterRefusesToMoveTheApps(t *testing.T) {
+	t.Parallel()
+	exposed := cluster.Settings{Domain: "tobile.ch", HostSuffix: "-dev", TunnelTarget: "t-1.cfargotunnel.com"}
+	tests := []struct {
+		name     string
+		settings cluster.Settings
+		apps     []string
+		args     []string
+		wantErr  string
+	}{
+		{
+			name: "a different domain while apps run", settings: exposed, apps: []string{"greeter"},
+			args:    []string{"--domain", "dev.local"},
+			wantErr: "this cluster serves <app>-dev.tobile.ch; changing it to <app>.dev.local moves app greeter",
+		},
+		{
+			name: "a different host suffix while apps run", settings: exposed, apps: []string{"greeter", "shop"},
+			args:    []string{"--domain", "tobile.ch"},
+			wantErr: "moves apps greeter and shop",
+		},
+		{
+			name: "asked for it", settings: exposed, apps: []string{"greeter"},
+			args: []string{"--domain", "dev.local", "--move-hosts"},
+		},
+		{
+			name: "the same names", settings: exposed, apps: []string{"greeter"},
+			args: []string{"--domain", "tobile.ch", "--host-suffix", "-dev"},
+		},
+		{
+			name: "no apps to move", settings: exposed,
+			args: []string{"--domain", "dev.local"},
+		},
+		{
+			name: "a cluster without a domain", apps: []string{"greeter"},
+			args: []string{"--domain", "dev.local"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.cluster.settings = tt.settings
+			h.cluster.apps = tt.apps
+			args := append([]string{"init", "cluster", "--yes"}, tt.args...)
+			_, stderr, code := h.run(t, args...)
+
+			if tt.wantErr == "" {
+				if code != 0 {
+					t.Fatalf("exit code %d: %s", code, stderr)
+				}
+				if len(h.cluster.installed) != 1 {
+					t.Error("nothing was installed")
+				}
+				return
+			}
+			if code == 0 || !strings.Contains(stderr, tt.wantErr) {
+				t.Errorf("code %d, stderr %q, want %q", code, stderr, tt.wantErr)
+			}
+			if len(h.cluster.installed) != 0 {
+				t.Error("the platform was installed anyway")
+			}
+			if !strings.Contains(stderr, "--move-hosts") {
+				t.Errorf("the error does not say how to do it on purpose: %s", stderr)
 			}
 		})
 	}

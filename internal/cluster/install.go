@@ -168,6 +168,11 @@ func (c *client) warnAboutOldHosts(ctx context.Context, rep progress.Reporter, b
 	return nil
 }
 
+// HostsChange reports whether apps answer under a different name after the change. It is only
+// true when the cluster had a domain before: the first installation gives the apps their names,
+// it does not move them.
+func HostsChange(before, after Settings) bool { return hostsChange(before, after) }
+
 // hostsChange reports whether apps answer under a different name after the change.
 func hostsChange(before, after Settings) bool {
 	return before.Domain != "" && (before.Domain != after.Domain || before.HostSuffix != after.HostSuffix)

@@ -1458,6 +1458,28 @@ Results (2026-09-20):
 - Left behind in the dev registry: a second tag `sha-test` on `smoke/hello-deploy`, made to
   prove the rollback. The dev registry has no delete endpoint; `just cluster-reset` clears it.
 
+**A warning is not a guard (2026-09-20).** During the Phase 6 acceptance, `just smoke-init` was
+run against the dev cluster, which was serving `greeter-dev.tobile.ch` from the Phase 5
+exposure. The script passes `--domain dev.local` hard-coded, so the platform moved the app to
+`greeter.dev.local` within the minute. Everything kept working except the thing that mattered:
+Cloudflare still resolved the old name, the tunnel still carried it, and Traefik answered 404
+because no Ingress had that host any more. shelf printed exactly the warning Phase 5 built for
+this — and it scrolled past in a wall of output that was read with `tail`.
+
+Two changes, because the warning was right and its position was wrong:
+
+- `shelf init cluster` **refuses** a domain or host suffix that moves apps that already exist,
+  unless `--move-hosts` is passed. `--yes` does not cover it: the point is a gesture that cannot
+  be made by accident, and the smoke tests all pass `--yes`. The refusal happens before anything
+  is applied, names the apps, and only claims stranded records when the old names were public
+  ones — a cluster under `dev.local` has none.
+- The smoke tests check the cluster's domain before they start (`require_dev_domain` in
+  `hack/lib.sh`) and stop with the command that restores it. A test that silently reconfigures
+  the machine it is testing on is a trap, and on the mini it would be a bad one.
+
+The general lesson for the admin UI: an operation that changes what every app answers under is
+not a warning, it is a question. Phase 11's wizard has to treat it that way too.
+
 ### Phase 9 – Mac mini: host, Colima, doctor, destroy
 The old Phase 6, without the installer. `shelf init host`: preflight (Apple Silicon, RAM, disk,
 macOS version, Rosetta, Homebrew, tool versions, existing profile, energy settings), tool

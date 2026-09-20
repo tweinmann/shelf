@@ -117,6 +117,7 @@ func newInitClusterCmd(o Options) *cobra.Command {
 		domain     string
 		hostSuffix string
 		insecure   bool
+		moveHosts  bool
 		target     clusterFlags
 	)
 	cmd := &cobra.Command{
@@ -163,6 +164,7 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 				Domain:     domain,
 				HostSuffix: hostSuffix,
 				Insecure:   insecure,
+				MoveHosts:  moveHosts,
 				Timeout:    target.timeout,
 			}
 			plan := shelf.PlanCluster(opts)
@@ -198,6 +200,8 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 	f.StringVar(&hostSuffix, "host-suffix", "",
 		"suffix in the app's host name, e.g. -dev, to separate clusters that share a DNS zone")
 	f.BoolVar(&insecure, "insecure-registry", false, "pull platform and chart without TLS (dev registry)")
+	f.BoolVar(&moveHosts, "move-hosts", false,
+		"allow a domain or host suffix that moves the apps of this cluster to different names")
 	target.register(f)
 	return cmd
 }

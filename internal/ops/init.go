@@ -21,7 +21,40 @@ type InitOptions struct {
 	HostSuffix string
 	// Insecure allows a platform and chart registry without TLS.
 	Insecure bool
-	Timeout  time.Duration
+	// MoveHosts allows a change that gives every app a different host name. Without it such a
+	// change is refused, because it silently takes every app off the name it answers under.
+	MoveHosts bool
+	Timeout   time.Duration
+}
+
+// HostsMoveError is returned when an installation would rename every app and was not asked to.
+// It is an error and not a warning because the apps stop answering the moment the platform
+// reconciles, and the DNS records under the old names stay behind pointing at nothing.
+type HostsMoveError struct {
+	From, To string
+	Apps     []string
+	// StrandsRecords is true when the names being left behind are public ones, so DNS records
+	// exist for them and will point at a tunnel that no longer routes them.
+	StrandsRecords bool
+}
+
+func (e *HostsMoveError) Error() string {
+	message := fmt.Sprintf("this cluster serves %s; changing it to %s moves %s",
+		e.From, e.To, appList(e.Apps))
+	if e.StrandsRecords {
+		message += ", and the records under the old names stay behind"
+	}
+	return message + ". Pass --move-hosts if that is what you want"
+}
+
+func appList(apps []string) string {
+	switch len(apps) {
+	case 1:
+		return "app " + apps[0]
+	case 2:
+		return "apps " + apps[0] + " and " + apps[1]
+	}
+	return fmt.Sprintf("%d apps", len(apps))
 }
 
 // InitPlan is what an installation would do, for showing it before it happens.
@@ -95,6 +128,9 @@ func (o *Ops) PlanCluster(opts InitOptions) InitPlan {
 
 // InitCluster installs Flux and the platform and waits until everything is ready.
 func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Reporter) error {
+	if err := o.checkHostsStay(ctx, opts); err != nil {
+		return err
+	}
 	return o.Cluster.Install(ctx, o.config(), cluster.Options{
 		Platform: opts.Platform,
 		// The tunnel target is written by Expose and kept as it is here.
@@ -108,4 +144,35 @@ func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Re
 		Timeout:  opts.Timeout,
 		Report:   rep,
 	})
+}
+
+// checkHostsStay refuses an installation that would move every app to a different name, unless
+// it was asked for. A cluster that is already serving apps is not the place to find out that a
+// flag was forgotten: the platform reconciles within the minute, and from then on requests for
+// the old names reach Traefik and get a 404.
+func (o *Ops) checkHostsStay(ctx context.Context, opts InitOptions) error {
+	if opts.MoveHosts {
+		return nil
+	}
+	before, err := o.Cluster.Settings(ctx, o.config())
+	if err != nil {
+		return err
+	}
+	after := cluster.Settings{Domain: opts.Domain, HostSuffix: opts.HostSuffix}
+	if !cluster.HostsChange(before, after) {
+		return nil
+	}
+	apps, err := o.Cluster.AppNames(ctx, o.config())
+	if err != nil {
+		return err
+	}
+	if len(apps) == 0 {
+		return nil
+	}
+	return &HostsMoveError{
+		From:           Hosts(before.Domain, before.HostSuffix),
+		To:             Hosts(opts.Domain, opts.HostSuffix),
+		Apps:           apps,
+		StrandsRecords: before.TunnelTarget != "" && PublicDomain(before.Domain),
+	}
 }

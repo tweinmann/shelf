@@ -8,6 +8,7 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
+require_dev_domain
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d)"

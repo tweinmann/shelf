@@ -105,3 +105,28 @@ func TestPublicDomain(t *testing.T) {
 		}
 	}
 }
+
+// TestHostsMoveError checks that the refusal only promises stranded records where records can
+// exist: a development cluster under dev.local has none, whatever else changes.
+func TestHostsMoveError(t *testing.T) {
+	t.Parallel()
+	public := &ops.HostsMoveError{
+		From: "<app>-dev.tobile.ch", To: "<app>.dev.local",
+		Apps: []string{"greeter"}, StrandsRecords: true,
+	}
+	if !strings.Contains(public.Error(), "records under the old names stay behind") {
+		t.Errorf("a public name leaves a record behind: %v", public)
+	}
+	local := &ops.HostsMoveError{
+		From: "<app>.dev.local", To: "<app>-dev.tobile.ch", Apps: []string{"greeter", "shop"},
+	}
+	if strings.Contains(local.Error(), "records") {
+		t.Errorf("dev.local can have no records: %v", local)
+	}
+	if !strings.Contains(local.Error(), "apps greeter and shop") {
+		t.Errorf("the message does not name the apps: %v", local)
+	}
+	if !strings.Contains(local.Error(), "--move-hosts") {
+		t.Errorf("the message does not say how to do it on purpose: %v", local)
+	}
+}
