@@ -15,7 +15,10 @@ func newAppCmd(o Options) *cobra.Command {
 		Use:   "app",
 		Short: "Add, inspect and remove apps",
 	}
-	cmd.AddCommand(newAppAddCmd(o), newAppRmCmd(o), newAppStatusCmd(o))
+	cmd.AddCommand(
+		newAppAddCmd(o), newAppRmCmd(o), newAppStatusCmd(o),
+		newAppRedeployCmd(o), newAppSecretsCmd(o),
+	)
 	return cmd
 }
 

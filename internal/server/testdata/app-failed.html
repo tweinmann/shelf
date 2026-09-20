@@ -47,6 +47,34 @@ what the artifact above carries; to change ports, volumes or secrets, change tha
 pipeline publish a new artifact.</p>
 </section>
 
+
+
+<section class="card">
+<h2>Deploy</h2>
+<form method="post" action="/apps/shop/deploy" class="inline">
+<input type="hidden" name="csrf" value="CSRF">
+
+<label for="artifact">Artifact and tag</label>
+<input id="artifact" name="artifact" value="oci://ghcr.io/tweinmann/shop:no-such-tag" required>
+<button type="submit">Deploy this</button>
+</form>
+<p class="muted">Point it at another tag to move the app there — a commit tag such as
+<code>sha-905acce</code> is how you go back to a version that worked, and the branch tag is how
+you come forward again.</p>
+<form method="post" action="/apps/shop/redeploy" class="inline">
+<input type="hidden" name="csrf" value="CSRF">
+<button type="submit" class="secondary">Deploy again</button>
+</form>
+<p class="muted">Fetches the same tag once more, for when it was moved or something failed.</p>
+</section>
+
+<section class="card">
+<h2>Secrets</h2>
+
+<p class="muted">This app declares no secrets.</p>
+
+</section>
+
 <h2>How it gets here</h2>
 <ol class="chain">
 
@@ -86,6 +114,18 @@ pipeline publish a new artifact.</p>
 </li>
 
 </ol>
+
+<section class="card problem">
+<h2>Remove shop</h2>
+<p>This deletes the app, its namespace and its volumes. The data in them is gone; the secret
+backup on this machine is kept. Type the name to confirm.</p>
+<form method="post" action="/apps/shop/delete" class="inline">
+<input type="hidden" name="csrf" value="CSRF">
+<label for="confirm">Name of the app</label>
+<input id="confirm" name="confirm" placeholder="shop" autocomplete="off" required>
+<button type="submit" class="danger">Remove it</button>
+</form>
+</section>
 
 </main>
 <footer>shelf v0.3.0</footer>

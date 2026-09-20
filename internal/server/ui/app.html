@@ -29,6 +29,52 @@ what the artifact above carries; to change ports, volumes or secrets, change tha
 pipeline publish a new artifact.</p>
 </section>
 
+{{if .Running}}
+<p class="notice">A change is running: <a href="/jobs/{{.Running.ID}}">{{.Running.Title}}</a>.
+The buttons below wait until it is done.</p>
+{{end}}
+
+<section class="card">
+<h2>Deploy</h2>
+<form method="post" action="/apps/{{.App.Name}}/deploy" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if .App.Insecure}}<input type="hidden" name="insecure" value="1">{{end}}
+<label for="artifact">Artifact and tag</label>
+<input id="artifact" name="artifact" value="{{.App.Artifact}}" required>
+<button type="submit">Deploy this</button>
+</form>
+<p class="muted">Point it at another tag to move the app there — a commit tag such as
+<code>sha-905acce</code> is how you go back to a version that worked, and the branch tag is how
+you come forward again.</p>
+<form method="post" action="/apps/{{.App.Name}}/redeploy" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<button type="submit" class="secondary">Deploy again</button>
+</form>
+<p class="muted">Fetches the same tag once more, for when it was moved or something failed.</p>
+</section>
+
+<section class="card">
+<h2>Secrets</h2>
+{{if .SecretNames}}
+<p class="muted">shelf generated these and hands them to the app as environment variables. They
+are stored in the cluster and backed up on this machine.</p>
+<dl class="facts">
+{{range .SecretNames}}<dt>{{.}}</dt><dd>{{with index $.Secrets .}}{{.}}{{else}}••••••••{{end}}</dd>{{end}}
+</dl>
+{{if not .Secrets}}
+{{if .SecretError}}<p class="problem-line">{{.SecretError}}</p>{{end}}
+<form method="post" action="/apps/{{.App.Name}}/secrets" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="password">Your password, to show the values</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit" class="secondary">Show</button>
+</form>
+{{end}}
+{{else}}
+<p class="muted">This app declares no secrets.</p>
+{{end}}
+</section>
+
 <h2>How it gets here</h2>
 <ol class="chain">
 {{range .Diagnosis.Stages}}
@@ -40,4 +86,16 @@ pipeline publish a new artifact.</p>
 </li>
 {{end}}
 </ol>
+
+<section class="card problem">
+<h2>Remove {{.App.Name}}</h2>
+<p>This deletes the app, its namespace and its volumes. The data in them is gone; the secret
+backup on this machine is kept. Type the name to confirm.</p>
+<form method="post" action="/apps/{{.App.Name}}/delete" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="confirm">Name of the app</label>
+<input id="confirm" name="confirm" placeholder="{{.App.Name}}" autocomplete="off" required>
+<button type="submit" class="danger">Remove it</button>
+</form>
+</section>
 {{end}}

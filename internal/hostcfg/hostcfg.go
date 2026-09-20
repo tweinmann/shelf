@@ -116,3 +116,24 @@ func writeFile(path string, content []byte) error {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// AuditFile records the changes that were made through the admin UI. One password protects a
+// machine that can delete an app with its volumes; a line per change is what makes that
+// defensible afterwards.
+const AuditFile = "audit.log"
+
+// Audit appends one line about a change. A failure to write it is returned, not swallowed:
+// a change that cannot be recorded is worth knowing about.
+func (s *Store) Audit(when time.Time, action, detail string) error {
+	f, err := os.OpenFile(filepath.Join(s.dir, AuditFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	line := when.UTC().Format(time.RFC3339) + " " + action
+	if detail != "" {
+		line += " " + detail
+	}
+	_, err = f.WriteString(line + "\n")
+	return err
+}

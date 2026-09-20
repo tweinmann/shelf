@@ -31,8 +31,12 @@ address can point here. A development cluster answers inside the cluster only.
 </section>
 {{end}}
 
+{{if .Running}}
+<p class="notice">A change is running: <a href="/jobs/{{.Running.ID}}">{{.Running.Title}}</a>.</p>
+{{end}}
+
 {{if .Apps}}
-<h1>Apps</h1>
+<div class="app-head"><h1>Apps</h1><a class="button" href="/apps/new">Add an app</a></div>
 <ul class="apps">
 {{range .Apps}}
 <li>
@@ -52,7 +56,7 @@ address can point here. A development cluster answers inside the cluster only.
 {{end}}
 </ul>
 {{else if .Status.Installed}}
-<h1>Apps</h1>
-<p class="empty">No apps yet. Add one with <code>shelf app add &lt;name&gt; &lt;oci://…&gt;</code>.</p>
+<div class="app-head"><h1>Apps</h1><a class="button" href="/apps/new">Add an app</a></div>
+<p class="empty">No apps yet.</p>
 {{end}}
 {{end}}

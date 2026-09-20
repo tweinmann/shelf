@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redeploy greeter · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
+<nav class="crumbs"><a href="/">Apps</a> / Redeploy greeter</nav>
+
+<div class="app-head">
+<h1>Redeploy greeter</h1>
+<span class="pill Failed" id="job-state">failed</span>
+
+</div>
+
+<pre id="job-log" class="log">ResourceSetInputProvider shelf-system/greeter: created
+  waiting for the app ... failed
+</pre>
+<p class="problem-line" id="job-error">the app is not ready: no chart values</p>
+
+<p id="job-links">
+<a href="/apps/greeter">greeter</a> · 
+<a href="/">All apps</a>
+</p>
+
+
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

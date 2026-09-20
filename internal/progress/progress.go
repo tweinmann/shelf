@@ -112,38 +112,39 @@ func OrDiscard(r Reporter) Reporter {
 // Writer renders events as the lines the command line prints. A step prints the beginning of
 // its line and the following event completes it, which is why the two belong together.
 func Writer(w io.Writer) Reporter {
-	return ReporterFunc(func(e Event) { write(w, e) })
+	return ReporterFunc(func(e Event) { _, _ = io.WriteString(w, Text(e)) })
 }
 
-func write(w io.Writer, e Event) {
+// Text is what one event looks like as text, including the line break where there is one. The
+// admin UI sends these pieces to the browser one at a time, so that the log of a job reads like
+// the output of the command that does the same thing.
+func Text(e Event) string {
 	switch e.Kind {
 	case KindInfo:
-		fmt.Fprintln(w, e.Message)
+		return e.Message + "\n"
 	case KindWarning:
-		fmt.Fprint(w, e.Message)
+		return e.Message
 	case KindApplied:
 		if e.Detail != "" {
-			fmt.Fprintf(w, "%s: %s, %s\n", e.Subject, e.Action, e.Detail)
-			return
+			return fmt.Sprintf("%s: %s, %s\n", e.Subject, e.Action, e.Detail)
 		}
-		fmt.Fprintf(w, "%s: %s\n", e.Subject, e.Action)
+		return fmt.Sprintf("%s: %s\n", e.Subject, e.Action)
 	case KindSecret:
-		fmt.Fprintf(w, "secret %s: %s\n", e.Subject, e.Action)
+		return fmt.Sprintf("secret %s: %s\n", e.Subject, e.Action)
 	case KindRecord:
 		if e.Detail == "" {
-			fmt.Fprintf(w, "DNS %s: %s\n", e.Subject, e.Action)
-			return
+			return fmt.Sprintf("DNS %s: %s\n", e.Subject, e.Action)
 		}
-		fmt.Fprintf(w, "DNS %s points at %s: %s\n", e.Subject, e.Detail, e.Action)
+		return fmt.Sprintf("DNS %s points at %s: %s\n", e.Subject, e.Detail, e.Action)
 	case KindStep:
-		fmt.Fprintf(w, "  waiting for %s ... ", e.Subject)
+		return fmt.Sprintf("  waiting for %s ... ", e.Subject)
 	case KindStepDone:
 		if e.Detail != "" {
-			fmt.Fprintf(w, "done after %s: %s\n", e.Elapsed, e.Detail)
-			return
+			return fmt.Sprintf("done after %s: %s\n", e.Elapsed, e.Detail)
 		}
-		fmt.Fprintf(w, "done after %s\n", e.Elapsed)
+		return fmt.Sprintf("done after %s\n", e.Elapsed)
 	case KindStepFailed:
-		fmt.Fprintln(w, "failed")
+		return "failed\n"
 	}
+	return ""
 }

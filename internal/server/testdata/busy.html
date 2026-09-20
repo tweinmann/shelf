@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Apps · shelf</title>
+<title>One at a time · shelf</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -18,18 +18,13 @@
 </header>
 <main>
 
-
-<section class="card problem">
-<h1>The platform is not installed</h1>
-<p>This cluster answers, but shelf has not set it up yet. Run <code>shelf init cluster</code> against it.</p>
+<section class="card narrow problem">
+<h1>One change at a time</h1>
+<p>shelf is already running “Redeploy greeter”. Two changes at once
+would fight over the same objects in the cluster, so this one was not started.</p>
+<p><a href="/jobs/job-1">Watch what is running</a></p>
+<p><a href="/">Back to the apps</a></p>
 </section>
-
-
-
-
-
-
-
 
 </main>
 <footer>shelf v0.3.0</footer>

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/ops"
@@ -29,7 +31,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := withTimeout(r)
 	defer cancel()
 
-	view := dashboardView{base: s.base(r, "Apps")}
+	view := dashboardView{base: s.base(r, "Apps"), Running: s.jobs.runningJob()}
 	view.Status = s.platform.Status(ctx)
 	if view.Status.Reachable {
 		apps, err := s.platform.Apps(ctx)
@@ -43,9 +45,15 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 
 // appPage shows one app and why it is, or is not, running.
 func (s *Server) appPage(w http.ResponseWriter, r *http.Request) {
+	s.showApp(w, r, r.PathValue("name"), nil, "")
+}
+
+// showApp renders the page of one app. The secret values are only ever passed in by the handler
+// that asked for the password; they are never read for the page itself.
+func (s *Server) showApp(w http.ResponseWriter, r *http.Request, name string,
+	secrets map[string]string, secretError string) {
 	ctx, cancel := withTimeout(r)
 	defer cancel()
-	name := r.PathValue("name")
 	if err := ops.CheckAppName(name); err != nil {
 		s.fail(w, r, http.StatusNotFound, err.Error())
 		return
@@ -61,7 +69,10 @@ func (s *Server) appPage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusBadGateway, err.Error())
 		return
 	}
-	view := appView{base: s.base(r, app.Name), App: app, Status: s.platform.Status(ctx)}
+	view := appView{
+		base: s.base(r, app.Name), App: app, Status: s.platform.Status(ctx),
+		Secrets: secrets, SecretError: secretError, Running: s.jobs.runningJob(),
+	}
 	diagnosis, err := s.platform.Diagnose(ctx, name)
 	if err != nil {
 		s.fail(w, r, http.StatusBadGateway, err.Error())
@@ -69,7 +80,17 @@ func (s *Server) appPage(w http.ResponseWriter, r *http.Request) {
 	}
 	view.Diagnosis = diagnosis
 	view.Trouble = diagnosis.Trouble()
-	s.render(w, "app.html", http.StatusOK, view)
+	stored, err := s.platform.Secrets(ctx, name)
+	if err != nil {
+		s.fail(w, r, http.StatusBadGateway, err.Error())
+		return
+	}
+	view.SecretNames = slices.Sorted(maps.Keys(stored))
+	status := http.StatusOK
+	if secretError != "" {
+		status = http.StatusUnauthorized
+	}
+	s.render(w, "app.html", status, view)
 }
 
 // apiStatus is the snapshot the dashboard reads; it exists for the pages of the admin UI and

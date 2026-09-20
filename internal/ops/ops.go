@@ -88,6 +88,8 @@ type Cluster interface {
 	AddApp(ctx context.Context, cfg *rest.Config, o cluster.AppOptions) error
 	RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
 		rep progress.Reporter) (bool, error)
+	Redeploy(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
+		rep progress.Reporter) error
 	Expose(ctx context.Context, cfg *rest.Config, o cluster.ExposeOptions) error
 	AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]string, error)
 	AppNames(ctx context.Context, cfg *rest.Config) ([]string, error)
@@ -111,6 +113,11 @@ func (liveCluster) AddApp(ctx context.Context, cfg *rest.Config, o cluster.AppOp
 func (liveCluster) RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
 	rep progress.Reporter) (bool, error) {
 	return cluster.RemoveApp(ctx, cfg, app, timeout, rep)
+}
+
+func (liveCluster) Redeploy(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
+	rep progress.Reporter) error {
+	return cluster.Redeploy(ctx, cfg, app, timeout, rep)
 }
 
 func (liveCluster) Expose(ctx context.Context, cfg *rest.Config, o cluster.ExposeOptions) error {

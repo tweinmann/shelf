@@ -1,0 +1,22 @@
+{{define "content"}}
+<nav class="crumbs"><a href="/">Apps</a> / add</nav>
+<section class="card narrow">
+<h1>Add an app</h1>
+<p>An app comes from its deploy artifact: the package your pipeline publishes to the registry.
+shelf reads it, generates the secrets it declares, and keeps the app on that tag from then on.</p>
+{{if .Error}}<p class="problem-line">{{.Error}}</p>{{end}}
+<form method="post" action="/apps">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="name">Name</label>
+<input id="name" name="name" value="{{.Name}}" placeholder="greeter" autofocus required>
+<label for="artifact">Deploy artifact</label>
+<input id="artifact" name="artifact" value="{{.Artifact}}" placeholder="oci://ghcr.io/owner/greeter:main" required>
+{{if .Status.Settings.InsecureRegistry}}
+<label class="check"><input type="checkbox" name="insecure" {{if .Insecure}}checked{{end}}>
+Registry without TLS (this cluster uses one)</label>
+{{end}}
+<button type="submit">Add the app</button>
+</form>
+{{if .Status.Hosts}}<p class="muted">It will answer at {{.Status.Hosts}}, with its own name in place of &lt;app&gt;.</p>{{end}}
+</section>
+{{end}}

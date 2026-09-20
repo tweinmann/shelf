@@ -35,11 +35,14 @@ Phase 6 complete: `internal/ops` holds the operations both the CLI and the serve
 `internal/progress` replaces the `io.Writer` progress pattern with typed events, `cli.New` takes
 injected dependencies instead of package variables, and the CLI tests run in parallel under
 `-race`. The output did not change.
-Phase 7 complete (awaiting approval): `shelf serve` is the admin UI — claim with a setup code,
-password login, and a read-only dashboard that lists the apps and says which step is broken.
-`cluster.AppStates` and the five-stage diagnosis back both the pages and `shelf app status`.
-Results in docs/plan.md.
-Next: Phase 8 (mutating actions and the job model).
+Phase 7 complete: `shelf serve` is the admin UI — claim with a setup code, password login, and a
+read-only dashboard that lists the apps and says which step is broken. `cluster.AppStates` and
+the five-stage diagnosis back both the pages and `shelf app status`.
+Phase 8 complete (awaiting approval): apps are added, pointed at another tag, deployed again and
+removed from the browser. Each change is a job with a live log that reads like the command
+line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
+level with the UI. Results in docs/plan.md.
+Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
 
@@ -144,6 +147,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - `internal/server` renders `html/template` pages from `internal/server/ui`, embedded in the
   binary; every page has a golden file in `internal/server/testdata`, rendered against a fake
   `Platform` with a fixed clock, so its tests need neither cluster nor network
+- A change the admin UI makes runs as a job in `internal/server`: it reports `progress.Event`s,
+  the page renders them as the text the CLI prints, and the browser follows the rest over
+  server-sent events. One change runs at a time, and every one is written to `~/.shelf/audit.log`
 - Files under `~/.shelf` belong to `internal/hostcfg`: mode 0600 in a 0700 directory, written
   atomically. Passwords are PBKDF2-SHA256 with the algorithm in the stored string
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files

@@ -153,3 +153,42 @@ button.link {
   font-weight: 400;
   text-decoration: underline;
 }
+
+/* Forms that sit inside a card, next to their explanation. */
+.inline { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem; }
+.inline label { margin: 0; flex-basis: 100%; }
+.inline input { flex: 1 1 16rem; }
+.inline button { margin-top: 0; }
+.check { display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; }
+.check input { width: auto; }
+
+button.secondary, .button {
+  color: var(--fg);
+  background: none;
+  border: 1px solid var(--line);
+}
+button.danger { background: var(--failed); color: #fff; }
+.button {
+  display: inline-block;
+  padding: 0.4rem 0.9rem;
+  border-radius: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.notice {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--card);
+  font-size: 0.9rem;
+}
+
+.log {
+  min-height: 6rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+}

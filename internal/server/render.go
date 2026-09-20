@@ -23,7 +23,10 @@ var (
 )
 
 // pageNames are the templates that go with the layout, one file each.
-var pageNames = []string{"dashboard.html", "app.html", "login.html", "setup.html", "error.html"}
+var pageNames = []string{
+	"dashboard.html", "app.html", "new.html", "job.html", "busy.html",
+	"login.html", "setup.html", "error.html",
+}
 
 func parsePages(now func() time.Time) (map[string]*template.Template, error) {
 	pages := map[string]*template.Template{}
@@ -145,6 +148,8 @@ type dashboardView struct {
 	Apps   []ops.App
 	// Error is why the apps could not be listed; the status above them is still shown.
 	Error string
+	// Running is the change that is going on, so that every page can link to it.
+	Running *Job
 }
 
 // appView is one app with the chain that produced it.
@@ -155,6 +160,39 @@ type appView struct {
 	Diagnosis cluster.Diagnosis
 	// Trouble is the first stage that is not ready, or nil.
 	Trouble *cluster.Stage
+	// SecretNames are the names of the app's generated secrets, always shown.
+	SecretNames []string
+	// Secrets are their values, only after the password was entered again.
+	Secrets map[string]string
+	// SecretError is why the values are not shown.
+	SecretError string
+	Running     *Job
+}
+
+// newAppView is the form that registers an app.
+type newAppView struct {
+	base
+	Status   ops.Status
+	Name     string
+	Artifact string
+	Insecure bool
+	Error    string
+}
+
+// jobView is the page that watches one change.
+type jobView struct {
+	base
+	Job *Job
+	// Log is everything reported so far, as text.
+	Log string
+	// From is how many events the log above already holds; the browser asks for the rest.
+	From int
+}
+
+// busyView explains that another change is running.
+type busyView struct {
+	base
+	Running *Job
 }
 
 // loginView is the password page.

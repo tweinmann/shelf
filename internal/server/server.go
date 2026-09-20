@@ -19,6 +19,7 @@ import (
 	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/ops"
+	"github.com/tweinmann/shelf/internal/progress"
 )
 
 //go:embed ui
@@ -29,12 +30,17 @@ var ui embed.FS
 const clusterTimeout = 8 * time.Second
 
 // Platform is what the admin UI needs from shelf. *ops.Ops implements it; tests implement it
-// with fixed answers.
+// with fixed answers. Everything below Diagnose changes the cluster and runs as a job.
 type Platform interface {
 	Status(ctx context.Context) ops.Status
 	Apps(ctx context.Context) ([]ops.App, error)
 	App(ctx context.Context, name string) (ops.App, error)
 	Diagnose(ctx context.Context, name string) (cluster.Diagnosis, error)
+	Secrets(ctx context.Context, name string) (map[string]string, error)
+
+	AddApp(ctx context.Context, o ops.AddOptions, rep progress.Reporter) error
+	RemoveApp(ctx context.Context, name string, timeout time.Duration, rep progress.Reporter) error
+	Redeploy(ctx context.Context, name string, timeout time.Duration, rep progress.Reporter) error
 }
 
 // Options configure a server.
@@ -49,6 +55,9 @@ type Options struct {
 	Now func() time.Time
 	// Secure marks the session cookie as HTTPS-only. It is false on a LAN without TLS.
 	Secure bool
+	// NewID makes the identifier of a job. Nil means a random one; tests set it so that a
+	// rendered page is the same every time.
+	NewID func() string
 }
 
 // Server is the admin UI.
@@ -61,6 +70,7 @@ type Server struct {
 
 	admin  *adminState
 	logins *backoff
+	jobs   *jobs
 	pages  map[string]*template.Template
 }
 
@@ -85,6 +95,10 @@ func New(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	newID := o.NewID
+	if newID == nil {
+		newID = hostcfg.NewToken
+	}
 	return &Server{
 		platform: o.Platform,
 		store:    o.Store,
@@ -93,6 +107,7 @@ func New(o Options) (*Server, error) {
 		secure:   o.Secure,
 		admin:    admin,
 		logins:   newBackoff(now),
+		jobs:     newJobs(now, newID),
 		pages:    pages,
 	}, nil
 }
@@ -116,7 +131,15 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /logout", s.guard(http.HandlerFunc(s.logout)))
 	mux.Handle("GET /{$}", s.guard(http.HandlerFunc(s.dashboard)))
+	mux.Handle("GET /apps/new", s.guard(http.HandlerFunc(s.newAppForm)))
+	mux.Handle("POST /apps", s.guard(http.HandlerFunc(s.addApp)))
 	mux.Handle("GET /apps/{name}", s.guard(http.HandlerFunc(s.appPage)))
+	mux.Handle("POST /apps/{name}/deploy", s.guard(http.HandlerFunc(s.deployApp)))
+	mux.Handle("POST /apps/{name}/redeploy", s.guard(http.HandlerFunc(s.redeployApp)))
+	mux.Handle("POST /apps/{name}/delete", s.guard(http.HandlerFunc(s.deleteApp)))
+	mux.Handle("POST /apps/{name}/secrets", s.guard(http.HandlerFunc(s.revealSecrets)))
+	mux.Handle("GET /jobs/{id}", s.guard(http.HandlerFunc(s.jobPage)))
+	mux.Handle("GET /api/jobs/{id}/events", s.guard(http.HandlerFunc(s.jobEvents)))
 	mux.Handle("GET /api/status", s.guard(http.HandlerFunc(s.apiStatus)))
 
 	// Cross-origin protection refuses a state-changing request that a different site sent, by

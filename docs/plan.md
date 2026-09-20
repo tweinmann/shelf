@@ -1434,6 +1434,30 @@ the same lines `shelf app add` prints; a second mutating request while a job run
 link to it; removing an app requires typing its name; the output of `shelf app add` is still
 byte-identical to Phase 5.
 
+Results (2026-09-20):
+
+- Every criterion, against the dev cluster: an app added from the browser, pointed at a second
+  tag and back, deployed again, and removed — each one a job whose log is the text
+  `shelf app add` prints, down to the line that says the secret backup stays behind. A second
+  change during a running one answered 409 with a link to it.
+- The job log is text on purpose. Each event is sent as the piece of text the command line
+  would print, so the browser shows the same thing without a second renderer. A page is
+  rendered with the log so far and the browser attaches from that index, which is why a reload
+  in the middle of a five-minute change loses nothing. Without JavaScript the page still shows
+  everything up to the moment it was loaded.
+- `cluster.Redeploy` came out of splitting `AddApp`: the wait from the artifact to the running
+  release is the same whether an app was just registered, pointed at another tag, or only asked
+  to try again. Changing the tag *is* adding the app with a different reference, which is why a
+  rollback needs no rollback machinery.
+- Two commands were added so the guardrail holds: `shelf app redeploy` and `shelf app secrets`.
+  The values are printed only with `--reveal`, as the UI asks for the password first.
+- The tests went from 12 s to 6 s under `-race` by seeding the session into the admin file
+  instead of claiming an instance per test: 600 000 PBKDF2 rounds are expensive on purpose, and
+  a test that only needs to be logged in should not pay for them. The claim and the login keep
+  their own tests that go through the pages.
+- Left behind in the dev registry: a second tag `sha-test` on `smoke/hello-deploy`, made to
+  prove the rollback. The dev registry has no delete endpoint; `just cluster-reset` clears it.
+
 ### Phase 9 – Mac mini: host, Colima, doctor, destroy
 The old Phase 6, without the installer. `shelf init host`: preflight (Apple Silicon, RAM, disk,
 macOS version, Rosetta, Homebrew, tool versions, existing profile, energy settings), tool

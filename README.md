@@ -93,8 +93,8 @@ one starts.
 | 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | ✅ done |
 | 5 | `shelf init expose`: Cloudflare Tunnel, DNS | ✅ done |
 | 6 | Operations layer shared by the CLI and the admin UI | ✅ done |
-| 7 | `shelf serve`: admin UI with login and dashboard | 🔍 in review |
-| 8 | Adding, changing and removing apps from the browser | planned |
+| 7 | `shelf serve`: admin UI with login and dashboard | ✅ done |
+| 8 | Adding, changing and removing apps from the browser | 🔍 in review |
 | 9 | Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy` | planned |
 | 10 | Service and one-command installer | planned |
 | 11 | Setup wizard | planned |
@@ -341,6 +341,8 @@ drift.
 | `shelf build-plan <app.yaml>` | Prints the app name and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
 | `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. `--host-suffix -dev` separates clusters that share a DNS zone: apps are then reachable at `<app>-dev.<domain>`. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
 | `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. On an exposed cluster it publishes the app's host name as a DNS record (`CF_API_TOKEN`). Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
+| `shelf app redeploy <app>` | Fetches the app's artifact again under the tag it is registered with and rolls out what it finds. For a tag that moved, or a deploy worth another try. |
+| `shelf app secrets <app>` | Lists the names of the generated secrets; `--reveal` prints the values. |
 | `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. Same chain as the admin UI shows. |
 | `shelf serve` | Runs the admin UI on the local network (`--listen 127.0.0.1:7654` keeps it off the network). The first start prints a setup code that claims the instance; after that a password protects it. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets and DNS record, after asking. The secret backup stays. |

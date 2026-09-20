@@ -74,6 +74,20 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	return publisher.publish(ctx, opts.Name, rep)
 }
 
+// Redeploy asks Flux to fetch the app's artifact again and to roll out what it finds. It is
+// what to do when a tag was moved, or when something failed and is worth another try.
+func (o *Ops) Redeploy(ctx context.Context, name string, timeout time.Duration,
+	report progress.Reporter) error {
+	return o.Cluster.Redeploy(ctx, o.config(), name, timeout, progress.OrDiscard(report))
+}
+
+// Secrets returns the generated secret values of an app, by name. They are generated, so the
+// person who runs the app has no other way to learn them — a database client needs the
+// password that the app itself gets from the environment.
+func (o *Ops) Secrets(ctx context.Context, name string) (map[string]string, error) {
+	return o.Cluster.AppSecrets(ctx, o.config(), name)
+}
+
 // RemoveApp removes an app with its namespace, volumes and secrets, and withdraws its host
 // name. The secret backup on this machine is kept, and the caller is told where it is.
 func (o *Ops) RemoveApp(ctx context.Context, name string, timeout time.Duration,

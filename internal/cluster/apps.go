@@ -134,14 +134,45 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		}
 	}
 
-	repo := ref{gvk: ociRepositoryGVK, namespace: o.Name, name: deployName}
+	return c.rollOut(ctx, rep, o.Name, o.Artifact)
+}
+
+// Redeploy asks Flux to fetch the app's artifact again and to roll out what it finds, and waits
+// until it runs. It changes nothing: it is the answer to "the tag moved" and to "try that
+// again", and the artifact reference it uses is the one the app is registered with.
+func Redeploy(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
+	report progress.Reporter) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	c, err := newClient(cfg)
+	if err != nil {
+		return err
+	}
+	provider, err := c.get(ctx, ref{gvk: providerGVK, namespace: SystemNamespace, name: app})
+	if err != nil {
+		return err
+	}
+	if provider == nil {
+		return fmt.Errorf("app %s does not exist", app)
+	}
+	values, _, _ := unstructured.NestedMap(provider.Object, "spec", "defaultValues")
+	url, _ := values["url"].(string)
+	tag, _ := values["tag"].(string)
+	return c.rollOut(ctx, progress.OrDiscard(report), app, Artifact{URL: url, Tag: tag})
+}
+
+// rollOut waits for the chain from the deploy artifact to the running release, asking each
+// controller to act now instead of at its next interval. It is the same wait whether the app
+// was just registered, changed, or only asked to try again.
+func (c *client) rollOut(ctx context.Context, rep progress.Reporter, name string, artifact Artifact) error {
+	repo := ref{gvk: ociRepositoryGVK, namespace: name, name: deployName}
 	var revision string
-	err = c.step(ctx, rep, "the deploy artifact", func(ctx context.Context) (string, error) {
+	err := c.step(ctx, rep, "the deploy artifact", func(ctx context.Context) (string, error) {
 		// The ResourceSet may still be creating the OCIRepository, or updating its URL.
 		err := c.waitFor(ctx, repo, func(obj *unstructured.Unstructured) (bool, string, error) {
 			url, _, _ := unstructured.NestedString(obj.Object, "spec", "url")
 			tag, _, _ := unstructured.NestedString(obj.Object, "spec", "ref", "tag")
-			return url == o.Artifact.URL && tag == o.Artifact.Tag, "waiting for the platform to create the app", nil
+			return url == artifact.URL && tag == artifact.Tag, "waiting for the platform to create the app", nil
 		})
 		if err != nil {
 			return "", err
@@ -157,7 +188,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		return err
 	}
 
-	ks := ref{gvk: kustomizationGVK, namespace: o.Name, name: deployName}
+	ks := ref{gvk: kustomizationGVK, namespace: name, name: deployName}
 	err = c.step(ctx, rep, "the app values", func(ctx context.Context) (string, error) {
 		return "", c.waitFor(ctx, ks, appliedRevision(revision))
 	})
@@ -165,8 +196,8 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		return err
 	}
 
-	chart := ref{gvk: ociRepositoryGVK, namespace: o.Name, name: chartName}
-	release := ref{gvk: helmReleaseGVK, namespace: o.Name, name: o.Name}
+	chart := ref{gvk: ociRepositoryGVK, namespace: name, name: chartName}
+	release := ref{gvk: helmReleaseGVK, namespace: name, name: name}
 	return c.step(ctx, rep, "the app", func(ctx context.Context) (string, error) {
 		if err := c.waitFor(ctx, chart, readyCondition); err != nil {
 			return "", err

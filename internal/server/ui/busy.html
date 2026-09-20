@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="card narrow problem">
+<h1>One change at a time</h1>
+<p>shelf is already {{with .Running}}running “{{.Title}}”{{else}}busy{{end}}. Two changes at once
+would fight over the same objects in the cluster, so this one was not started.</p>
+{{with .Running}}<p><a href="/jobs/{{.ID}}">Watch what is running</a></p>{{end}}
+<p><a href="/">Back to the apps</a></p>
+</section>
+{{end}}

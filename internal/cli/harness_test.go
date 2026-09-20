@@ -49,10 +49,11 @@ type fakeCluster struct {
 	stages      []cluster.Stage
 	found       bool
 
-	installed []cluster.Options
-	added     []cluster.AppOptions
-	exposed   []cluster.ExposeOptions
-	removed   []string
+	installed  []cluster.Options
+	added      []cluster.AppOptions
+	exposed    []cluster.ExposeOptions
+	removed    []string
+	redeployed []string
 	// host is the API server the operation was pointed at.
 	host string
 }
@@ -73,6 +74,12 @@ func (f *fakeCluster) RemoveApp(_ context.Context, _ *rest.Config, app string, _
 	_ progress.Reporter) (bool, error) {
 	f.removed = append(f.removed, app)
 	return f.found, nil
+}
+
+func (f *fakeCluster) Redeploy(_ context.Context, _ *rest.Config, app string, _ time.Duration,
+	_ progress.Reporter) error {
+	f.redeployed = append(f.redeployed, app)
+	return nil
 }
 
 func (f *fakeCluster) Expose(_ context.Context, _ *rest.Config, o cluster.ExposeOptions) error {

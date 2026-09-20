@@ -3,12 +3,15 @@ package cli
 import (
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/ops"
+	"github.com/tweinmann/shelf/internal/progress"
 )
 
 func newAppStatusCmd(o Options) *cobra.Command {
@@ -107,4 +110,84 @@ func firstLine(s string) string {
 		}
 	}
 	return s
+}
+
+func newAppRedeployCmd(o Options) *cobra.Command {
+	var target clusterFlags
+	cmd := &cobra.Command{
+		Use:   "redeploy <name>",
+		Short: "Fetch the app's artifact again and roll out what it finds",
+		Long: `Ask Flux to read the deploy artifact again under the tag the app is registered with, and
+to roll out what it finds. Nothing about the app changes: this is for a tag that was moved, and
+for something that failed and is worth another try.
+
+To move an app to a different tag, run ` + "`shelf app add`" + ` with that reference instead.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			if err := ops.CheckAppName(name); err != nil {
+				return err
+			}
+			shelf, err := target.load(o)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Deploying %s again from:\n", name)
+			printTarget(out, shelf.Target)
+			return shelf.Redeploy(cmd.Context(), name, target.timeout, progress.Writer(out))
+		},
+	}
+	target.register(cmd.Flags())
+	return cmd
+}
+
+func newAppSecretsCmd(o Options) *cobra.Command {
+	var (
+		reveal bool
+		target clusterFlags
+	)
+	cmd := &cobra.Command{
+		Use:   "secrets <name>",
+		Short: "List the generated secrets of an app",
+		Long: `List the names of the secrets shelf generated for an app. The values are printed only with
+--reveal, because they end up in the terminal and in its history.
+
+shelf generates these values, so this and the admin UI are the only ways to read them — a
+database client needs the same password the app gets from its environment.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			if err := ops.CheckAppName(name); err != nil {
+				return err
+			}
+			shelf, err := target.load(o)
+			if err != nil {
+				return err
+			}
+			values, err := shelf.Secrets(cmd.Context(), name)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if len(values) == 0 {
+				fmt.Fprintf(out, "%s has no secrets.\n", name)
+				return nil
+			}
+			for _, key := range slices.Sorted(maps.Keys(values)) {
+				if reveal {
+					fmt.Fprintf(out, "%s: %s\n", key, values[key])
+					continue
+				}
+				fmt.Fprintln(out, key)
+			}
+			if !reveal {
+				fmt.Fprintln(cmd.ErrOrStderr(), "\nPass --reveal to print the values.")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&reveal, "reveal", false, "print the values, not only the names")
+	target.registerTarget(cmd.Flags())
+	return cmd
 }
