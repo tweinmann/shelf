@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/schema"
 )
@@ -228,6 +229,65 @@ func TestAppAddWithoutExposure(t *testing.T) {
 			}
 			if tt.wantOut != "" && !strings.Contains(stdout, tt.wantOut) {
 				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
+			}
+		})
+	}
+}
+
+// TestAppStatusComponents pins the three cases the app page and the command both have to show: a
+// component a browser reaches, one that answers inside the cluster only, and one with no port at
+// all.
+func TestAppStatusComponents(t *testing.T) {
+	t.Parallel()
+	states := []cluster.AppState{{Name: "hello", Phase: cluster.PhaseReady}}
+	components := []cluster.Component{
+		{Name: "check", Phase: cluster.PhaseWorking},
+		{Name: "db", Phase: cluster.PhaseReady, Ports: []cluster.Port{{Name: "main", Number: 5432}}},
+		{Name: "web", Phase: cluster.PhaseReady, Path: "/",
+			Ports: []cluster.Port{{Name: "main", Number: 80}}},
+	}
+	tests := map[string]struct {
+		exposed bool
+		local   bool
+		want    []string
+	}{
+		"exposed": {exposed: true, want: []string{
+			"    check  Working  inside the cluster only",
+			"    db     Ready    db:5432 (inside the cluster only)",
+			"    web    Ready    https://hello-dev.example.com/",
+		}},
+		"a public domain without a tunnel": {want: []string{
+			"    web    Ready    hello.example.com/ (not exposed)",
+		}},
+		"a reserved domain": {local: true, want: []string{
+			"    web    Ready    hello.dev.local/ (inside the cluster only)",
+		}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			switch {
+			case tt.exposed:
+				h.exposed()
+			case tt.local:
+				h.cluster.settings = cluster.Settings{Domain: "dev.local", TunnelTarget: "t-1.cfargotunnel.com"}
+			default:
+				h.cluster.settings = cluster.Settings{Domain: "example.com"}
+			}
+			h.cluster.states, h.cluster.components = states, components
+
+			stdout, stderr, code := h.run(t, "app", "status", "hello")
+			if code != 0 {
+				t.Fatalf("exit code %d: %s", code, stderr)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(stdout, want) {
+					t.Errorf("stdout lacks %q:\n%s", want, stdout)
+				}
+			}
+			if tt.local && strings.Contains(stdout, "https://hello.dev.local") {
+				t.Errorf("a link to a name that cannot exist:\n%s", stdout)
 			}
 		})
 	}

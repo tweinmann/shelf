@@ -263,6 +263,16 @@ func encodeYAML(v any) ([]byte, error) {
 // ConfigMapName is the name of the ConfigMap that carries an app's resolved app.yaml.
 func ConfigMapName(app string) string { return app + "-values" }
 
+// ParseApp reads back what MarshalApp wrote, so that anyone holding the ConfigMap of an app can
+// see what it is made of without going to the registry for the artifact.
+func ParseApp(data []byte) (*schema.App, error) {
+	doc, err := schema.Parse(ConfigMapKey, data)
+	if err != nil {
+		return nil, err
+	}
+	return doc.App, nil
+}
+
 // ConfigMapKey is the data key holding the resolved app.yaml; the HelmRelease reads it through
 // valuesFrom.
 const ConfigMapKey = "app.yaml"

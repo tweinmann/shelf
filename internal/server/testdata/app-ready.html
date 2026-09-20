@@ -40,6 +40,33 @@ what the artifact above carries; to change ports, volumes or secrets, change tha
 pipeline publish a new artifact.</p>
 </section>
 
+<section class="card">
+<h2>Components</h2>
+
+<ul class="components">
+
+<li>
+<div class="app-head"><span class="name">check</span><span class="pill Working">Working</span></div>
+<p class="address"><span class="muted">inside the cluster only</span></p>
+</li>
+
+<li>
+<div class="app-head"><span class="name">db</span><span class="pill Ready">Ready</span></div>
+<p class="address">db:5432 <span class="muted">inside the cluster only</span></p>
+</li>
+
+<li>
+<div class="app-head"><span class="name">web</span><span class="pill Ready">Ready</span></div>
+<p class="address"><a href="https://greeter-dev.example.com/">https://greeter-dev.example.com/</a></p>
+</li>
+
+</ul>
+<p class="muted">A component answers from outside only where its <code>app.yaml</code> gives it a
+route. The others carry the app from within, and their address is how a component of this app
+reaches them.</p>
+
+</section>
+
 
 
 <section class="card">

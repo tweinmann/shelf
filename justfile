@@ -34,7 +34,7 @@ test:
 
 # Rewrite golden files and schema/app.schema.json from the current code
 golden:
-    go test ./internal/schema ./internal/render ./internal/cli ./internal/chart ./internal/cluster -update
+    go test ./internal/schema ./internal/render ./internal/cli ./internal/chart ./internal/cluster ./internal/server -update
 
 # Replace the embedded Flux Operator manifest with the install.yaml of another release
 flux-operator-update version:

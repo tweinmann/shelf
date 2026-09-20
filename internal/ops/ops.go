@@ -94,6 +94,7 @@ type Cluster interface {
 	AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]string, error)
 	AppNames(ctx context.Context, cfg *rest.Config) ([]string, error)
 	AppStates(ctx context.Context, cfg *rest.Config) ([]cluster.AppState, error)
+	AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]cluster.Component, error)
 	AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
 	TunnelCredentials(ctx context.Context, cfg *rest.Config) ([]byte, error)
@@ -134,6 +135,10 @@ func (liveCluster) AppNames(ctx context.Context, cfg *rest.Config) ([]string, er
 
 func (liveCluster) AppStates(ctx context.Context, cfg *rest.Config) ([]cluster.AppState, error) {
 	return cluster.AppStates(ctx, cfg)
+}
+
+func (liveCluster) AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]cluster.Component, error) {
+	return cluster.AppComponents(ctx, cfg, app)
 }
 
 func (liveCluster) AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error) {

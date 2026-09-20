@@ -41,7 +41,8 @@ the five-stage diagnosis back both the pages and `shelf app status`.
 Phase 8 complete (awaiting approval): apps are added, pointed at another tag, deployed again and
 removed from the browser. Each change is a job with a live log that reads like the command
 line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
-level with the UI. Results in docs/plan.md.
+level with the UI. The app page also lists the app's components with their addresses, the routed
+ones as links. Results in docs/plan.md.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements

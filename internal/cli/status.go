@@ -46,6 +46,7 @@ This is what the admin UI shows on its pages, in text.`,
 				return err
 			}
 			printApp(out, app)
+			printComponents(out, app.Components, shelf.Status(cmd.Context()).Public)
 			printChain(out, diagnosis)
 			return nil
 		},
@@ -88,6 +89,37 @@ func printApp(out io.Writer, app ops.App) {
 	if !app.Deployed.IsZero() {
 		fmt.Fprintf(out, "  deployed  %s\n", app.Deployed.Local().Format(time.RFC3339))
 	}
+}
+
+// printComponents lists what the app is made of and where each part answers, the same three
+// cases the admin UI shows on the app's page.
+func printComponents(out io.Writer, comps []ops.Component, public bool) {
+	if len(comps) == 0 {
+		return
+	}
+	width := 0
+	for _, c := range comps {
+		width = max(width, len(c.Name))
+	}
+	fmt.Fprintln(out, "  components")
+	for _, c := range comps {
+		fmt.Fprintf(out, "    %-*s  %-7s  %s\n", width, c.Name, c.Phase, componentAddress(c, public))
+	}
+}
+
+// componentAddress is the link a browser can follow, or the address plus why it is not one.
+func componentAddress(c ops.Component, public bool) string {
+	if c.URL != "" {
+		return c.URL
+	}
+	note := "inside the cluster only"
+	if !c.Internal && public {
+		note = "not exposed"
+	}
+	if c.Address == "" {
+		return note
+	}
+	return c.Address + " (" + note + ")"
 }
 
 func printChain(out io.Writer, d cluster.Diagnosis) {

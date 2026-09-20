@@ -2,6 +2,8 @@ package ops
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/tweinmann/shelf/internal/cluster"
 )
@@ -13,6 +15,22 @@ type App struct {
 	Host string `json:"host,omitempty"`
 	// URL is where a browser reaches the app, empty until the cluster is exposed.
 	URL string `json:"url,omitempty"`
+	// Components is what the app is made of, filled by App but not by Apps: a list of apps
+	// does not need it, and it costs a read per app.
+	Components []Component `json:"components,omitempty"`
+}
+
+// Component is one part of an app together with the address it answers at.
+type Component struct {
+	cluster.Component
+	// URL is where a browser reaches this component, empty unless it has a route and the
+	// cluster carries the app to the internet.
+	URL string `json:"url,omitempty"`
+	// Address is what URL says without the scheme, or, for a component without a route, how a
+	// sibling component reaches it. Empty when there is no address to give at all.
+	Address string `json:"address,omitempty"`
+	// Internal is true when the component has no route, so nothing outside the app reaches it.
+	Internal bool `json:"internal,omitempty"`
 }
 
 // Status is what a dashboard shows above the apps. It never fails: a cluster that cannot be
@@ -82,9 +100,15 @@ func (o *Ops) App(ctx context.Context, name string) (App, error) {
 		return App{}, err
 	}
 	for _, a := range apps {
-		if a.Name == name {
-			return a, nil
+		if a.Name != name {
+			continue
 		}
+		list, err := o.Cluster.AppComponents(ctx, o.config(), name)
+		if err != nil {
+			return App{}, err
+		}
+		a.Components = components(list, a.Host, a.URL != "")
+		return a, nil
 	}
 	return App{}, &NotFoundError{Name: name}
 }
@@ -112,4 +136,34 @@ func app(state cluster.AppState, settings cluster.Settings) App {
 		a.URL = "https://" + a.Host + "/"
 	}
 	return a
+}
+
+// components says where each part of an app answers. Whether a link is offered is taken from the
+// app's own URL rather than decided again, so the two can never disagree.
+func components(list []cluster.Component, host string, exposed bool) []Component {
+	out := make([]Component, 0, len(list))
+	for _, c := range list {
+		comp := Component{Component: c, Internal: c.Path == ""}
+		switch {
+		case comp.Internal:
+			comp.Address = siblingAddress(c)
+		case host != "":
+			comp.Address = host + c.Path
+			if exposed {
+				comp.URL = "https://" + comp.Address
+			}
+		}
+		out = append(out, comp)
+	}
+	return out
+}
+
+// siblingAddress is how another component of the same app reaches this one: the chart names the
+// Service after the component, in the app's own namespace.
+func siblingAddress(c cluster.Component) string {
+	parts := make([]string, 0, len(c.Ports))
+	for _, p := range c.Ports {
+		parts = append(parts, fmt.Sprintf("%s:%d", c.Name, p.Number))
+	}
+	return strings.Join(parts, ", ")
 }

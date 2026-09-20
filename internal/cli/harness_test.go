@@ -46,6 +46,7 @@ type fakeCluster struct {
 	tunnelCreds []byte
 	apps        []string
 	states      []cluster.AppState
+	components  []cluster.Component
 	stages      []cluster.Stage
 	found       bool
 
@@ -95,6 +96,10 @@ func (f *fakeCluster) AppNames(context.Context, *rest.Config) ([]string, error) 
 
 func (f *fakeCluster) AppStates(context.Context, *rest.Config) ([]cluster.AppState, error) {
 	return f.states, nil
+}
+
+func (f *fakeCluster) AppComponents(context.Context, *rest.Config, string) ([]cluster.Component, error) {
+	return f.components, nil
 }
 
 func (f *fakeCluster) AppDiagnosis(_ context.Context, _ *rest.Config, app string) (cluster.Diagnosis, error) {

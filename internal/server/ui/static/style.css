@@ -102,6 +102,12 @@ pre {
 }
 .chain > li.Failed { border-color: var(--failed); }
 
+/* The components sit inside a card already, so they are rows rather than cards of their own. */
+.components { list-style: none; padding: 0; margin: 0 0 0.9rem; }
+.components > li { padding: 0.55rem 0; border-top: 1px solid var(--line); }
+.components > li:first-child { border-top: none; padding-top: 0; }
+.address { margin: 0.2rem 0 0; font-size: 0.9rem; word-break: break-all; }
+
 .app-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .app-head h1 { margin: 0; }
 .app-head .name { font-weight: 600; text-decoration: none; }

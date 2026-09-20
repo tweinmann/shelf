@@ -131,6 +131,24 @@ func runningPlatform() *fakePlatform {
 				},
 				Host: "greeter-dev.example.com",
 				URL:  "https://greeter-dev.example.com/",
+				Components: []ops.Component{
+					{
+						Component: cluster.Component{Name: "check", Phase: cluster.PhaseWorking},
+						Internal:  true,
+					},
+					{
+						Component: cluster.Component{Name: "db", Phase: cluster.PhaseReady,
+							Ports: []cluster.Port{{Name: "main", Number: 5432}}},
+						Address:  "db:5432",
+						Internal: true,
+					},
+					{
+						Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
+							Ports: []cluster.Port{{Name: "main", Number: 80}}, Path: "/"},
+						Address: "greeter-dev.example.com/",
+						URL:     "https://greeter-dev.example.com/",
+					},
+				},
 			},
 			{
 				AppState: cluster.AppState{
@@ -144,6 +162,14 @@ func runningPlatform() *fakePlatform {
 				},
 				Host: "shop-dev.example.com",
 				URL:  "https://shop-dev.example.com/",
+				Components: []ops.Component{
+					{
+						Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
+							Ports: []cluster.Port{{Name: "http", Number: 8080}}, Path: "/"},
+						Address: "shop-dev.example.com/",
+						URL:     "https://shop-dev.example.com/",
+					},
+				},
 			},
 		},
 		diagnoses: map[string]cluster.Diagnosis{
@@ -305,6 +331,19 @@ func TestPages(t *testing.T) {
 		golden(t, "app-failed", get(h, "/apps/shop", cookie))
 	})
 
+	// An app that was just added has no values in the cluster yet, so shelf cannot say what it is
+	// made of. The page says so rather than claiming the app has no components.
+	t.Run("components not known yet", func(t *testing.T) {
+		t.Parallel()
+		fresh := runningPlatform()
+		fresh.apps[0].Components = nil
+		h, cookie := claimed(t, fresh)
+		body := get(h, "/apps/greeter", cookie).Body.String()
+		if !strings.Contains(body, "does not know yet what this app is made of") {
+			t.Errorf("the page does not say why the components are missing:\n%s", body)
+		}
+	})
+
 	t.Run("cluster unreachable", func(t *testing.T) {
 		t.Parallel()
 		down := &fakePlatform{status: ops.Status{
@@ -339,12 +378,20 @@ func TestPages(t *testing.T) {
 					Phase:    cluster.PhaseReady,
 				},
 				Host: "greeter.dev.local",
+				Components: []ops.Component{{
+					Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
+						Ports: []cluster.Port{{Name: "main", Number: 80}}, Path: "/"},
+					Address: "greeter.dev.local/",
+				}},
 			}},
 		}
 		h, cookie := claimed(t, local)
 		rec := get(h, "/", cookie)
 		if strings.Contains(rec.Body.String(), `href="https://greeter.dev.local`) {
 			t.Error("the page offers a link to a name that cannot exist")
+		}
+		if page := get(h, "/apps/greeter", cookie); strings.Contains(page.Body.String(), `href="https://greeter.dev.local`) {
+			t.Error("a component offers a link to a name that cannot exist")
 		}
 		golden(t, "dashboard-reserved-domain", rec)
 	})

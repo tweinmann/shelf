@@ -19,6 +19,10 @@ import (
 // AppLabel marks the objects shelf creates for an app in SystemNamespace.
 const AppLabel = "shelf.dev/app"
 
+// ComponentLabel marks the objects the chart creates for one component of an app, which is how
+// the pods of a component are told apart from the rest of the app's.
+const ComponentLabel = "shelf.dev/component"
+
 var (
 	providerGVK    = schema.GroupVersionKind{Group: "fluxcd.controlplane.io", Version: "v1", Kind: "ResourceSetInputProvider"}
 	helmReleaseGVK = schema.GroupVersionKind{Group: "helm.toolkit.fluxcd.io", Version: "v2", Kind: "HelmRelease"}

@@ -1458,6 +1458,22 @@ Results (2026-09-20):
 - Left behind in the dev registry: a second tag `sha-test` on `smoke/hello-deploy`, made to
   prove the rollback. The dev registry has no delete endpoint; `just cluster-reset` clears it.
 
+**The components of an app (2026-09-20).** Added after the acceptance, because the page said only
+where the *app* answers and never what it is made of. `/apps/{name}` now lists every component
+with its state and its address: a link where a browser reaches it, the host and path where the
+cluster is not exposed, and `db:5432` — how a sibling reaches it — for a component without a
+route. `shelf app status <name>` prints the same three cases.
+
+- The source is the values ConfigMap `<app>-values` that the deploy Kustomization writes, because
+  that is the document the chart renders from. It names every component; the Ingresses would have
+  named only the routed ones, and `db` and `check` would have been invisible.
+- `cluster.AppStates` was left alone. Components are read per app by `cluster.AppComponents` and
+  filled in by `ops.App`, not by `ops.Apps`: the dashboard keeps one address per app, because ten
+  apps with four components each is a wall, and the components belong on the page of their app.
+- Whether a component gets a link is taken from the app's own URL rather than decided a second
+  time from the settings. Two places deciding when a name is reachable is how a link to
+  `greeter.dev.local` gets offered again.
+
 **A warning is not a guard (2026-09-20).** During the Phase 6 acceptance, `just smoke-init` was
 run against the dev cluster, which was serving `greeter-dev.tobile.ch` from the Phase 5
 exposure. The script passes `--domain dev.local` hard-coded, so the platform moved the app to
