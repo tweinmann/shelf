@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"slices"
 	"time"
 
@@ -13,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
+
+	"github.com/tweinmann/shelf/internal/progress"
 )
 
 // Names of the objects that expose a cluster. They all live in SystemNamespace, next to the
@@ -37,7 +38,8 @@ type ExposeOptions struct {
 	// Credentials is the credentials.json of that tunnel, or nil to keep the stored one.
 	Credentials []byte
 	Timeout     time.Duration
-	Out         io.Writer
+	// Report receives what happens; nil reports nothing.
+	Report progress.Reporter
 }
 
 // secret returns an opaque Secret in SystemNamespace that the platform watches.
@@ -88,15 +90,15 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 	if err != nil {
 		return err
 	}
-	out := o.Out
+	rep := progress.OrDiscard(o.Report)
 
 	if o.Credentials != nil {
-		if err := c.applyReport(ctx, out, secret(TunnelSecretName,
+		if err := c.applyReport(ctx, rep, secret(TunnelSecretName,
 			map[string]string{"credentials.json": string(o.Credentials)})); err != nil {
 			return err
 		}
 	}
-	if err := c.applyReport(ctx, out, ExposeProvider(o)); err != nil {
+	if err := c.applyReport(ctx, rep, ExposeProvider(o)); err != nil {
 		return err
 	}
 
@@ -106,14 +108,14 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 	}
 	settings.TunnelTarget = o.TunnelID + ".cfargotunnel.com"
 	for _, obj := range ConfigObjects(settings) {
-		if err := c.applyReport(ctx, out, obj); err != nil {
+		if err := c.applyReport(ctx, rep, obj); err != nil {
 			return err
 		}
 	}
 	// The expose ResourceSet generates cloudflared only once its provider exists. Reconciling
 	// the platform applies it again with the provider in place; without this the tunnel would
 	// come up only at the next interval.
-	err = c.step(ctx, out, "the platform", func(ctx context.Context) (string, error) {
+	err = c.step(ctx, rep, "the platform", func(ctx context.Context) (string, error) {
 		_, err := c.reconcileAndWait(ctx, platformSync, readyCondition)
 		return "", err
 	})
@@ -121,7 +123,7 @@ func Expose(ctx context.Context, cfg *rest.Config, o ExposeOptions) error {
 		return err
 	}
 
-	return c.step(ctx, out, "the tunnel", func(ctx context.Context) (string, error) {
+	return c.step(ctx, rep, "the tunnel", func(ctx context.Context) (string, error) {
 		return "", c.waitFor(ctx, ref{gvk: deploymentGVK, namespace: SystemNamespace, name: CloudflaredName}, current)
 	})
 }
@@ -183,12 +185,12 @@ func ClusterSettings(ctx context.Context, cfg *rest.Config) (Settings, error) {
 	return c.settings(ctx)
 }
 
-// applyReport applies an object and prints what happened to it.
-func (c *client) applyReport(ctx context.Context, out io.Writer, obj *unstructured.Unstructured) error {
+// applyReport applies an object and reports what happened to it.
+func (c *client) applyReport(ctx context.Context, rep progress.Reporter, obj *unstructured.Unstructured) error {
 	action, err := c.apply(ctx, obj)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "%s: %s\n", describe(obj), action)
+	rep.Report(progress.Applied(describe(obj), string(action), ""))
 	return nil
 }

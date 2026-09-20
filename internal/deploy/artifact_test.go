@@ -134,7 +134,7 @@ func TestFetch(t *testing.T) {
 	}
 
 	good := push("hello-deploy:main", ContentMediaType, tarball(t, map[string]string{"configmap.yaml": helloConfigMap(t)}))
-	app, err := Fetch(context.Background(), good, true)
+	app, err := Fetch(context.Background(), good, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +143,10 @@ func TestFetch(t *testing.T) {
 	}
 
 	other := push("image:latest", types.DockerLayer, []byte("x"))
-	if _, err := Fetch(context.Background(), other, true); err == nil || !strings.Contains(err.Error(), "not a deploy artifact") {
+	if _, err := Fetch(context.Background(), other, nil, true); err == nil || !strings.Contains(err.Error(), "not a deploy artifact") {
 		t.Errorf("error %v", err)
 	}
-	if _, err := Fetch(context.Background(), u.Host+"/missing:main", true); err == nil {
+	if _, err := Fetch(context.Background(), u.Host+"/missing:main", nil, true); err == nil {
 		t.Error("a missing artifact must be an error")
 	}
 }

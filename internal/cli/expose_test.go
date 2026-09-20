@@ -3,15 +3,12 @@ package cli
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"k8s.io/client-go/rest"
-
 	"github.com/tweinmann/shelf/internal/cloudflare"
 	"github.com/tweinmann/shelf/internal/cluster"
+	"github.com/tweinmann/shelf/internal/ops"
 )
 
 // fakeCloudflare answers like the Cloudflare API without talking to it.
@@ -76,75 +73,38 @@ func (f *fakeCloudflare) DeleteRecord(_ context.Context, _, name string) (bool, 
 	return true, nil
 }
 
-// exposeEnv installs fakes for the cluster and Cloudflare and returns them.
-type exposeEnv struct {
-	apps        []string
-	api         *fakeCloudflare
-	settings    cluster.Settings
-	stored      []byte
-	settingsErr error
-	calls       []cluster.ExposeOptions
-	kubeconfig  string
-}
-
-func newExposeEnv(t *testing.T) *exposeEnv {
+// exposeHarness is a cluster that has a domain but is not exposed yet, with a token at hand.
+func exposeHarness(t *testing.T) *harness {
 	t.Helper()
-	kubeconfig := filepath.Join(t.TempDir(), "config")
-	if err := os.WriteFile(kubeconfig, []byte(testKubeconfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env := &exposeEnv{
-		api:        &fakeCloudflare{accounts: []string{"acc-1"}},
-		settings:   cluster.Settings{Domain: "example.com", HostSuffix: "-dev"},
-		kubeconfig: kubeconfig,
-	}
-	oldSettings, oldCreds, oldExpose, oldNew := clusterSettings, tunnelCredentials, exposeCluster, newCloudflare
-	t.Cleanup(func() {
-		clusterSettings, tunnelCredentials, exposeCluster, newCloudflare = oldSettings, oldCreds, oldExpose, oldNew
-	})
-	clusterSettings = func(context.Context, *rest.Config) (cluster.Settings, error) {
-		return env.settings, env.settingsErr
-	}
-	tunnelCredentials = func(context.Context, *rest.Config) ([]byte, error) { return env.stored, nil }
-	oldApps := appNames
-	t.Cleanup(func() { appNames = oldApps })
-	appNames = func(context.Context, *rest.Config) ([]string, error) { return env.apps, nil }
-	exposeCluster = func(_ context.Context, _ *rest.Config, o cluster.ExposeOptions) error {
-		env.calls = append(env.calls, o)
-		return nil
-	}
-	newCloudflare = func(string) cloudflareAPI { return env.api }
-	return env
-}
-
-func (e *exposeEnv) run(t *testing.T, args ...string) (stdout, stderr string, code int) {
-	t.Helper()
-	return run(t, append([]string{"init", "expose", "--kubeconfig", e.kubeconfig}, args...)...)
+	h := newHarness(t)
+	h.cluster.settings = cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
+	h.env[ops.EnvCloudflareToken] = "cf-secret-token"
+	return h
 }
 
 func TestInitExposeCreatesTunnel(t *testing.T) {
-	env := newExposeEnv(t)
-	t.Setenv(envCloudflareToken, "cf-secret-token")
+	t.Parallel()
+	h := exposeHarness(t)
 
-	stdout, stderr, code := env.run(t, "--yes")
+	stdout, stderr, code := h.run(t, "init", "expose", "--yes")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
 	if strings.Contains(stdout+stderr, "cf-secret-token") {
 		t.Fatal("the token appears in the output")
 	}
-	if len(env.api.created) != 1 || env.api.created[0] != "shelf-dev" {
-		t.Errorf("created %v; the tunnel is named after the host suffix", env.api.created)
+	if len(h.api.created) != 1 || h.api.created[0] != "shelf-dev" {
+		t.Errorf("created %v; the tunnel is named after the host suffix", h.api.created)
 	}
-	if len(env.calls) != 1 {
-		t.Fatalf("expose called %d times", len(env.calls))
+	if len(h.cluster.exposed) != 1 {
+		t.Fatalf("expose called %d times", len(h.cluster.exposed))
 	}
-	got := env.calls[0]
+	got := h.cluster.exposed[0]
 	if got.TunnelID != "new-tunnel" || string(got.Credentials) != `{"TunnelID":"new-tunnel"}` {
 		t.Errorf("options %+v", got)
 	}
 	for _, want := range []string{"hosts     <app>-dev.example.com", "tunnel    shelf-dev",
-		"target    new-tunnel.cfargotunnel.com"} {
+		"tunnel shelf-dev created", "target    new-tunnel.cfargotunnel.com"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
@@ -152,102 +112,98 @@ func TestInitExposeCreatesTunnel(t *testing.T) {
 }
 
 func TestInitExposeReusesTunnel(t *testing.T) {
-	env := newExposeEnv(t)
-	env.api.existing = &cloudflare.Tunnel{ID: "old-tunnel", Name: "shelf-dev"}
-	env.stored = []byte(`{"TunnelID":"old-tunnel","TunnelSecret":"x"}`)
-	t.Setenv(envCloudflareToken, "cf-secret-token")
+	t.Parallel()
+	h := exposeHarness(t)
+	h.api.existing = &cloudflare.Tunnel{ID: "old-tunnel", Name: "shelf-dev"}
+	h.cluster.tunnelCreds = []byte(`{"TunnelID":"old-tunnel","TunnelSecret":"x"}`)
 
-	_, stderr, code := env.run(t, "--yes")
+	_, stderr, code := h.run(t, "init", "expose", "--yes")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	if len(env.api.created) != 0 || len(env.api.deleted) != 0 {
+	if len(h.api.created) != 0 || len(h.api.deleted) != 0 {
 		t.Errorf("created %v, deleted %v; an existing tunnel with credentials is reused",
-			env.api.created, env.api.deleted)
+			h.api.created, h.api.deleted)
 	}
-	if got := env.calls[0]; got.TunnelID != "old-tunnel" || got.Credentials != nil {
+	if got := h.cluster.exposed[0]; got.TunnelID != "old-tunnel" || got.Credentials != nil {
 		t.Errorf("options %+v; the stored credentials must be kept", got)
 	}
 }
 
 func TestInitExposeReplacesTunnelWithoutCredentials(t *testing.T) {
-	env := newExposeEnv(t)
-	env.api.existing = &cloudflare.Tunnel{ID: "old-tunnel", Name: "shelf-dev"}
-	t.Setenv(envCloudflareToken, "cf-secret-token")
+	t.Parallel()
+	h := exposeHarness(t)
+	h.api.existing = &cloudflare.Tunnel{ID: "old-tunnel", Name: "shelf-dev"}
 
-	stdout, _, code := env.run(t, "--yes")
+	stdout, _, code := h.run(t, "init", "expose", "--yes")
 	if code != 0 {
 		t.Fatalf("exit code %d", code)
 	}
-	if len(env.api.deleted) != 1 || env.api.deleted[0] != "old-tunnel" || len(env.api.created) != 1 {
-		t.Errorf("deleted %v, created %v", env.api.deleted, env.api.created)
+	if len(h.api.deleted) != 1 || h.api.deleted[0] != "old-tunnel" || len(h.api.created) != 1 {
+		t.Errorf("deleted %v, created %v", h.api.deleted, h.api.created)
 	}
-	if !strings.Contains(stdout, "has to be replaced") {
+	if !strings.Contains(stdout, "has to be replaced") || !strings.Contains(stdout, "tunnel shelf-dev replaced") {
 		t.Errorf("stdout does not explain the replacement:\n%s", stdout)
 	}
 }
 
 func TestInitExposeDeclined(t *testing.T) {
-	env := newExposeEnv(t)
-	env.api.existing = &cloudflare.Tunnel{ID: "old-tunnel", Name: "shelf-dev"}
-	t.Setenv(envCloudflareToken, "cf-secret-token")
+	t.Parallel()
+	h := exposeHarness(t)
+	h.api.existing = &cloudflare.Tunnel{ID: "old-tunnel", Name: "shelf-dev"}
 
-	cmd := New(images)
-	var out, errOut strings.Builder
-	cmd.SetOut(&out)
-	cmd.SetErr(&errOut)
-	cmd.SetIn(strings.NewReader("n\n"))
-	cmd.SetArgs([]string{"init", "expose", "--kubeconfig", env.kubeconfig})
-	if code := Execute(context.Background(), cmd); code != 1 {
+	_, stderr, code := h.runWithInput(t, "n\n", "init", "expose")
+	if code != 1 {
 		t.Fatalf("exit code %d", code)
 	}
-	if len(env.api.deleted) != 0 || len(env.calls) != 0 {
+	if len(h.api.deleted) != 0 || len(h.cluster.exposed) != 0 {
 		t.Error("nothing may change when the replacement is declined")
 	}
-	if !strings.Contains(errOut.String(), "aborted") {
-		t.Errorf("stderr %q", errOut.String())
+	if !strings.Contains(stderr, "aborted") {
+		t.Errorf("stderr %q", stderr)
 	}
 }
 
 func TestInitExposeErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
-		token   string
-		setup   func(*exposeEnv)
+		noToken bool
+		setup   func(*harness)
 		wantErr string
 	}{
-		{name: "no token", wantErr: "CF_API_TOKEN is not set"},
+		{name: "no token", noToken: true, wantErr: "CF_API_TOKEN is not set"},
 		{
 			name:    "cluster without domain",
-			token:   "cf-secret-token",
-			setup:   func(e *exposeEnv) { e.settings = cluster.Settings{} },
+			setup:   func(h *harness) { h.cluster.settings = cluster.Settings{} },
 			wantErr: "shelf init cluster",
 		},
 		{
 			name:    "token refused",
-			token:   "cf-secret-token",
-			setup:   func(e *exposeEnv) { e.api.verifyErr = errors.New("Invalid request headers (code 6003)") },
+			setup:   func(h *harness) { h.api.verifyErr = errors.New("Invalid request headers (code 6003)") },
 			wantErr: "CF_API_TOKEN was refused",
 		},
 		{
 			name:    "several accounts",
-			token:   "cf-secret-token",
-			setup:   func(e *exposeEnv) { e.api.accounts = []string{"acc-1", "acc-2"} },
+			setup:   func(h *harness) { h.api.accounts = []string{"acc-1", "acc-2"} },
 			wantErr: "CF_ACCOUNT_ID",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := newExposeEnv(t)
-			if tt.setup != nil {
-				tt.setup(env)
+			t.Parallel()
+			h := exposeHarness(t)
+			if tt.noToken {
+				delete(h.env, ops.EnvCloudflareToken)
 			}
-			t.Setenv(envCloudflareToken, tt.token)
-			_, stderr, code := env.run(t, "--yes")
+			if tt.setup != nil {
+				tt.setup(h)
+			}
+			_, stderr, code := h.run(t, "init", "expose", "--yes")
 			if code == 0 || !strings.Contains(stderr, tt.wantErr) {
 				t.Errorf("exit code %d, stderr %q, want %q", code, stderr, tt.wantErr)
 			}
-			if len(env.calls) != 0 {
+			if len(h.cluster.exposed) != 0 {
 				t.Error("nothing may be exposed")
 			}
 		})
@@ -255,31 +211,31 @@ func TestInitExposeErrors(t *testing.T) {
 }
 
 func TestInitExposeAccountFromEnvironment(t *testing.T) {
-	env := newExposeEnv(t)
-	env.api.accounts = []string{"acc-1", "acc-2"}
-	t.Setenv(envCloudflareToken, "cf-secret-token")
-	t.Setenv(envCloudflareAccount, "acc-2")
+	t.Parallel()
+	h := exposeHarness(t)
+	h.api.accounts = []string{"acc-1", "acc-2"}
+	h.env[ops.EnvCloudflareAccount] = "acc-2"
 
-	_, stderr, code := env.run(t, "--yes", "--tunnel", "my-tunnel")
+	_, stderr, code := h.run(t, "init", "expose", "--yes", "--tunnel", "my-tunnel")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	if env.api.accountID != "acc-2" {
-		t.Errorf("account %q", env.api.accountID)
+	if h.api.accountID != "acc-2" {
+		t.Errorf("account %q", h.api.accountID)
 	}
-	if len(env.api.created) != 1 || env.api.created[0] != "my-tunnel" {
-		t.Errorf("created %v", env.api.created)
+	if len(h.api.created) != 1 || h.api.created[0] != "my-tunnel" {
+		t.Errorf("created %v", h.api.created)
 	}
 }
 
 // TestInitExposePublishesRunningApps checks that an exposure set up after the apps publishes
 // their host names, instead of waiting for the next `shelf app add`.
 func TestInitExposePublishesRunningApps(t *testing.T) {
-	env := newExposeEnv(t)
-	env.apps = []string{"greeter", "shop"}
-	t.Setenv(envCloudflareToken, "cf-secret-token")
+	t.Parallel()
+	h := exposeHarness(t)
+	h.cluster.apps = []string{"greeter", "shop"}
 
-	stdout, stderr, code := env.run(t, "--yes")
+	stdout, stderr, code := h.run(t, "init", "expose", "--yes")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
@@ -287,12 +243,12 @@ func TestInitExposePublishesRunningApps(t *testing.T) {
 		"greeter-dev.example.com -> new-tunnel.cfargotunnel.com in zone-1",
 		"shop-dev.example.com -> new-tunnel.cfargotunnel.com in zone-1",
 	}
-	if len(env.api.records) != len(want) {
-		t.Fatalf("records %v, want %v", env.api.records, want)
+	if len(h.api.records) != len(want) {
+		t.Fatalf("records %v, want %v", h.api.records, want)
 	}
 	for i, w := range want {
-		if env.api.records[i] != w {
-			t.Errorf("record %d = %q, want %q", i, env.api.records[i], w)
+		if h.api.records[i] != w {
+			t.Errorf("record %d = %q, want %q", i, h.api.records[i], w)
 		}
 	}
 	if !strings.Contains(stdout, "DNS greeter-dev.example.com") {

@@ -32,7 +32,7 @@ const hello = "../../examples/hello/app.yaml"
 
 func run(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	cmd := New(images)
+	cmd := New(Options{Images: images})
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)

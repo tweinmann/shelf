@@ -31,7 +31,12 @@ Target product revised on 2026-09-20, after Phase 5: shelf becomes an appliance 
 phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions and the new
 phase plan in docs/plan.md; the work happens on the branch `appliance`, so `main` still carries
 the old path.
-Next: Phase 6 (operations layer: `internal/ops` and `internal/progress`).
+Phase 6 complete (awaiting approval): `internal/ops` holds the operations both the CLI and the
+coming server call, `internal/progress` replaces the `io.Writer` progress pattern with typed
+events, `cli.New` takes injected dependencies instead of package variables, and the CLI tests
+run in parallel under `-race`. The output did not change: `just smoke-apps` and `just smoke-init`
+print what Phase 5 printed.
+Next: Phase 7 (`shelf serve`: server, login, read-only dashboard).
 
 ## Working agreements
 
@@ -65,7 +70,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 
 | Command | Run from | Purpose |
 |---|---|---|
-| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, helm lint, kubeconform, examples) |
+| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, `go test -race`, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
 | `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry:5000` (added to `/etc/hosts`), write kubeconfig (run after every container restart or rebuild) |
@@ -124,6 +129,14 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   manager `shelf`); it must not shell out to kubectl, helm or flux, and it knows nothing about
   `~/.shelf`, HTTP or the operator's machine. Orchestration lives in `internal/ops`, flags and
   prompts in `internal/cli`, routes and templates in `internal/server`
+- Operations report through `progress.Reporter`, never to an `io.Writer`: the CLI renders the
+  events as text (`progress.Writer`), the server keeps them as a job log. The exact wording of
+  a line is decided in `internal/progress` alone, with a golden file over every kind of event
+- What an operation needs from the machine it runs on (backup directory, tokens, registry
+  authenticator) goes into `ops.Env`; what a test replaces (cluster, registry, Cloudflare) is a
+  field of `ops.Ops`. No package-level variable is a test seam — tests must be able to run in
+  parallel, which also rules out `t.Setenv`: the CLI reads the environment through
+  `cli.Options.Getenv`
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
   themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):

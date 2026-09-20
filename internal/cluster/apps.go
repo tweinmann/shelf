@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+
+	"github.com/tweinmann/shelf/internal/progress"
 )
 
 // AppLabel marks the objects shelf creates for an app in SystemNamespace.
@@ -43,7 +44,8 @@ type AppOptions struct {
 	// Secrets are all secret values of the app; they replace the stored ones.
 	Secrets map[string]string
 	Timeout time.Duration
-	Out     io.Writer
+	// Report receives what happens; nil reports nothing.
+	Report progress.Reporter
 }
 
 // AppSecret returns the Secret with an app's secret values.
@@ -124,19 +126,17 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 	if err != nil {
 		return err
 	}
-	out := o.Out
+	rep := progress.OrDiscard(o.Report)
 
 	for _, obj := range []*unstructured.Unstructured{AppSecret(o.Name, o.Secrets), AppProvider(o)} {
-		action, err := c.apply(ctx, obj)
-		if err != nil {
+		if err := c.applyReport(ctx, rep, obj); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s: %s\n", describe(obj), action)
 	}
 
 	repo := ref{gvk: ociRepositoryGVK, namespace: o.Name, name: deployName}
 	var revision string
-	err = c.step(ctx, out, "the deploy artifact", func(ctx context.Context) (string, error) {
+	err = c.step(ctx, rep, "the deploy artifact", func(ctx context.Context) (string, error) {
 		// The ResourceSet may still be creating the OCIRepository, or updating its URL.
 		err := c.waitFor(ctx, repo, func(obj *unstructured.Unstructured) (bool, string, error) {
 			url, _, _ := unstructured.NestedString(obj.Object, "spec", "url")
@@ -158,7 +158,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 	}
 
 	ks := ref{gvk: kustomizationGVK, namespace: o.Name, name: deployName}
-	err = c.step(ctx, out, "the app values", func(ctx context.Context) (string, error) {
+	err = c.step(ctx, rep, "the app values", func(ctx context.Context) (string, error) {
 		return "", c.waitFor(ctx, ks, appliedRevision(revision))
 	})
 	if err != nil {
@@ -167,7 +167,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 
 	chart := ref{gvk: ociRepositoryGVK, namespace: o.Name, name: chartName}
 	release := ref{gvk: helmReleaseGVK, namespace: o.Name, name: o.Name}
-	return c.step(ctx, out, "the app", func(ctx context.Context) (string, error) {
+	return c.step(ctx, rep, "the app", func(ctx context.Context) (string, error) {
 		if err := c.waitFor(ctx, chart, readyCondition); err != nil {
 			return "", err
 		}
@@ -182,13 +182,15 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 
 // RemoveApp deletes the app's provider, waits until the platform has removed the app namespace
 // with everything in it, and deletes the app's Secret. It reports whether anything existed.
-func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration, out io.Writer) (bool, error) {
+func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
+	report progress.Reporter) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	c, err := newClient(cfg)
 	if err != nil {
 		return false, err
 	}
+	rep := progress.OrDiscard(report)
 	found := false
 	provider := ref{gvk: providerGVK, namespace: SystemNamespace, name: app}
 	deleted, err := c.delete(ctx, provider)
@@ -197,11 +199,11 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 	}
 	if deleted {
 		found = true
-		fmt.Fprintf(out, "%s: deleted\n", provider)
+		rep.Report(progress.Applied(provider.String(), "deleted", ""))
 	}
 
 	ns := ref{gvk: namespaceGVK, name: app}
-	err = c.step(ctx, out, "namespace "+app+" to be deleted", func(ctx context.Context) (string, error) {
+	err = c.step(ctx, rep, "namespace "+app+" to be deleted", func(ctx context.Context) (string, error) {
 		return "", wait.PollUntilContextCancel(ctx, pollInterval, true, func(ctx context.Context) (bool, error) {
 			obj, err := c.get(ctx, ns)
 			if err != nil {
@@ -231,7 +233,7 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 	}
 	if deleted {
 		found = true
-		fmt.Fprintf(out, "%s: deleted\n", secret)
+		rep.Report(progress.Applied(secret.String(), "deleted", ""))
 	}
 	return found, nil
 }

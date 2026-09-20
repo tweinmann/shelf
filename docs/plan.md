@@ -1306,10 +1306,11 @@ Design:
 - `internal/progress`: a `Reporter` interface and a typed `Event` (step started, step done with
   its duration, object applied with its action, DNS record, warning). `progress.Writer(w)` prints
   exactly what the CLI prints today; that is the regression test.
-- `internal/ops`: `LoadTarget`, `PlanCluster`, `InitCluster`, `Expose`, `AddApp`, `RemoveApp`,
-  `Apps`, `Diagnose`. Everything the operator machine supplies — the secret backup directory,
+- `internal/ops`: `LoadTarget`, `PlanCluster`, `InitCluster`, `PlanExpose`, `Expose`, `AddApp`,
+  `RemoveApp`, `Apps`. Everything the operator machine supplies — the secret backup directory,
   the registry and Cloudflare credentials, the registry authenticator — arrives in one `Env`
-  struct instead of through environment reads and package-level variables.
+  struct instead of through environment reads and package-level variables. `Diagnose` belongs
+  to this package too but is written in Phase 7, where the dashboard needs it.
 - `internal/cluster` keeps its rule: Kubernetes API only. The one change is mechanical —
   `Out io.Writer` in the option structs becomes a `progress.Reporter`. This is an edit to
   approved code and worth naming as such: keeping the writer and having the server scrape its own
@@ -1326,6 +1327,32 @@ Design:
 seam is left in `internal/cli`; `Out io.Writer` is gone from every option struct in
 `internal/cluster`; `go test ./... -race` is green with the CLI tests running in parallel;
 `just smoke-init`, `just smoke-apps` and `just smoke-expose` pass untouched.
+
+Results (2026-09-20):
+
+- Every acceptance criterion is met, except that `just smoke-expose` was not run: it needs the
+  Cloudflare API token, which only the maintainer has. `just smoke-apps` and `just smoke-init`
+  passed against the dev cluster, and their output is line for line what Phase 5 printed —
+  including `DNS: skipped`, the secret sources and the backup path.
+- The regression guard for the output is a golden file in `internal/progress/testdata`, which
+  renders one event of every kind. It is the one place where the format of a line is decided
+  now, so a change to it is visible in a diff instead of spread over four packages.
+- The plan/apply split for `init expose` turned out better than the sentinel error it was
+  designed as. `PlanExpose` creates a tunnel when there is none and otherwise reports
+  `NeedsReplacement`; the caller asks and calls `ReplaceTunnel`. A sentinel error would have
+  meant calling `PlanExpose` again after the confirmation, which repeats the API calls and the
+  lines it printed. What this costs: the header lines of `init expose` now appear after the
+  Cloudflare calls instead of before them, so an invalid token shows only the error. Nothing a
+  test asserts, but worth knowing.
+- `cli.New` takes an `Options` struct now: the resolver, the version, a `Getenv` and a factory
+  for the operations. That is what makes the tests parallel — they used to swap package
+  variables and call `t.Setenv`, and neither works under `t.Parallel()`. It also puts every
+  environment read in one place, which is what the service in Phase 10 will replace wholesale.
+- `go test -race` is part of `just test` from now on, since the tests run in parallel and the
+  server will run operations concurrently.
+- Not done here, on purpose: `ops.Ops` holds one cluster and is built per command. Whether the
+  server keeps one per job or one per process is a Phase 7 question, and guessing it now would
+  have added a lifetime nobody needs yet.
 
 ### Phase 7 – `shelf serve`: server, login, read-only dashboard
 The HTTP server with embedded templates, the claim/password/session/CSRF model, and a dashboard

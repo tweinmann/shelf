@@ -12,7 +12,7 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code := cli.Execute(ctx, cli.New(render.NewRegistryResolver()))
+	code := cli.Execute(ctx, cli.New(cli.Options{Images: render.NewRegistryResolver()}))
 	stop()
 	os.Exit(code)
 }

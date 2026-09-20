@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/render"
 	"github.com/tweinmann/shelf/internal/schema"
+	"github.com/tweinmann/shelf/internal/secrets"
 	"github.com/tweinmann/shelf/internal/validate"
 )
 
@@ -26,8 +29,71 @@ var ErrReported = errors.New("errors reported")
 // Version is set at build time with -ldflags "-X github.com/tweinmann/shelf/internal/cli.Version=...".
 var Version = ""
 
-// New returns the root command. The resolver is injected so tests can avoid the network.
-func New(resolver render.Resolver) *cobra.Command {
+// Options are what the command line needs from the outside world. Every field has a real
+// default, and tests fill them in instead, so that no test reads the environment, reaches a
+// registry or touches a cluster — and so that tests can run in parallel, which they cannot
+// while they swap package-level variables.
+type Options struct {
+	// Images resolves image references; `shelf render` needs a registry without it.
+	Images render.Resolver
+	// Version overrides the version this binary reports.
+	Version string
+	// Getenv reads an environment variable. Nil means os.Getenv.
+	Getenv func(string) string
+	// NewOps builds the operations against a cluster. Nil means ops.New, which talks to the
+	// real cluster, registry and Cloudflare.
+	NewOps func(ops.Target, ops.Env) *ops.Ops
+}
+
+func (o Options) getenv(key string) string {
+	if o.Getenv != nil {
+		return o.Getenv(key)
+	}
+	return os.Getenv(key)
+}
+
+func (o Options) version() string {
+	if o.Version != "" {
+		return o.Version
+	}
+	return buildVersion()
+}
+
+func (o Options) newOps(t ops.Target, env ops.Env) *ops.Ops {
+	if o.NewOps != nil {
+		return o.NewOps(t, env)
+	}
+	return ops.New(t, env)
+}
+
+// shelfHome is where shelf keeps state on the host: $SHELF_HOME, or ~/.shelf.
+func (o Options) shelfHome() (string, error) {
+	if dir := o.getenv("SHELF_HOME"); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".shelf"), nil
+}
+
+// env collects what this machine supplies to an operation. The registry login is not part of
+// it: only `shelf init cluster` stores one, and only it reports a login that is incomplete.
+func (o Options) env() (ops.Env, error) {
+	home, err := o.shelfHome()
+	if err != nil {
+		return ops.Env{}, err
+	}
+	return ops.Env{
+		Backup:            secrets.Backup{Dir: filepath.Join(home, "apps")},
+		CloudflareToken:   strings.TrimSpace(o.getenv(ops.EnvCloudflareToken)),
+		CloudflareAccount: strings.TrimSpace(o.getenv(ops.EnvCloudflareAccount)),
+	}, nil
+}
+
+// New returns the root command.
+func New(o Options) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "shelf",
 		Short:         "A small self-hosted app platform",
@@ -36,12 +102,12 @@ func New(resolver render.Resolver) *cobra.Command {
 	}
 	root.AddCommand(
 		newValidateCmd(),
-		newRenderCmd(resolver),
+		newRenderCmd(o.Images),
 		newBuildPlanCmd(),
 		newSchemaCmd(),
-		newInitCmd(),
-		newAppCmd(),
-		newVersionCmd(),
+		newInitCmd(o),
+		newAppCmd(o),
+		newVersionCmd(o),
 	)
 	return root
 }
@@ -226,18 +292,20 @@ func newSchemaCmd() *cobra.Command {
 	}
 }
 
-func newVersionCmd() *cobra.Command {
+func newVersionCmd(o Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the shelf version",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "shelf %s (app.yaml %s)\n", version(), schema.APIVersion)
+			fmt.Fprintf(cmd.OutOrStdout(), "shelf %s (app.yaml %s)\n", o.version(), schema.APIVersion)
 		},
 	}
 }
 
-func version() string {
+// buildVersion is the version stamped into this binary, or a marker that it is a development
+// build, which is what keeps `shelf init cluster` from guessing an artifact tag.
+func buildVersion() string {
 	if Version != "" {
 		return Version
 	}

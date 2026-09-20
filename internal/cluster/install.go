@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -12,6 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
+
+	"github.com/tweinmann/shelf/internal/progress"
 )
 
 // Options configure Install.
@@ -23,8 +24,8 @@ type Options struct {
 	Registry *RegistryAuth
 	// Timeout bounds the whole installation, including all waits.
 	Timeout time.Duration
-	// Out receives progress messages.
-	Out io.Writer
+	// Report receives what happens; nil reports nothing.
+	Report progress.Reporter
 }
 
 var (
@@ -46,7 +47,7 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	out := opts.Out
+	rep := progress.OrDiscard(opts.Report)
 
 	objs, err := FluxOperatorObjects()
 	if err != nil {
@@ -67,8 +68,8 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err := c.applyAll(ctx, rest, actions); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Flux Operator %s: %d objects, %s\n", FluxOperatorVersion, len(objs), summarize(actions))
-	err = c.step(ctx, out, "the operator", func(ctx context.Context) (string, error) {
+	rep.Report(progress.Info("Flux Operator %s: %d objects, %s", FluxOperatorVersion, len(objs), summarize(actions)))
+	err = c.step(ctx, rep, "the operator", func(ctx context.Context) (string, error) {
 		for _, obj := range rest {
 			if obj.GetKind() == "Deployment" {
 				if err := c.waitFor(ctx, refOf(obj), current); err != nil {
@@ -91,17 +92,15 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 		// `shelf init expose` writes the tunnel target; a later `init cluster` keeps it.
 		settings.TunnelTarget = current.TunnelTarget
 	}
-	if err := c.warnAboutOldHosts(ctx, out, current, settings); err != nil {
+	if err := c.warnAboutOldHosts(ctx, rep, current, settings); err != nil {
 		return err
 	}
 	for _, obj := range ConfigObjects(settings) {
-		action, err := c.apply(ctx, obj)
-		if err != nil {
+		if err := c.applyReport(ctx, rep, obj); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s: %s\n", describe(obj), action)
 	}
-	if err := c.ensureRegistrySecret(ctx, out, opts.Registry); err != nil {
+	if err := c.ensureRegistrySecret(ctx, rep, opts.Registry); err != nil {
 		return err
 	}
 
@@ -110,23 +109,23 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Flux %s (%s): %s\n", FluxVersion, describe(instance), action)
-	err = c.step(ctx, out, "Flux", func(ctx context.Context) (string, error) {
+	rep.Report(progress.Info("Flux %s (%s): %s", FluxVersion, describe(instance), action))
+	err = c.step(ctx, rep, "Flux", func(ctx context.Context) (string, error) {
 		return "", c.waitFor(ctx, refOf(instance), readyCondition)
 	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "Platform %s\n", opts.Platform)
-	return c.step(ctx, out, "the platform", func(ctx context.Context) (string, error) {
+	rep.Report(progress.Info("Platform %s", opts.Platform))
+	return c.step(ctx, rep, "the platform", func(ctx context.Context) (string, error) {
 		return c.waitForPlatform(ctx, opts.Platform)
 	})
 }
 
 // ensureRegistrySecret writes the registry credential if one is given or none exists yet. It
 // never prints the credential.
-func (c *client) ensureRegistrySecret(ctx context.Context, out io.Writer, auth *RegistryAuth) error {
+func (c *client) ensureRegistrySecret(ctx context.Context, rep progress.Reporter, auth *RegistryAuth) error {
 	secret, err := RegistrySecret(auth)
 	if err != nil {
 		return err
@@ -137,7 +136,7 @@ func (c *client) ensureRegistrySecret(ctx context.Context, out io.Writer, auth *
 			return err
 		}
 		if existing != nil {
-			fmt.Fprintf(out, "%s: kept (no GHCR_TOKEN given)\n", describe(secret))
+			rep.Report(progress.Applied(describe(secret), "kept (no GHCR_TOKEN given)", ""))
 			return nil
 		}
 	}
@@ -149,13 +148,13 @@ func (c *client) ensureRegistrySecret(ctx context.Context, out io.Writer, auth *
 	if auth != nil {
 		login = "for " + auth.Username + "@" + RegistryHost
 	}
-	fmt.Fprintf(out, "%s: %s, %s\n", describe(secret), action, login)
+	rep.Report(progress.Applied(describe(secret), string(action), login))
 	return nil
 }
 
 // warnAboutOldHosts points out the DNS records an app keeps under its previous name when the
 // domain or the host suffix changes.
-func (c *client) warnAboutOldHosts(ctx context.Context, out io.Writer, before, after Settings) error {
+func (c *client) warnAboutOldHosts(ctx context.Context, rep progress.Reporter, before, after Settings) error {
 	if !hostsChange(before, after) {
 		return nil
 	}
@@ -164,7 +163,7 @@ func (c *client) warnAboutOldHosts(ctx context.Context, out io.Writer, before, a
 		return err
 	}
 	if warning := OldHostWarning(before, after, apps); warning != "" {
-		fmt.Fprint(out, warning)
+		rep.Report(progress.Warning(warning))
 	}
 	return nil
 }
@@ -210,20 +209,16 @@ func summarize(actions map[Action]int) string {
 }
 
 // step runs a wait and reports how long it took and, if given, a detail.
-func (c *client) step(ctx context.Context, out io.Writer, what string, wait func(context.Context) (string, error)) error {
-	fmt.Fprintf(out, "  waiting for %s ... ", what)
+func (c *client) step(ctx context.Context, rep progress.Reporter, what string,
+	wait func(context.Context) (string, error)) error {
+	rep.Report(progress.Step(what))
 	start := time.Now()
 	detail, err := wait(ctx)
 	if err != nil {
-		fmt.Fprintln(out, "failed")
+		rep.Report(progress.StepFailed(what))
 		return err
 	}
-	elapsed := time.Since(start).Round(time.Second)
-	if detail != "" {
-		fmt.Fprintf(out, "done after %s: %s\n", elapsed, detail)
-	} else {
-		fmt.Fprintf(out, "done after %s\n", elapsed)
-	}
+	rep.Report(progress.StepDone(what, time.Since(start).Round(time.Second), detail))
 	return nil
 }
 

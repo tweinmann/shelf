@@ -1,107 +1,36 @@
 package cli
 
 import (
-	"context"
 	"errors"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"k8s.io/client-go/rest"
-
-	"github.com/tweinmann/shelf/internal/cluster"
+	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/schema"
-	"github.com/tweinmann/shelf/internal/secrets"
 )
-
-// fakeApps replaces registry and cluster access for the app commands.
-type fakeApps struct {
-	settings cluster.Settings
-	api      *fakeCloudflare
-	app      *schema.App
-	fetchErr error
-	stored   map[string]string
-	added    []cluster.AppOptions
-	removed  []string
-	found    bool
-	insecure bool
-	ref      string
-}
-
-func (f *fakeApps) install(t *testing.T) {
-	t.Helper()
-	oldFetch, oldSecrets, oldAdd, oldRemove := fetchApp, appSecrets, addApp, removeApp
-	oldSettings, oldNew := clusterSettings, newCloudflare
-	t.Cleanup(func() {
-		fetchApp, appSecrets, addApp, removeApp = oldFetch, oldSecrets, oldAdd, oldRemove
-		clusterSettings, newCloudflare = oldSettings, oldNew
-	})
-	clusterSettings = func(context.Context, *rest.Config) (cluster.Settings, error) { return f.settings, nil }
-	newCloudflare = func(string) cloudflareAPI { return f.api }
-	fetchApp = func(_ context.Context, ref string, insecure bool) (*schema.App, error) {
-		f.ref, f.insecure = ref, insecure
-		return f.app, f.fetchErr
-	}
-	appSecrets = func(context.Context, *rest.Config, string) (map[string]string, error) {
-		return f.stored, nil
-	}
-	addApp = func(_ context.Context, _ *rest.Config, o cluster.AppOptions) error {
-		f.added = append(f.added, o)
-		f.stored = o.Secrets
-		return nil
-	}
-	removeApp = func(_ context.Context, _ *rest.Config, name string, _ time.Duration, _ io.Writer) (bool, error) {
-		f.removed = append(f.removed, name)
-		return f.found, nil
-	}
-}
-
-// exposedApps is a cluster whose apps are reachable from the internet.
-func exposedApps(f *fakeApps) {
-	f.settings = cluster.Settings{Domain: "example.com", HostSuffix: "-dev", TunnelTarget: "t-1.cfargotunnel.com"}
-	f.api = &fakeCloudflare{}
-}
-
-func appWithSecrets(name string, secretNames ...string) *schema.App {
-	app := &schema.App{APIVersion: schema.APIVersion, Name: name, Secrets: map[string]*schema.Secret{}}
-	for _, s := range secretNames {
-		app.Secrets[s] = &schema.Secret{Generate: true}
-	}
-	return app
-}
-
-func appTestEnv(t *testing.T) (kubeconfig string, backup secrets.Backup) {
-	t.Helper()
-	kubeconfig = filepath.Join(t.TempDir(), "config")
-	if err := os.WriteFile(kubeconfig, []byte(testKubeconfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	home := t.TempDir()
-	t.Setenv("SHELF_HOME", home)
-	return kubeconfig, secrets.Backup{Dir: filepath.Join(home, "apps")}
-}
 
 const helloArtifact = "oci://shelf-registry:5000/hello-deploy:main"
 
 func TestAppAdd(t *testing.T) {
-	kubeconfig, backup := appTestEnv(t)
-	fake := &fakeApps{app: appWithSecrets("hello", "db-password")}
-	fake.install(t)
+	t.Parallel()
+	h := newHarness(t)
+	h.app = appWithSecrets("hello", "db-password")
 
-	stdout, stderr, code := run(t, "app", "add", "hello", helloArtifact, "--insecure-registry", "--kubeconfig", kubeconfig)
+	stdout, stderr, code := h.run(t, "app", "add", "hello", helloArtifact, "--insecure-registry")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	if fake.ref != "shelf-registry:5000/hello-deploy:main" || !fake.insecure {
-		t.Errorf("fetched %s insecure=%v", fake.ref, fake.insecure)
+	if h.fetched != "shelf-registry:5000/hello-deploy:main" || !h.insecure {
+		t.Errorf("fetched %s insecure=%v", h.fetched, h.insecure)
 	}
-	if len(fake.added) != 1 {
-		t.Fatalf("add called %d times", len(fake.added))
+	if h.pull != nil {
+		t.Error("the command line takes the registry login from the Docker config")
 	}
-	added := fake.added[0]
+	if len(h.cluster.added) != 1 {
+		t.Fatalf("add called %d times", len(h.cluster.added))
+	}
+	added := h.cluster.added[0]
 	if added.Name != "hello" || added.Artifact.String() != helloArtifact || !added.Insecure || added.Timeout <= 0 {
 		t.Errorf("options %+v", added)
 	}
@@ -109,7 +38,7 @@ func TestAppAdd(t *testing.T) {
 	if len(password) < 26 {
 		t.Fatalf("generated secret %q", password)
 	}
-	for _, want := range []string{"context   dev", "secret db-password: generated", "secret backup: " + backup.Path("hello")} {
+	for _, want := range []string{"context   dev", "secret db-password: generated", "secret backup: " + h.backup.Path("hello")} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
@@ -117,18 +46,18 @@ func TestAppAdd(t *testing.T) {
 	if strings.Contains(stdout+stderr, password) {
 		t.Error("the secret value appears in the output")
 	}
-	saved, err := backup.Load("hello")
+	saved, err := h.backup.Load("hello")
 	if err != nil || saved["db-password"] != password {
 		t.Fatalf("backup %v, %v", saved, err)
 	}
 
 	// A second add with a new secret keeps the old value and generates the new one.
-	fake.app = appWithSecrets("hello", "db-password", "api-key")
-	stdout, stderr, code = run(t, "app", "add", "hello", helloArtifact, "--kubeconfig", kubeconfig)
+	h.app = appWithSecrets("hello", "db-password", "api-key")
+	stdout, stderr, code = h.run(t, "app", "add", "hello", helloArtifact)
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	second := fake.added[1].Secrets
+	second := h.cluster.added[1].Secrets
 	if second["db-password"] != password || len(second["api-key"]) < 26 {
 		t.Errorf("secrets %v", second)
 	}
@@ -137,10 +66,10 @@ func TestAppAdd(t *testing.T) {
 	}
 
 	// After a cluster rebuild the backup restores the values.
-	fake.stored = nil
-	stdout, _, code = run(t, "app", "add", "hello", helloArtifact, "--kubeconfig", kubeconfig)
-	if code != 0 || fake.added[2].Secrets["db-password"] != password {
-		t.Fatalf("code %d, secrets %v", code, fake.added[2].Secrets)
+	h.cluster.stored = nil
+	stdout, _, code = h.run(t, "app", "add", "hello", helloArtifact)
+	if code != 0 || h.cluster.added[2].Secrets["db-password"] != password {
+		t.Fatalf("code %d, secrets %v", code, h.cluster.added[2].Secrets)
 	}
 	if !strings.Contains(stdout, "secret db-password: restored from the backup") {
 		t.Errorf("stdout:\n%s", stdout)
@@ -148,23 +77,24 @@ func TestAppAdd(t *testing.T) {
 }
 
 func TestAppAddWithoutSecrets(t *testing.T) {
-	kubeconfig, backup := appTestEnv(t)
-	fake := &fakeApps{app: appWithSecrets("web")}
-	fake.install(t)
-	_, stderr, code := run(t, "app", "add", "web", "oci://ghcr.io/o/web-deploy:main", "--kubeconfig", kubeconfig)
+	t.Parallel()
+	h := newHarness(t)
+	h.app = appWithSecrets("web")
+
+	_, stderr, code := h.run(t, "app", "add", "web", "oci://ghcr.io/o/web-deploy:main")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	if len(fake.added[0].Secrets) != 0 {
-		t.Errorf("secrets %v", fake.added[0].Secrets)
+	if len(h.cluster.added[0].Secrets) != 0 {
+		t.Errorf("secrets %v", h.cluster.added[0].Secrets)
 	}
-	if _, err := os.Stat(backup.Path("web")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(h.backup.Path("web")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("an app without secrets needs no backup: %v", err)
 	}
 }
 
 func TestAppAddErrors(t *testing.T) {
-	kubeconfig, _ := appTestEnv(t)
+	t.Parallel()
 	tests := []struct {
 		name     string
 		args     []string
@@ -179,13 +109,14 @@ func TestAppAddErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fake := &fakeApps{app: tt.app, fetchErr: tt.fetchErr}
-			fake.install(t)
-			_, stderr, code := run(t, append(append([]string{"app", "add"}, tt.args...), "--kubeconfig", kubeconfig)...)
+			t.Parallel()
+			h := newHarness(t)
+			h.app, h.fetchErr = tt.app, tt.fetchErr
+			_, stderr, code := h.run(t, append([]string{"app", "add"}, tt.args...)...)
 			if code == 0 || !strings.Contains(stderr, tt.wantErr) {
 				t.Errorf("code %d, stderr %q, want %q", code, stderr, tt.wantErr)
 			}
-			if len(fake.added) != 0 {
+			if len(h.cluster.added) != 0 {
 				t.Error("nothing may be added")
 			}
 		})
@@ -193,10 +124,7 @@ func TestAppAddErrors(t *testing.T) {
 }
 
 func TestAppRm(t *testing.T) {
-	kubeconfig, backup := appTestEnv(t)
-	if err := backup.Save("hello", map[string]string{"db-password": "x"}); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
 	tests := []struct {
 		name        string
 		args        []string
@@ -208,91 +136,95 @@ func TestAppRm(t *testing.T) {
 		wantErr     string
 	}{
 		{name: "confirmed", args: []string{"hello"}, stdin: "y\n", found: true, wantRemoved: 1,
-			wantOut: "The secret backup stays in " + backup.Path("hello")},
+			wantOut: "The secret backup stays in "},
 		{name: "declined", args: []string{"hello"}, stdin: "n\n", found: true, wantCode: 1, wantErr: "aborted"},
 		{name: "unknown app", args: []string{"nope", "--yes"}, wantCode: 1, wantRemoved: 1, wantErr: "app nope does not exist"},
 		{name: "invalid name", args: []string{"a_b", "--yes"}, wantCode: 1, wantErr: "DNS label"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fake := &fakeApps{found: tt.found}
-			fake.install(t)
-			cmd := New(images)
-			var out, errOut strings.Builder
-			cmd.SetOut(&out)
-			cmd.SetErr(&errOut)
-			cmd.SetIn(strings.NewReader(tt.stdin))
-			cmd.SetArgs(append(append([]string{"app", "rm"}, tt.args...), "--kubeconfig", kubeconfig))
-			code := Execute(context.Background(), cmd)
+			t.Parallel()
+			h := newHarness(t)
+			h.cluster.found = tt.found
+			if err := h.backup.Save("hello", map[string]string{"db-password": "x"}); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, code := h.runWithInput(t, tt.stdin, append([]string{"app", "rm"}, tt.args...)...)
 			if code != tt.wantCode {
-				t.Errorf("exit code %d, want %d: %s", code, tt.wantCode, errOut.String())
+				t.Errorf("exit code %d, want %d: %s", code, tt.wantCode, stderr)
 			}
-			if len(fake.removed) != tt.wantRemoved {
-				t.Errorf("remove called %d times, want %d", len(fake.removed), tt.wantRemoved)
+			if len(h.cluster.removed) != tt.wantRemoved {
+				t.Errorf("remove called %d times, want %d", len(h.cluster.removed), tt.wantRemoved)
 			}
-			if !strings.Contains(out.String(), tt.wantOut) {
-				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, out.String())
+			if !strings.Contains(stdout, tt.wantOut) {
+				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
 			}
-			if !strings.Contains(errOut.String(), tt.wantErr) {
-				t.Errorf("stderr lacks %q: %s", tt.wantErr, errOut.String())
+			if !strings.Contains(stderr, tt.wantErr) {
+				t.Errorf("stderr lacks %q: %s", tt.wantErr, stderr)
 			}
-			if tt.wantRemoved == 1 && !strings.Contains(out.String(), "including all its volumes") {
-				t.Errorf("the warning is missing:\n%s", out.String())
+			if tt.wantRemoved == 1 && !strings.Contains(stdout, "including all its volumes") {
+				t.Errorf("the warning is missing:\n%s", stdout)
 			}
 		})
 	}
 }
 
 func TestAppAddAndRmPublishTheHostName(t *testing.T) {
-	kubeconfig, _ := appTestEnv(t)
-	fake := &fakeApps{app: appWithSecrets("greeter"), found: true}
-	exposedApps(fake)
-	fake.install(t)
-	t.Setenv(envCloudflareToken, "cf-secret-token")
+	t.Parallel()
+	h := newHarness(t).exposed()
+	h.app = appWithSecrets("greeter")
+	h.cluster.found = true
+	h.env[ops.EnvCloudflareToken] = "cf-secret-token"
 
-	stdout, stderr, code := run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main", "--kubeconfig", kubeconfig)
+	stdout, stderr, code := h.run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main")
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
 	want := "greeter-dev.example.com -> t-1.cfargotunnel.com in zone-1"
-	if len(fake.api.records) != 1 || fake.api.records[0] != want {
-		t.Errorf("records %v, want %q", fake.api.records, want)
+	if len(h.api.records) != 1 || h.api.records[0] != want {
+		t.Errorf("records %v, want %q", h.api.records, want)
 	}
 	if !strings.Contains(stdout, "DNS greeter-dev.example.com points at t-1.cfargotunnel.com: created") {
 		t.Errorf("stdout lacks the record:\n%s", stdout)
 	}
 
-	if _, stderr, code = run(t, "app", "rm", "greeter", "--yes", "--kubeconfig", kubeconfig); code != 0 {
+	if _, stderr, code = h.run(t, "app", "rm", "greeter", "--yes"); code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
 	}
-	if len(fake.api.deletedRecords) != 1 || fake.api.deletedRecords[0] != "greeter-dev.example.com" {
-		t.Errorf("deleted %v", fake.api.deletedRecords)
+	if len(h.api.deletedRecords) != 1 || h.api.deletedRecords[0] != "greeter-dev.example.com" {
+		t.Errorf("deleted %v", h.api.deletedRecords)
+	}
+	if !strings.Contains(stdout, "DNS greeter-dev.example.com") {
+		t.Errorf("stdout lacks the record:\n%s", stdout)
 	}
 }
 
 func TestAppAddWithoutExposure(t *testing.T) {
-	kubeconfig, _ := appTestEnv(t)
+	t.Parallel()
 	tests := map[string]struct {
-		setup   func(*fakeApps)
+		exposed bool
 		token   string
 		wantOut string
 	}{
-		"cluster not exposed": {setup: func(*fakeApps) {}, token: "cf-secret-token"},
-		"no token":            {setup: exposedApps, wantOut: "DNS: skipped"},
+		"cluster not exposed": {token: "cf-secret-token"},
+		"no token":            {exposed: true, wantOut: "DNS: skipped"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			fake := &fakeApps{app: appWithSecrets("greeter"), api: &fakeCloudflare{}}
-			tt.setup(fake)
-			fake.install(t)
-			t.Setenv(envCloudflareToken, tt.token)
+			t.Parallel()
+			h := newHarness(t)
+			if tt.exposed {
+				h.exposed()
+			}
+			h.app = appWithSecrets("greeter")
+			h.env[ops.EnvCloudflareToken] = tt.token
 
-			stdout, stderr, code := run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main", "--kubeconfig", kubeconfig)
+			stdout, stderr, code := h.run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main")
 			if code != 0 {
 				t.Fatalf("exit code %d: %s", code, stderr)
 			}
-			if len(fake.api.records) != 0 {
-				t.Errorf("no record may be written: %v", fake.api.records)
+			if len(h.api.records) != 0 {
+				t.Errorf("no record may be written: %v", h.api.records)
 			}
 			if tt.wantOut != "" && !strings.Contains(stdout, tt.wantOut) {
 				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
