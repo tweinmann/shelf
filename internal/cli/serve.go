@@ -63,7 +63,11 @@ shows nothing but the page that asks for it.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "The admin UI is at %s\n", uiURL(listener.Addr()))
+			local, remote := uiURLs(listener.Addr(), hostName())
+			fmt.Fprintf(out, "The admin UI is at %s\n", local)
+			if remote != "" {
+				fmt.Fprintf(out, "  from another device on the network: %s\n", remote)
+			}
 			fmt.Fprintf(out, "  cluster   %s\n", shelf.Target.Context)
 			fmt.Fprintf(out, "  state     %s\n", store.Dir())
 			if token := srv.SetupToken(); token != "" {
@@ -100,24 +104,30 @@ func serve(ctx context.Context, listener net.Listener, handler http.Handler, out
 	return <-done
 }
 
-// uiURL turns a listening address into something that can be pasted into a browser. A server
-// that listens on every address prints the machine's own name, because that is the one that
-// works from another device.
-func uiURL(addr net.Addr) string {
+// uiURLs turns a listening address into addresses that can be pasted into a browser. A server
+// that listens on every address has two of them, and only the person in front of it knows which
+// one applies: localhost works on the machine itself, and the machine's own name works from
+// another device — if that name resolves there, which it does over mDNS on a Mac but not for a
+// container whose name is a hexadecimal id.
+func uiURLs(addr net.Addr, hostname string) (local, remote string) {
 	host, port, err := net.SplitHostPort(addr.String())
 	if err != nil {
-		return "http://" + addr.String()
+		return "http://" + addr.String() + "/", ""
 	}
-	if host == "" || host == "::" || host == "0.0.0.0" {
-		host = hostName()
+	if host != "" && host != "::" && host != "0.0.0.0" {
+		return "http://" + net.JoinHostPort(host, port) + "/", ""
 	}
-	return "http://" + net.JoinHostPort(host, port) + "/"
+	local = "http://" + net.JoinHostPort("localhost", port) + "/"
+	if hostname != "" && hostname != "localhost" {
+		remote = "http://" + net.JoinHostPort(hostname, port) + "/"
+	}
+	return local, remote
 }
 
 func hostName() string {
 	name, err := os.Hostname()
-	if err != nil || name == "" {
-		return "localhost"
+	if err != nil {
+		return ""
 	}
 	return name
 }
