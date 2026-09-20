@@ -31,6 +31,9 @@ type Status struct {
 	Settings  cluster.Settings `json:"-"`
 	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com.
 	Hosts string `json:"hosts,omitempty"`
+	// Public is false when the domain cannot exist on the internet, as dev.local cannot. The
+	// apps then answer inside the cluster only, whatever else is set up.
+	Public bool `json:"public"`
 	// Exposed is true once a tunnel carries the apps to the internet.
 	Exposed bool `json:"exposed"`
 }
@@ -50,7 +53,8 @@ func (o *Ops) Status(ctx context.Context) Status {
 	s.Settings = settings
 	s.Installed = settings.Domain != ""
 	s.Hosts = Hosts(settings.Domain, settings.HostSuffix)
-	s.Exposed = settings.TunnelTarget != ""
+	s.Public = PublicDomain(settings.Domain)
+	s.Exposed = s.Public && settings.TunnelTarget != ""
 	return s
 }
 
@@ -102,7 +106,9 @@ func app(state cluster.AppState, settings cluster.Settings) App {
 		return a
 	}
 	a.Host = AppHost(settings, state.Name)
-	if settings.TunnelTarget != "" {
+	// Only a name that exists on the internet and a tunnel that carries it make a link that
+	// works; otherwise the host name is a fact about the cluster, not an address.
+	if settings.TunnelTarget != "" && PublicDomain(settings.Domain) {
 		a.URL = "https://" + a.Host + "/"
 	}
 	return a

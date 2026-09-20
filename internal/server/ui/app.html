@@ -18,7 +18,8 @@
 <section class="card">
 <dl class="facts">
 {{if .App.URL}}<dt>Address</dt><dd><a href="{{.App.URL}}">{{.App.Host}}</a></dd>
-{{else if .App.Host}}<dt>Address</dt><dd>{{.App.Host}} <span class="muted">not exposed</span></dd>{{end}}
+{{else if .App.Host}}<dt>Address</dt><dd>{{.App.Host}}
+<span class="muted">{{if .Status.Public}}not exposed{{else}}inside the cluster only{{end}}</span></dd>{{end}}
 <dt>Artifact</dt><dd>{{.App.Artifact}}</dd>
 {{if .App.Revision}}<dt>Running</dt><dd><span title="{{.App.Revision}}">{{short .App.Revision}}</span></dd>{{end}}
 {{with ago .App.Deployed}}<dt>Deployed</dt><dd>{{.}}</dd>{{end}}

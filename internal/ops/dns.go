@@ -30,6 +30,11 @@ func (o *Ops) newDNS(ctx context.Context, rep progress.Reporter) (*dns, error) {
 	if settings.TunnelTarget == "" {
 		return nil, nil
 	}
+	if !PublicDomain(settings.Domain) {
+		rep.Report(progress.Info("DNS: skipped, %s is not a public domain; the apps answer inside the cluster only",
+			settings.Domain))
+		return nil, nil
+	}
 	if o.Env.CloudflareToken == "" {
 		rep.Report(progress.Info("DNS: skipped, %s is not set; run `shelf init expose` with it to publish the host names",
 			EnvCloudflareToken))

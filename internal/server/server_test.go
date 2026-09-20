@@ -64,7 +64,7 @@ func runningPlatform() *fakePlatform {
 		status: ops.Status{
 			Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 			Reachable: true, Installed: true, Settings: settings,
-			Hosts: "<app>-dev.example.com", Exposed: true,
+			Hosts: "<app>-dev.example.com", Public: true, Exposed: true,
 		},
 		apps: []ops.App{
 			{
@@ -222,6 +222,36 @@ func TestPages(t *testing.T) {
 			t.Fatalf("a cluster that is down is a page, not an error: %d", rec.Code)
 		}
 		golden(t, "dashboard-unreachable", rec)
+	})
+
+	// A development cluster answers under a reserved name such as dev.local. No record can ever
+	// point there, so the page says that instead of offering a link that cannot work.
+	t.Run("reserved domain", func(t *testing.T) {
+		t.Parallel()
+		local := &fakePlatform{
+			status: ops.Status{
+				Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
+				Reachable: true, Installed: true,
+				Settings: cluster.Settings{Domain: "dev.local", TunnelTarget: "t-1.cfargotunnel.com"},
+				Hosts:    "<app>.dev.local",
+			},
+			apps: []ops.App{{
+				AppState: cluster.AppState{
+					Name:     "greeter",
+					Artifact: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/greeter", Tag: "main"},
+					Revision: "main@" + digest,
+					Deployed: now.Add(-17 * time.Minute),
+					Phase:    cluster.PhaseReady,
+				},
+				Host: "greeter.dev.local",
+			}},
+		}
+		h, cookie := claimed(t, local)
+		rec := get(h, "/", cookie)
+		if strings.Contains(rec.Body.String(), `href="https://greeter.dev.local`) {
+			t.Error("the page offers a link to a name that cannot exist")
+		}
+		golden(t, "dashboard-reserved-domain", rec)
 	})
 
 	t.Run("platform not installed", func(t *testing.T) {

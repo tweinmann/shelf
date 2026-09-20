@@ -16,7 +16,10 @@
 <dt>Cluster</dt><dd>{{.Status.Context}} <span class="muted">{{.Status.Server}}</span></dd>
 <dt>Apps answer at</dt><dd>{{.Status.Hosts}}</dd>
 <dt>Internet</dt>
-<dd>{{if .Status.Exposed}}reachable through the Cloudflare tunnel{{else}}not exposed{{end}}</dd>
+<dd>{{if .Status.Exposed}}reachable through the Cloudflare tunnel
+{{- else if not .Status.Public}}not reachable: {{.Status.Settings.Domain}} is a reserved name, so no
+address can point here. A development cluster answers inside the cluster only.
+{{- else}}not exposed{{end}}</dd>
 </dl>
 </section>
 {{end}}
@@ -40,7 +43,8 @@
 {{if .Reason}}<p class="reason">{{.Stage}}: {{.Reason}}</p>{{end}}
 <dl class="facts">
 {{if .URL}}<dt>Address</dt><dd><a href="{{.URL}}">{{.Host}}</a></dd>
-{{else if .Host}}<dt>Address</dt><dd>{{.Host}} <span class="muted">not exposed</span></dd>{{end}}
+{{else if .Host}}<dt>Address</dt><dd>{{.Host}}
+<span class="muted">{{if $.Status.Public}}not exposed{{else}}inside the cluster only{{end}}</span></dd>{{end}}
 {{if .Revision}}<dt>Running</dt><dd><span title="{{.Revision}}">{{short .Revision}}</span>
 {{with ago .Deployed}}<span class="muted">deployed {{.}}</span>{{end}}</dd>{{end}}
 </dl>

@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
@@ -55,6 +56,29 @@ func CheckHostSuffix(suffix string) error {
 
 // Hosts is the pattern the apps of a cluster answer under.
 func Hosts(domain, suffix string) string { return "<app>" + suffix + "." + domain }
+
+// reservedSuffixes are the names that cannot exist on the internet: RFC 6762 keeps .local for
+// multicast DNS, RFC 6761 and RFC 8375 reserve the rest for local use. A name under them can
+// never be delegated to a DNS provider, so no record can point at a tunnel.
+var reservedSuffixes = []string{
+	".local", ".localhost", ".internal", ".test", ".invalid", ".example", ".home.arpa",
+}
+
+// PublicDomain reports whether a domain can carry host names that a browser anywhere resolves.
+// The development cluster uses dev.local, which cannot, and shelf must not offer a link to a
+// name that will never answer.
+func PublicDomain(domain string) bool {
+	if domain == "" || !strings.Contains(domain, ".") {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSuffix(domain, "."))
+	for _, suffix := range reservedSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return false
+		}
+	}
+	return true
+}
 
 // PlanCluster describes what InitCluster would install.
 func (o *Ops) PlanCluster(opts InitOptions) InitPlan {

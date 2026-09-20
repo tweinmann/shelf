@@ -83,3 +83,25 @@ func TestHosts(t *testing.T) {
 		t.Errorf("host %q", got)
 	}
 }
+
+// TestPublicDomain pins which names shelf may offer a link to. A reserved name cannot be
+// delegated to a DNS provider, so no record will ever point at the tunnel — the development
+// cluster uses dev.local and would otherwise show links that can never work.
+func TestPublicDomain(t *testing.T) {
+	t.Parallel()
+	public := []string{"example.com", "shelf.dev", "a.b.example.co.uk", "EXAMPLE.COM", "example.com."}
+	for _, domain := range public {
+		if !ops.PublicDomain(domain) {
+			t.Errorf("%q is a public domain", domain)
+		}
+	}
+	reserved := []string{
+		"", "localhost", "dev.local", "mini.local", "shelf.internal", "app.test",
+		"x.invalid", "my.example", "shelf.home.arpa", "nodot",
+	}
+	for _, domain := range reserved {
+		if ops.PublicDomain(domain) {
+			t.Errorf("%q cannot exist on the internet", domain)
+		}
+	}
+}
