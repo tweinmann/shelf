@@ -9,8 +9,14 @@ at `<app>.<your-domain>`.
 > [!WARNING]
 > shelf is a learning project for platform engineering. It is **not meant for production**,
 > and it is **still under construction**: a push to your repository deploys your app and makes
-> it reachable at `https://<app>.<your-domain>`, but the Mac mini setup is still missing. See
-> [Status](#status).
+> it reachable at `https://<app>.<your-domain>`, but the Mac mini setup and the admin UI are
+> still missing. See [Status](#status).
+
+Where this is going: shelf installs on the mini with one command, and everything after that
+happens in an admin UI in your browser — adding an app, changing which version runs, removing it
+again, later logs and resource usage. You do not need to know that Kubernetes is underneath. The
+command line stays the expert interface for everything the UI can do, and the cluster stays open
+to `kubectl` if you want it.
 
 ## Contents
 
@@ -20,6 +26,7 @@ at `<app>.<your-domain>`.
 - [Quick start](#quick-start)
 - [Deploying an app](#deploying-an-app)
 - [Writing an `app.yaml`](#writing-an-appyaml)
+- [What shelf does in the cluster](#what-shelf-does-in-the-cluster)
 - [CLI reference](#cli-reference)
 - [Developing shelf](#developing-shelf)
 - [Further reading](#further-reading)
@@ -85,10 +92,26 @@ one starts.
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | ✅ done |
 | 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | ✅ done |
 | 5 | `shelf init expose`: Cloudflare Tunnel, DNS | ✅ done |
-| 6 | Installation on the Mac mini | planned |
-| 7 | Reference apps | planned |
+| 6 | Operations layer shared by the CLI and the admin UI | planned |
+| 7 | `shelf serve`: admin UI with login and dashboard | planned |
+| 8 | Adding, changing and removing apps from the browser | planned |
+| 9 | Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy` | planned |
+| 10 | Service and one-command installer | planned |
+| 11 | Setup wizard | planned |
+| 12 | Logs, resource usage, self-update | planned |
+| 13 | Reference apps | planned |
+
+Phases 6 to 13 were re-cut on 2026-09-20, when the target product changed from a command-line
+tool to an appliance with an admin UI. The reasoning is in
+[docs/plan.md](docs/plan.md); the work happens on the branch `appliance`.
 
 ## Quick start
+
+> [!NOTE]
+> On the finished product this becomes one command on the mini —
+> `curl -fsSL https://raw.githubusercontent.com/tweinmann/shelf/v0/install.sh | sh` — followed by
+> a setup wizard in the browser. That installer arrives in Phase 10. Until then, install the
+> binary yourself:
 
 Download the latest release for your platform (linux or darwin, amd64 or arm64):
 
@@ -287,7 +310,28 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
   moves them to `<app>.<new>` and lists the DNS records that stay behind under the old name, so
   you can delete them. Running `shelf app rm` for each app before the change avoids that.
 
+## What shelf does in the cluster
+
+You never have to look, but nothing is hidden. shelf keeps the substrate reachable with
+`kubectl`, and the split of ownership is this:
+
+- **`shelf-system`** holds what shelf itself manages: one `ResourceSetInputProvider` per
+  registered app, which is the app's registration, and one Secret per app with its generated
+  secret values. `shelf app add` and `shelf app rm` write exactly these.
+- **`flux-system`** holds Flux and the platform: Traefik, the `ResourceSet` that turns each
+  registration into a running app, and — once the cluster is exposed — cloudflared. These
+  objects belong to Flux and come from a released artifact. **Editing them by hand does not
+  last**; Flux reverts the change at the next reconciliation.
+- **One namespace per app**, named after the app, holds everything that app runs. That is yours.
+
+So: look at anything, change the app namespaces if you must, and leave the platform to Flux. If
+you want a different platform, change it in the repository and release it, not in the cluster.
+
 ## CLI reference
+
+The command line is the expert interface. From Phase 7 on, everything below is also available in
+the admin UI, and both go through the same code — there is no second implementation that could
+drift.
 
 | Command | What it does |
 |---|---|
@@ -307,8 +351,8 @@ Example of an error message:
 app.yaml:12: error: components.web.route: route needs a port; add port or ports to the component
 ```
 
-The commands for the Mac mini (`shelf init host`, `shelf doctor`, `shelf destroy`) follow in a
-later phase.
+The admin UI (`shelf serve`, `shelf service`) and the commands for the Mac mini
+(`shelf init host`, `shelf doctor`, `shelf destroy`) follow in later phases.
 
 ## Developing shelf
 

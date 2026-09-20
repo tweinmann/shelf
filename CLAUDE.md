@@ -26,7 +26,12 @@ workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the regist
 Phase 5 complete and approved: `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
 records written by shelf), `just smoke-expose`. `greeter-dev.<domain>` is reachable over HTTPS
 from the dev cluster. Results in docs/plan.md.
-Next: Phase 6 (Mac mini).
+Target product revised on 2026-09-20, after Phase 5: shelf becomes an appliance with an admin UI
+(host service on the mini, LAN with a login, one-command install plus a browser wizard), and the
+phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions and the new
+phase plan in docs/plan.md; the work happens on the branch `appliance`, so `main` still carries
+the old path.
+Next: Phase 6 (operations layer: `internal/ops` and `internal/progress`).
 
 ## Working agreements
 
@@ -40,7 +45,10 @@ Next: Phase 6 (Mac mini).
 ## Guardrails
 
 - The registry is the only interface between build and platform. The platform never talks to
-  Git or forge APIs.
+  Git or forge APIs. That rule is about the cluster: the host service may call the GitHub API for
+  convenience (checking for a newer release), as long as no deploy path depends on it.
+- Every action the admin UI offers exists as a CLI command, and both call the same function in
+  `internal/ops`. The UI is a second face on one operations layer, never a second implementation.
 - The platform is generic: no knowledge of databases or specific services. Everything is a
   component.
 - Apps are isolated from each other; nothing is shared between apps.
@@ -91,11 +99,12 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   `devcontainer.json` together.
 - A plain `go build` produces a Linux binary. Anything shipped to the mini needs
   `GOOS=darwin GOARCH=arm64`.
-- `internal/host` (brew, pmset, colima) cannot run in the devcontainer. Test it through the
-  fake command runner.
+- `internal/host` (brew, pmset, colima, launchctl) cannot run in the devcontainer. Test it
+  through the fake command runner. The launchd service is a level-3 concern too.
 - Secret values never appear in rendered manifests, logs or golden files (golden files may
   hold obviously fake values such as `not-a-real-token`). The GHCR token is read from
-  `GHCR_TOKEN` only, never from a flag.
+  `GHCR_TOKEN` only, never from a flag. The same holds for the files under `~/.shelf`: a token
+  never goes into the launchd plist, into a log line or into a rendered page.
 - `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
   this session.
 
@@ -112,7 +121,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   (`-update` via `just golden`); the registry is behind `render.Resolver`, so tests never need
   the network
 - `internal/cluster` talks to the API server only (client-go, server-side apply with field
-  manager `shelf`); it must not shell out to kubectl, helm or flux
+  manager `shelf`); it must not shell out to kubectl, helm or flux, and it knows nothing about
+  `~/.shelf`, HTTP or the operator's machine. Orchestration lives in `internal/ops`, flags and
+  prompts in `internal/cli`, routes and templates in `internal/server`
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
   themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):

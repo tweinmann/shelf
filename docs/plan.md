@@ -8,6 +8,20 @@ plus a deploy artifact to a registry. The platform watches the artifact and depl
 automatically. Apps are reachable through Cloudflare Tunnel at `<app>.<domain>`.
 Learning project for platform engineering, not for production use.
 
+**Target product, revised on 2026-09-20 (after Phase 5).** Until here shelf was a command-line
+tool that the maintainer drives from a devcontainer: this document described the operator as
+someone with a terminal, SSH and kubectl, and listed an overview page as out of scope. That
+changes. shelf becomes an **appliance**: it installs on the Mac mini with one command and a
+browser wizard, and it serves an **admin UI** in which apps are registered, changed and removed
+by someone who neither sees nor needs to understand Kubernetes. Resource usage, logs and similar
+follow later. The substrate stays deliberately reachable with kubectl for anyone who wants it,
+and the CLI remains the expert interface — every action in the UI has a CLI equivalent, and both
+call the same function. What the user still has to bring from outside does not change: a GitHub
+account with a classic PAT, a Cloudflare domain with an API token, and per app a repository with
+`app.yaml` plus the unchanged workflow. The registry stays the only interface between build and
+platform. Everything from Phase 6 on follows from this; the decisions are in the table
+"Decided on 2026-09-20" below.
+
 The repository directory is empty — greenfield start.
 
 This plan is the validated version of an earlier draft. The technically risky assumptions were
@@ -106,6 +120,49 @@ Decided in Phase 5 (2026-09-18):
 | Webhook receiver | **Dropped, not moved again.** Polling reaches the app in about 80 s end to end; a receiver would need a public endpoint with a token and two secrets in every tenant repository, which is the knowledge Phase 4b removed. |
 | Test DNS isolation | **One zone for both clusters**, separated by the host suffix (`greeter-dev.<domain>` next to `greeter.<domain>`). The open question was whether a shared zone is safe; with external-dns it would have needed `--txt-owner-id` and `--domain-filter` per cluster, because each instance deletes records it considers orphaned. shelf only ever touches the record of the app it is working on, so a shared zone needs nothing else — and one zone keeps the free certificate, which covers `*.<domain>` but not a second level. |
 
+Decided on 2026-09-20, when the target product changed (see "Context"):
+
+| Question | Decision |
+|---|---|
+| Where the admin UI runs | **A host service on the mini**, not a workload in the cluster: the same `shelf` binary in server mode, started by launchd as the logged-in user. It uses the kubeconfig, the secret backup and the tokens that live there anyway, it can start and stop Colima, and it still shows something when the VM or the cluster is broken. No container image, no new RBAC, no DNS-capable token in the cluster — the Phase 5 decision stays true word for word. A cluster component was considered and rejected: it would need the first container image built from this repository, a ServiceAccount with far-reaching rights, and it disappears exactly when it is needed most. |
+| Access | **LAN with a login**: `http://shelf.local:<port>` from the home network, the password set during setup. No admin endpoint on the internet. |
+| Installation | **One command, then a browser wizard.** `install.sh` downloads the release binary, verifies the checksum and registers the service; domain, tokens and cluster are done in the browser. No Apple Developer account, no signing, no notarization, no `.pkg` — a binary fetched with `curl` carries no quarantine attribute, so Gatekeeper does not block it. That makes the one-liner the supported path, and a tarball downloaded in a browser needs `xattr -d com.apple.quarantine`. |
+| What "edit" means | The UI changes the **artifact and the tag** (which is also how a rollback works), triggers a redeploy, shows and rotates secrets, and removes apps. The `app.yaml` stays in the tenant repository, where it is versioned and where the CI builds from it; the UI only displays it and links the commit that is running. |
+| Apps without CI | **Not offered.** An app still comes from a deploy artifact built by the tenant's CI. Letting the UI invent an app.yaml and push an artifact itself would make shelf write to the registry and would give an app two sources of truth. |
+| Frontend | **`html/template` with `go:embed`**, plus about a hundred lines of plain JavaScript for the job log. Rendered pages are byte-comparable with the golden-file helper this repository already uses, the devcontainer needs no Node toolchain, `release.yml` needs no new step, and everything still ships as one binary — as the embedded Flux Operator manifest already does. The cost is honest: forms and full page loads instead of a single-page app. |
+| Dependencies | **None added.** `net/http` (method patterns in `ServeMux`), `html/template`, `crypto/rand.Text`, `crypto/pbkdf2`, `crypto/subtle` and `http.CrossOriginProtection` cover the server; the module is on Go 1.27.1. `k8s.io/client-go` is already a dependency, so pod logs cost nothing either. Same habit as `internal/cloudflare`, which is an API client without an SDK. |
+| Password | **PBKDF2-SHA256**, 600 000 iterations, 16-byte salt, stored as `pbkdf2-sha256$600000$<salt>$<hash>` and compared with `subtle.ConstantTimeCompare`. argon2id is the better primitive but costs `golang.org/x/crypto`; the algorithm tag in the hash keeps that upgrade open. |
+| Sessions | **Server-side ids**, persisted in `admin.yaml` so that a restart or a self-update does not log everyone out. Cookie `HttpOnly`, `SameSite=Lax`, 30 days sliding. Revocation and "log out everywhere" stay trivial. |
+| TLS on the LAN | **None.** A self-signed certificate teaches the user to click through browser warnings, and ACME needs a public name, which contradicts "no admin endpoint on the internet". The documented alternative is `listen: loopback` plus `ssh -L`. The risk is written down rather than hidden: the admin password crosses the home network in the clear. |
+| Long operations | **One job at a time, globally.** A second mutating request gets 409 with a link to the running job. Two `init cluster` runs would fight over the same objects. Progress reaches the browser as Server-Sent Events, and a job survives a page reload because its events are kept in memory. |
+| `shelf.local` | Comes from `scutil --set LocalHostName shelf` alone. The installer **asks** instead of renaming someone's Mac silently, and otherwise prints the URL with the current name plus the IP address. Bonjour advertising (`_http._tcp`) creates no name and is skipped. |
+
+What this changes about decisions taken earlier:
+
+- **The secret backup now lives on the same machine as the cluster.** It was insurance against
+  losing the cluster while sitting on a different machine. It still covers the common case (the
+  Colima profile is recreated, the cluster is rebuilt), but no longer disk failure or theft, and
+  it now sits next to the tokens. It stays, and gets `shelf secrets export`, a download button in
+  the UI and a line on the wizard's last screen saying to copy `~/.shelf` somewhere else.
+  `SHELF_HOME` already allows moving the whole tree to an encrypted volume.
+- **The Cloudflare and GHCR tokens now live on the mini**, as 0600 files under a 0700 directory.
+  The Phase 5 decision — no token with DNS rights inside the cluster — holds unchanged: the token
+  is a file on the host, not a Kubernetes Secret, and no shipped workload can reach the API server
+  or the host filesystem. What changes is the separation. The tokens used to sit on the MacBook
+  while the apps that answer requests from the internet ran on another machine; now the mini does
+  both. That does not make the mini open: cloudflared dials out, no port is opened towards the
+  internet, and the only port shelf listens on is the admin UI on the LAN. But whoever escapes a
+  tenant pod now has two boundaries left (the container and the Lima VM) instead of a different
+  machine. Plainly: anyone with a shell as that user owns the cluster, the DNS zone and the
+  registry token.
+- **The guardrail "the platform never talks to Git or forge APIs" is about the cluster.** The host
+  service may call the GitHub API for convenience — checking for a newer release — as long as no
+  part of the deploy path depends on it.
+- **The kubectl escape hatch is documented, not hidden.** An "Advanced" page shows the kubeconfig
+  path and offers a download behind a re-entered password, and the README explains what shelf owns
+  in the cluster: platform objects belong to Flux and are reverted when edited by hand, the input
+  providers belong to shelf, everything else belongs to the user.
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -147,8 +204,13 @@ Without a tunnel, ingress is checked via `kubectl port-forward svc/traefik 8080:
 `curl -H "Host: hello.dev.local" localhost:8080` — this fully exercises the Traefik rules;
 Cloudflare only adds DNS and TLS on top.
 
-**Level 3 — Mac mini over SSH (Phase 6 onward).** Only what level 2 cannot do: host preflight on
-real hardware, Cloudflare Tunnel against the real domain, first run on an untouched machine.
+**Level 3 — Mac mini over SSH (Phase 9 onward).** Only what level 2 cannot do: host preflight on
+real hardware, Cloudflare Tunnel against the real domain, the launchd service, and the first run
+on an untouched machine.
+
+The admin UI is level 2: `shelf serve` runs in the devcontainer against the k3d cluster, and the
+browser on the Mac reaches it through a forwarded port. Only the host parts — Colima, launchd,
+`install.sh` — need the mini.
 
 ### Design consequence: `shelf init` is split into layers
 
@@ -156,7 +218,7 @@ For level 2 to be possible at all, the installer is split into individually call
 idempotent steps:
 
 ```
-shelf init host     # brew, pmset, Colima profile     → target Mac only (Phase 6)
+shelf init host     # brew, pmset, Colima profile     → target Mac only (Phase 9)
 shelf init cluster  # Flux Operator, platform charts  → against the current kubecontext
 shelf init expose   # Cloudflare Tunnel, cloudflared, DNS records
 shelf init          # wrapper around all three
@@ -164,6 +226,10 @@ shelf init          # wrapper around all three
 
 `shelf init cluster` must contain **no Colima assumptions** and only use the kubecontext.
 In development, `cluster` runs (and from Phase 5 optionally `expose`); `host` never does.
+
+The split pays off a second time from Phase 11 on: the setup wizard's steps *are* these three
+operations, called from the server instead of from a terminal. That only works because they are
+separate and idempotent, which is why re-running the wizard on a configured host changes nothing.
 
 ### Devcontainer with Docker-in-Docker
 
@@ -272,7 +338,7 @@ mini, and a working LoadBalancer there would mask dependencies that do not exist
 
 **Why not Colima locally:** k3d provides the same k3s, creates and discards clusters in 20–30 s
 instead of minutes, needs no second VM, and is exactly what runs in CI from Phase 4 — one
-cluster setup instead of two. Colima is only needed on the mini (Phase 6), because Docker
+cluster setup instead of two. Colima is only needed on the mini (Phase 9), because Docker
 Desktop is a GUI app that needs a logged-in session and is the wrong choice for a machine
 operated over SSH.
 
@@ -340,7 +406,11 @@ Three pitfalls:
 
 The throwaway reset (`just cluster-down && just cluster-up`) is the metric Phase 3 optimizes for.
 
-### Mac mini access (Phase 6 onward)
+### Mac mini access for development (Phase 9 onward)
+
+This is how shelf is *developed and tested* against the mini, not how the mini is operated: since
+2026-09-20 the mini is run through its admin UI (see "Components on the mini"). The SSH forward,
+the separate kubeconfig and `just push-mini` stay as level-3 test tooling for the maintainer.
 
 Almost nothing runs over SSH — instead the API server is brought into the devcontainer:
 
@@ -373,7 +443,7 @@ on the mini with "exec format error". `just push-mini` therefore builds explicit
 
 ## Architecture
 
-### Runtime (Mac mini, Phase 6 onward)
+### Runtime (Mac mini, Phase 9 onward)
 Colima profile `shelf`:
 `--vm-type vz --vz-rosetta --runtime containerd --kubernetes
  --kubernetes-disable traefik --kubernetes-disable servicelb`.
@@ -382,6 +452,45 @@ In development, k3d plays the same role — see the development environment abov
 
 > **local-path does not enforce capacity.** The `size` field in the schema is documentation,
 > not a limit — a pod can fill the VM disk. This must be stated in the docs.
+
+### Components on the mini (Phase 7 onward)
+Everything shelf itself runs on the host is one binary in two modes. The CLI is one invocation;
+`shelf serve` is the long-running one, started by launchd.
+
+| Concern | Building block |
+|---|---|
+| Admin UI and its API | `shelf serve`, an HTTP server with embedded templates, bound to the LAN |
+| Autostart | LaunchAgent `dev.shelf.agent`, `RunAtLoad` + `KeepAlive` |
+| VM | Colima, started and stopped by the service |
+| Host setup | `shelf init host` (brew, `pmset`, Colima profile, host name) |
+
+The service runs **as the logged-in user, not as root**: Colima is per-user (`~/.colima`,
+`~/.lima`), and so are the kubeconfig, the secret backups and the tokens. A root daemon running
+`colima start` would silently create a second VM under root's home. No secret ever goes into the
+plist, which is world-readable.
+
+`shelf serve` at startup loads its configuration, serves nothing but the claim page while the
+instance is unclaimed, binds its listener, and then keeps a status snapshot fresh in the
+background (Colima state, API server reachable, settings, app states). Requests read the
+snapshot, so no page ever blocks on a cluster call that hangs — which is what keeps the UI
+useful when the VM is down. With autostart enabled it also brings Colima up at login, which is
+what makes the platform survive a power cut.
+
+State on disk, all under `~/.shelf` (0700), each file 0600:
+
+```
+bin/shelf                  the real binary; /usr/local/bin/shelf is a symlink to it
+config.yaml                domain, host suffix, listen address, Colima profile, autostart
+credentials.yaml           the Cloudflare and GHCR tokens
+admin.yaml                 password hash, sessions, and the setup token until the claim
+apps/<app>/secrets.yaml    the secret backup, unchanged since Phase 4
+audit.log                  one line per mutating action
+```
+
+Plain files rather than the macOS keychain: keychain ACLs are bound to a code-signing identity,
+so an unsigned binary replaced on every self-update would re-prompt — a dialog nobody is sitting
+in front of on a headless machine. `SHELF_HOME` moves the whole tree, for anyone who wants it on
+an encrypted volume.
 
 ### Cluster components
 | Concern | Building block |
@@ -597,8 +706,20 @@ cluster live and die together. On the mini, `~/.shelf/` is the real home directo
 - `shelf init expose` / `shelf init host` / `shelf init`
 - `shelf app add <name> <oci://…:tag> [--insecure-registry]` / `shelf app rm <name>`, both
   with `--context`, `--kubeconfig`, `--timeout`; `rm` asks unless `--yes`
-- `shelf doctor` — preflight plus runtime (VM, tunnel, Flux status), reporting per layer
-- `shelf destroy` — remove profile, tunnel and DNS records
+- `shelf app status <name>` — the diagnosis for one app: the first stage that is not healthy,
+  with its message and a hint in plain language
+- `shelf doctor` — preflight plus runtime (VM, tunnel, Flux status), reporting per layer. It is
+  the same diagnosis engine the dashboard renders, only as text
+- `shelf destroy` — remove profile, tunnel and DNS records. Stays **CLI-only**, including
+  `--purge`: a "delete everything" button behind one LAN password is a bad trade, and the
+  "back to vanilla" test on M1/M2 hardware needs it reliable, not convenient
+- `shelf serve` — the admin UI and its HTTP API (Phase 7 onward)
+- `shelf service install|uninstall|status` — the launchd agent (Phase 10)
+- `shelf secrets export <name>` — the secret backup as a file, for keeping a copy off the machine
+
+The rule for everything above: **every action the UI offers exists as a command, and both call
+the same function in `internal/ops`.** The UI is a second face on one operations layer, never a
+second implementation.
 
 ## Repository layout
 
@@ -608,7 +729,7 @@ shelf/
   .devcontainer/
     devcontainer.json         Docker-in-Docker, volumes, remoteEnv
     Dockerfile                Go base + pinned tool binaries (single source of versions)
-    ssh_config                template for mini access (Phase 6)
+    ssh_config                template for mini access (Phase 9)
   hack/
     lib.sh                    shared helpers, require_devcontainer guard
     cluster-up.sh             create/start dev cluster and registry, write kubeconfig
@@ -618,9 +739,15 @@ shelf/
     nuke.sh                   host-side cleanup by exact name (POSIX sh)
     smoke/                    smoke tests (Phase 0, chart in Phase 2, init in Phase 3, apps and
                               tenant in Phase 4)
+  install.sh                  one-command install on the mini (POSIX sh, Phase 10)
   cmd/shelf/                  CLI entry point
   internal/
-    cli/                      cobra commands
+    cli/                      cobra commands: flags, prompts, text output
+    ops/                      the operations both the CLI and the server call (Phase 6)
+    progress/                 typed progress events, rendered as text or streamed to a browser
+    server/                   shelf serve: routes, auth, sessions, jobs (Phase 7)
+      ui/                     html/template files and static assets, embedded
+    hostcfg/                  ~/.shelf: config, credentials, admin file
     schema/                   app.yaml types, parser, ${…} syntax, JSON Schema generation
     validate/                 validation rules
     render/                   app.yaml → resolved app.yaml → ConfigMap manifest; registry lookup
@@ -629,7 +756,7 @@ shelf/
     deploy/                   reading a deploy artifact from the registry
     testutil/                 golden-file helper
     preflight/                host checks
-    host/                     brew, pmset, colima — behind a command-runner interface
+    host/                     brew, pmset, colima, launchctl — behind a command-runner interface
     cloudflare/               tunnel and DNS API
     cluster/                  shelf init cluster: embedded Flux Operator manifest, FluxInstance,
                               server-side apply and readiness waits
@@ -657,12 +784,14 @@ language rule, guardrails, the command table, safety rules and naming convention
 deliberately short and points here for design detail. It also carries a short status section,
 because a new Claude session inside the devcontainer has no memory of earlier conversations.
 It is updated at the end of every phase; the command table grows with it (`just test` in
-Phase 1, `just push-mini` in Phase 6).
+Phase 1, `just push-mini` in Phase 9).
 
 ## Phases
 
 Stop after each phase, show the result, wait for approval.
-Phases 0–5 run entirely in the devcontainer on the MacBook; the mini joins in Phase 6.
+Phases 0–8 run entirely in the devcontainer on the MacBook; the mini joins in Phase 9.
+Phases 6 and up were re-cut on 2026-09-20 when the target product changed: the old Phase 6
+(Mac mini) is now Phase 9, the old Phase 7 (reference apps) is now Phase 13.
 
 ### Phase 0 – Devcontainer, dev cluster, smoke tests
 Precondition on the Mac: check the Docker Desktop VM for ~8 GB; record a baseline with
@@ -1162,28 +1291,167 @@ Steps:
    cluster)
 4. `just smoke-expose <app>`: expose, then DNS record and HTTPS, resolved through DoH
 
-### Phase 6 – Mac mini
-`shelf init host`: preflight (Apple Silicon, RAM, disk, macOS version, Rosetta, Homebrew, tool
-versions, existing profile, energy settings), tool installation, disable sleep, Colima profile.
-Plus `shelf doctor`, `shelf destroy`, the `shelf init` wrapper, `just push-mini`, and the SSH
+### Phase 6 – Operations layer
+Lift the orchestration out of the cobra closures into `internal/ops`, and replace the `io.Writer`
+progress pattern with `internal/progress.Reporter`. Nothing changes for the user; this is what
+makes a second caller possible at all.
+
+Today every user-facing operation is assembled inline in a `RunE` closure — `app add` and
+`app rm` in `internal/cli/app.go`, `init cluster` in `init.go`, `init expose` in `expose.go`,
+where `findOrCreateTunnel` even takes a `*cobra.Command`. The cluster library below it is already
+clean: it takes a `*rest.Config`, reads no environment and no files.
+
+Design:
+
+- `internal/progress`: a `Reporter` interface and a typed `Event` (step started, step done with
+  its duration, object applied with its action, DNS record, warning). `progress.Writer(w)` prints
+  exactly what the CLI prints today; that is the regression test.
+- `internal/ops`: `LoadTarget`, `PlanCluster`, `InitCluster`, `Expose`, `AddApp`, `RemoveApp`,
+  `Apps`, `Diagnose`. Everything the operator machine supplies — the secret backup directory,
+  the registry and Cloudflare credentials, the registry authenticator — arrives in one `Env`
+  struct instead of through environment reads and package-level variables.
+- `internal/cluster` keeps its rule: Kubernetes API only. The one change is mechanical —
+  `Out io.Writer` in the option structs becomes a `progress.Reporter`. This is an edit to
+  approved code and worth naming as such: keeping the writer and having the server scrape its own
+  output would throw away exactly the structure the UI needs.
+- Confirmation stays in the CLI. `PlanCluster` returns the facts, and the caller asks in its own
+  idiom. The "this tunnel exists but we hold no credentials" case becomes an option plus a
+  sentinel error instead of a prompt inside the operation.
+- The package-level test seams (`fetchApp`, `addApp`, `clusterSettings`, `newCloudflare`, …)
+  become fields of `Env`, which is also what allows `t.Parallel()` in `internal/cli`.
+- `deploy.Fetch` gets an explicit authenticator instead of only the Docker keychain (see the open
+  items): the mini may have no `~/.docker/config.json` at all.
+
+**Acceptance:** no golden file in `internal/cli/testdata` changes; no mutable package-level test
+seam is left in `internal/cli`; `Out io.Writer` is gone from every option struct in
+`internal/cluster`; `go test ./... -race` is green with the CLI tests running in parallel;
+`just smoke-init`, `just smoke-apps` and `just smoke-expose` pass untouched.
+
+### Phase 7 – `shelf serve`: server, login, read-only dashboard
+The HTTP server with embedded templates, the claim/password/session/CSRF model, and a dashboard
+that lists the apps with their state. No mutating actions yet.
+
+Design:
+
+- `internal/server` depends on an interface, not on `ops` directly, so its tests need neither
+  network nor cluster. Every rendered page gets a golden-file test against a fake.
+- `cluster.AppStates` joins the input providers with the HelmReleases, Kustomizations and
+  OCIRepositories that carry the `shelf.dev/app` label — four cluster-wide list calls regardless
+  of how many apps there are.
+- `ops.Diagnose` walks the chain in order and reports the **first** stage that is not healthy:
+  deploy `OCIRepository` (cannot pull, or authentication) → deploy `Kustomization` (artifact
+  rejected by the downscoped `shelf-deploy` account) → chart `OCIRepository` → `HelmRelease` →
+  workloads (`ImagePullBackOff`, `CrashLoopBackOff`, `OOMKilled`, failing probe). The same
+  function backs `shelf app status` and `shelf doctor`, which gives it a golden-file test.
+- Claim before anything: until the setup token is used, every route but the claim page and
+  `/healthz` is refused, so a port scan on the LAN cannot take the box.
+- `just serve` runs the server in the devcontainer against the dev cluster; `devcontainer.json`
+  already forwards port 8080.
+
+**Acceptance:** from the Mac's browser the dashboard lists the dev cluster's apps with URL,
+revision and state, and names the reason for an app that is broken on purpose; every route except
+the claim page and `/healthz` refuses an unauthenticated request; the claim cannot be completed
+without the printed token; every rendered page has a golden-file test; `go test ./internal/server`
+needs no network and no cluster.
+
+### Phase 8 – Mutating actions and the job model
+Add, retag, redeploy and remove apps from the browser.
+
+Design:
+
+- A job registry: `POST` returns 202 with a job id, the browser follows the job page, which
+  renders the events so far and then attaches to a Server-Sent Events stream. Jobs live in memory
+  only — the cluster is the source of truth, and the UI re-reads it after a restart.
+- One mutating job at a time, globally; a second request gets 409 with a link to the running one.
+- Changing the tag is `AddApp` with a different artifact reference, which is also the rollback
+  path: point at `sha-905acce`, then back at `main`. Redeploy is a reconcile request on the
+  app's `OCIRepository` and `HelmRelease`.
+- Removing an app deletes volumes, so the UI asks for the app name to be typed, as the CLI asks
+  for a confirmation.
+- The secrets view lists names, reveals a value behind a re-entered password (the values are
+  generated, and people legitimately need them for a database client) and writes an audit line.
+  Rotation stays on the "Later" list for now.
+
+**Acceptance:** in the dev cluster an app is added, rolled back to a `sha-` artifact and forward
+again, redeployed and removed entirely from the browser; the job page survives a reload and shows
+the same lines `shelf app add` prints; a second mutating request while a job runs gets 409 with a
+link to it; removing an app requires typing its name; the output of `shelf app add` is still
+byte-identical to Phase 5.
+
+### Phase 9 – Mac mini: host, Colima, doctor, destroy
+The old Phase 6, without the installer. `shelf init host`: preflight (Apple Silicon, RAM, disk,
+macOS version, Rosetta, Homebrew, tool versions, existing profile, energy settings), tool
+installation, disable sleep, host name, Colima profile. Plus `shelf doctor` on top of
+`ops.Diagnose`, `shelf destroy [--purge]`, the `shelf init` wrapper, `just push-mini`, and the SSH
 setup above.
 Since the devcontainer is Linux, `internal/host` cannot run there for real: it is tested with a
 fake command runner (expected `brew`/`pmset`/`colima` calls and their order) and executed for
 real only on the mini.
-**Acceptance:** one command on the mini brings the platform up; `shelf destroy` followed by
-`shelf init` works; kubectl from the devcontainer through the SSH forward.
 
-### Phase 7 – Reference apps
+**Acceptance:** one command on the mini brings Colima and the platform up; `shelf doctor` reports
+every layer and names the first broken one; `shelf destroy --purge` followed by `shelf init`
+returns to a working platform; kubectl from the devcontainer through the SSH forward reaches the
+mini; the experiment on starting Colima from a LaunchAgent without a GUI login has been run and
+its result is recorded here.
+
+### Phase 10 – Service and installer
+`shelf service install|uninstall|status` for the LaunchAgent, and `install.sh`: download the
+release binary, verify the checksum, install it to `~/.shelf/bin` with the symlink in
+`/usr/local/bin`, offer the host name, set `pmset`, allow the binary through the application
+firewall, register the service, print the URL and the setup token. Autostart after a power cut
+falls out of the same chain.
+
+**Acceptance:** the one-liner on an untouched user account ends with a URL that opens the claim
+page from another device on the LAN; pulling the power and restoring it brings shelf and the
+cluster back with no keyboard attached; `shelf service uninstall` leaves no loaded agent and no
+plist behind; the `xattr` workaround for a tarball downloaded in a browser is documented.
+
+### Phase 11 – The wizard
+Claim → host preflight → Colima → domain (the zone picked from the Cloudflare API rather than
+typed) → registry credentials → cluster and exposure as one job → the first app, with the two
+files the tenant repository needs offered for copying, `<owner>` already filled in.
+
+**Acceptance:** someone who has never seen Kubernetes gets from the one-liner to a reachable
+`https://<app>.<domain>` without opening a terminal, given only a registry PAT, a Cloudflare token
+and a tenant repository; re-running the wizard on a configured host changes nothing and shows the
+current state; a wrong token is rejected on the step that collects it, naming the permission that
+is missing.
+
+### Phase 12 – Operations: logs, usage, self-update
+Live pod logs including the previous container of a crash-looping pod, instantaneous CPU and
+memory per pod, a warning when the VM disk fills up (local-path enforces no quota, so one app can
+fill it), "update shelf" as one job that moves the binary, the platform tag and the chart version
+together, and the Advanced page with the kubeconfig.
+
+**Acceptance:** a crash-looping app shows its previous container's log in the UI; the dashboard
+warns above 85 % VM disk usage; an update from one release to the next runs from the browser and
+the three versions shown afterwards agree; the kubeconfig download is refused without a re-entered
+password; every UI action has a documented CLI equivalent.
+
+### Phase 13 – Reference apps
 `examples/hello` and `examples/tenant`, then the maintainer's own apps as the first real
 tenants.
 
 ## Open items
 
-Due in Phase 6:
+Due in Phase 9:
 - **Mini hardware** (chip, RAM, macOS version) determines Colima sizing defaults and whether the
   "vanilla Mac" first run can be tested in a `tart` VM. Apple's Virtualization framework only
   supports nested virtualization from M3 and macOS 15; on M1/M2 the substitute is a tested
-  `shelf destroy --purge` ("back to vanilla" instead of "start from vanilla").
+  `shelf destroy --purge` ("back to vanilla" instead of "start from vanilla"). Until the hardware
+  is known, the wizard proposes half the CPUs, half the RAM and 60 GB of disk, all editable.
+- **Does Colima's `vz` VM start from a LaunchAgent without a GUI login?** The highest-impact
+  unknown of the new plan, because it decides whether automatic login is required: an agent in
+  `~/Library/LaunchAgents` loads when a user session is created, and a headless mini has nobody to
+  log in. Plan: ship automatic login as the documented path, run the experiment with
+  `launchctl bootstrap user/<uid>` from a daemon in Phase 9, and drop automatic login only if it
+  demonstrably works without it. Automatic login in turn requires FileVault to be off, so the disk
+  holding the tokens and the secret backups is unencrypted — accepted for a home appliance whose
+  threat model is the LAN, but it belongs in the documentation, not in a footnote.
+- **The macOS application firewall** shows a GUI dialog when an unsigned binary opens a listening
+  socket — and nobody is sitting in front of a headless mini. `install.sh` adds the binary with
+  `socketfilterfw --add` while it still has sudo, and `shelf doctor` checks the state. Easy to
+  miss, unpleasant to debug remotely.
 
 Later:
 - **Short 504 during a rollout** (seen once in Phase 4, not reproduced in Phase 5): Traefik
@@ -1195,6 +1463,15 @@ Later:
 ## Explicitly not in the MVP
 
 Per-branch environments, scale-to-zero, supply-chain security (signatures, scans, policies),
-monitoring, own registry, backups, seed data, devcontainer integration *for tenant apps* (the
-devcontainer for shelf itself is part of Phase 0), overview page, autostart after power loss,
-catalog of managed services.
+own registry, backups, seed data, devcontainer integration *for tenant apps* (the devcontainer
+for shelf itself is part of Phase 0), catalog of managed services.
+
+Added on 2026-09-20 with the admin UI: more than one user or any notion of roles, admin access
+from the internet, TLS on the LAN, a stable public HTTP API (the JSON under `/api/` serves the
+UI and may change freely), code signing, notarization and `.pkg` installers, metrics history and
+graphs, log retention and search, editing `app.yaml` in the UI, and apps without a tenant
+repository.
+
+Removed from this list on the same day: an **overview page** — that is the product now — and
+**autostart after power loss**, which is a goal of Phase 10. Monitoring stays out except for the
+instantaneous numbers in Phase 12: Prometheus on a 16 GB mini would be a second platform.
