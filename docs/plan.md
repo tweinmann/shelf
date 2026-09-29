@@ -230,6 +230,9 @@ ConfigMap change, `shelf app add`/`rm`.
 Without a tunnel, ingress is checked via `kubectl port-forward svc/traefik 8080:80` and
 `curl -H "Host: hello.dev.local" localhost:8080` — this fully exercises the Traefik rules;
 Cloudflare only adds DNS and TLS on top.
+In CI (decided 2026-09-29, when a merge took twenty minutes of CI) level 2 runs on pull requests
+only, one job with a cluster of its own per smoke test, side by side; after a merge, `main` gets
+level 1 alone.
 
 **Level 3 — Mac mini over SSH (Phase 9 onward).** Only what level 2 cannot do: host preflight on
 real hardware, Cloudflare Tunnel against the real domain, the launchd service, and the first run
