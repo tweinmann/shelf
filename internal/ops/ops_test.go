@@ -15,10 +15,6 @@ func TestCheckAppName(t *testing.T) {
 	t.Parallel()
 	tests := map[string]bool{
 		"hello":                        true,
-		"flux-system":                  false,
-		"kube-public":                  false,
-		"shelf-system":                 false,
-		"shelfish":                     true,
 		"a":                            true,
 		"my-app-2":                     true,
 		"":                             false,
@@ -38,7 +34,7 @@ func TestCheckAppName(t *testing.T) {
 		if !valid {
 			if err == nil {
 				t.Errorf("%q was accepted", name)
-			} else if !strings.Contains(err.Error(), "DNS label") && !strings.Contains(err.Error(), "reserved") {
+			} else if !strings.Contains(err.Error(), "DNS label") {
 				t.Errorf("%q: %v", name, err)
 			}
 		}

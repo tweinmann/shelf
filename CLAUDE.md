@@ -50,10 +50,6 @@ with `--registry`/`--cloudflare`. An exposed app has its own tunnel in the conne
 cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Level 1
 green; level 2 and 3 not run yet, because migrating the dev cluster takes `greeter-dev.tobile.ch`
 off the shared tunnel.
-Phase 8c in progress: the app name left `app.yaml` and the artifact; shelf names an app at
-`shelf app add`, so one artifact can be deployed more than once. The workflow names the packages
-after the repository (input `package` overrides it). Level 1 green; level 2, the release v0.3.0
-and `shelf-hello` still open.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
@@ -147,12 +143,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 ## Conventions
 
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
-- `app.yaml` has no `name`: an app is named at `shelf app add <name>` (checked by
-  `ops.CheckAppName`), and the artifact's ConfigMap is `shelf-values` in every app
 - A component has either `image:` or `build: ./dir`; package names are the workflow's business,
-  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<package>`, a built image
-  `ghcr.io/<owner>/<package>/<component>`, the package being the repository name unless the
-  workflow input `package` sets another
+  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<app>`, a built image
+  `ghcr.io/<owner>/<app>/<component>`
 - Reading a deploy artifact uses the login of the app's registry connection, and only for the
   registry it is for (`ghcr.io`); `ops.Env.Pull` overrides it, the Docker keychain is the last
   resort. A machine running shelf as a service has no Docker config

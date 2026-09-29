@@ -41,7 +41,7 @@ func AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]Compone
 	if err != nil {
 		return nil, err
 	}
-	values, err := c.get(ctx, ref{gvk: configMapGVK, namespace: app, name: render.ConfigMapName})
+	values, err := c.get(ctx, ref{gvk: configMapGVK, namespace: app, name: render.ConfigMapName(app)})
 	if err != nil {
 		return nil, err
 	}

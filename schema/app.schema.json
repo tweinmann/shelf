@@ -229,6 +229,12 @@
       "const": "shelf.dev/v1alpha1",
       "description": "Always shelf.dev/v1alpha1."
     },
+    "name": {
+      "type": "string",
+      "maxLength": 40,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "description": "App name. Becomes the namespace and the host name \u003cname\u003e.\u003cdomain\u003e."
+    },
     "components": {
       "additionalProperties": {
         "$ref": "#/$defs/Component"
@@ -259,6 +265,7 @@
   "type": "object",
   "required": [
     "apiVersion",
+    "name",
     "components"
   ],
   "title": "shelf app (shelf.dev/v1alpha1)"

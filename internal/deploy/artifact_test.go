@@ -75,12 +75,8 @@ func TestDecode(t *testing.T) {
 			"configmap.yaml": strings.Replace(hello, "apiVersion: shelf.dev/v1alpha1", "apiVersion: shelf.dev/v9", 1),
 		}, wantErr: `unsupported apiVersion "shelf.dev/v9"`},
 		{name: "invalid app", files: map[string]string{
-			"configmap.yaml": strings.Replace(hello, "      web:\n", "      Web:\n", 1),
+			"configmap.yaml": strings.Replace(hello, "    name: hello\n", "    name: Hello\n", 1),
 		}, wantErr: "invalid"},
-		{name: "rendered by an older shelf", files: map[string]string{
-			"configmap.yaml": strings.Replace(hello, "    apiVersion: shelf.dev/v1alpha1\n",
-				"    apiVersion: shelf.dev/v1alpha1\n    name: hello\n", 1),
-		}, wantErr: "older than v0.3.0"},
 		{name: "broken yaml", files: map[string]string{"x.yaml": "kind: [\n"}, wantErr: "x.yaml"},
 	}
 	for _, tt := range tests {
@@ -95,7 +91,7 @@ func TestDecode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(app.Components) != 3 {
+			if app.Name != "hello" || len(app.Components) != 3 {
 				t.Errorf("unexpected app %+v", app)
 			}
 			if got := SecretNames(app); len(got) != 1 || got[0] != "db-password" {
@@ -142,8 +138,8 @@ func TestFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(app.Components) != 3 {
-		t.Errorf("app %+v", app)
+	if app.Name != "hello" {
+		t.Errorf("app %q", app.Name)
 	}
 
 	other := push("image:latest", types.DockerLayer, []byte("x"))

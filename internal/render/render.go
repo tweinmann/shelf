@@ -72,6 +72,7 @@ func Render(ctx context.Context, doc *schema.Document, resolver Resolver, built 
 
 	out := &schema.App{
 		APIVersion: src.APIVersion,
+		Name:       src.Name,
 		Components: map[string]*schema.Component{},
 		Secrets:    src.Secrets,
 	}
@@ -259,9 +260,8 @@ func encodeYAML(v any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ConfigMapName is the name of the ConfigMap that carries an app's resolved app.yaml. It is the
-// same for every app: the namespace is the app's, and the artifact does not know the app's name.
-const ConfigMapName = "shelf-values"
+// ConfigMapName is the name of the ConfigMap that carries an app's resolved app.yaml.
+func ConfigMapName(app string) string { return app + "-values" }
 
 // ParseApp reads back what MarshalApp wrote, so that anyone holding the ConfigMap of an app can
 // see what it is made of without going to the registry for the artifact.
@@ -277,6 +277,9 @@ func ParseApp(data []byte) (*schema.App, error) {
 // valuesFrom.
 const ConfigMapKey = "app.yaml"
 
+// AppLabel marks every object that belongs to an app.
+const AppLabel = "shelf.dev/app"
+
 type configMap struct {
 	APIVersion string            `yaml:"apiVersion"`
 	Kind       string            `yaml:"kind"`
@@ -285,11 +288,12 @@ type configMap struct {
 }
 
 type configMapMeta struct {
-	Name string `yaml:"name"`
+	Name   string            `yaml:"name"`
+	Labels map[string]string `yaml:"labels"`
 }
 
-// ConfigMap returns the ConfigMap manifest for a resolved app. It has neither namespace nor
-// labels: the Flux Kustomization sets targetNamespace and labels it with the app's name.
+// ConfigMap returns the ConfigMap manifest for a resolved app. It has no namespace; the Flux
+// Kustomization sets targetNamespace.
 func ConfigMap(app *schema.App) ([]byte, error) {
 	values, err := MarshalApp(app)
 	if err != nil {
@@ -298,8 +302,11 @@ func ConfigMap(app *schema.App) ([]byte, error) {
 	cm := configMap{
 		APIVersion: "v1",
 		Kind:       "ConfigMap",
-		Metadata:   configMapMeta{Name: ConfigMapName},
-		Data:       map[string]string{ConfigMapKey: string(values)},
+		Metadata: configMapMeta{
+			Name:   ConfigMapName(app.Name),
+			Labels: map[string]string{AppLabel: app.Name},
+		},
+		Data: map[string]string{ConfigMapKey: string(values)},
 	}
 	return encodeYAML(cm)
 }

@@ -45,7 +45,9 @@ jobs:
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$VERSION" dist/*.tar.gz dist/checksums.txt --generate-notes --verify-tag
+        # Not "latest" yet: build.yml@<major> downloads the latest binary, so a new binary must
+        # not become latest before the major tag carries the workflow that goes with it.
+        run: gh release create "$VERSION" dist/*.tar.gz dist/checksums.txt --generate-notes --verify-tag --latest=false
 
       - uses: docker/login-action@v4
         with:
@@ -70,8 +72,14 @@ jobs:
             --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --revision "$VERSION@sha1:$GITHUB_SHA"
 
-      - name: Move the major tag
+      # Workflow and binary switch together: the major tag first, then the release becomes latest.
+      # A tenant build that starts in the seconds between the two still gets matching versions
+      # on its next push.
+      - name: Move the major tag and mark the release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           major="${VERSION%%.*}"
           git tag -f "$major" "$GITHUB_SHA"
           git push -f origin "$major"
+          gh release edit "$VERSION" --latest

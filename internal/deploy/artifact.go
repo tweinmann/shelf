@@ -146,10 +146,6 @@ func appValues(data []byte) ([]string, error) {
 
 func parseApp(values string) (*schema.App, error) {
 	doc, err := schema.Parse(render.ConfigMapKey, []byte(values))
-	if errors.Is(err, schema.ErrAppName) {
-		return nil, errors.New("the artifact was rendered by a shelf older than v0.3.0, which named " +
-			"the app in it; push the app again with a current shelf")
-	}
 	if err != nil {
 		return nil, err
 	}

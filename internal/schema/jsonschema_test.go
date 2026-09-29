@@ -85,7 +85,7 @@ func TestJSONSchemaAcceptsExamples(t *testing.T) {
 
 func TestJSONSchema(t *testing.T) {
 	s := compileSchema(t)
-	const head = "apiVersion: shelf.dev/v1alpha1\n"
+	const head = "apiVersion: shelf.dev/v1alpha1\nname: a\n"
 	tests := []struct {
 		name  string
 		yaml  string
@@ -95,8 +95,9 @@ func TestJSONSchema(t *testing.T) {
 		{"route short", head + "components:\n  web: { image: nginx, port: 80, route: / }\n", true},
 		{"route long", head + "components:\n  web: { image: nginx, ports: { http: 80 }, route: { path: /, port: http } }\n", true},
 		{"env scalars", head + "components:\n  web: { image: nginx, env: { A: 1, B: true, C: x } }\n", true},
-		{"wrong apiVersion", "apiVersion: shelf.dev/v1\ncomponents:\n  web: { image: nginx }\n", false},
-		{"app name", head + "name: a\ncomponents:\n  web: { image: nginx }\n", false},
+		{"wrong apiVersion", "apiVersion: shelf.dev/v1\nname: a\ncomponents:\n  web: { image: nginx }\n", false},
+		{"missing name", "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web: { image: nginx }\n", false},
+		{"bad app name", "apiVersion: shelf.dev/v1alpha1\nname: A\ncomponents:\n  web: { image: nginx }\n", false},
 		{"no components", head + "components: {}\n", false},
 		{"missing image", head + "components:\n  web: { port: 80 }\n", false},
 		{"unknown field", head + "components:\n  web: { image: nginx, replicas: 2 }\n", false},

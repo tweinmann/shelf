@@ -13,8 +13,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -195,21 +193,10 @@ func (o *Ops) config() *rest.Config { return o.Target.Config }
 
 var appNameRE = regexp.MustCompile(schema.AppNamePattern)
 
-// reservedAppNames are namespaces the platform or Kubernetes already uses.
-var (
-	reservedAppNames    = []string{"default", "flux-system", "traefik", "cloudflared"}
-	reservedAppPrefixes = []string{"kube-", "shelf-"}
-)
-
-// CheckAppName rejects a name that cannot become a namespace and a host name, or that names a
-// namespace of the platform. The name is shelf's alone: app.yaml does not carry one.
+// CheckAppName rejects a name that cannot become a namespace and a host name.
 func CheckAppName(name string) error {
-	switch {
-	case len(name) > schema.MaxAppNameLength || !appNameRE.MatchString(name):
+	if len(name) > schema.MaxAppNameLength || !appNameRE.MatchString(name) {
 		return fmt.Errorf("app name %q must be a DNS label of at most %d characters", name, schema.MaxAppNameLength)
-	case slices.Contains(reservedAppNames, name) ||
-		slices.ContainsFunc(reservedAppPrefixes, func(pre string) bool { return strings.HasPrefix(name, pre) }):
-		return fmt.Errorf("app name %q is reserved for the platform", name)
 	}
 	return nil
 }

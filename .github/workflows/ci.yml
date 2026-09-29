@@ -23,20 +23,26 @@ jobs:
           push: never
           runCmd: just test
 
-  # Level-2 checks against a k3d cluster inside the devcontainer, as locally.
+  # Level-2 checks against a k3d cluster inside the devcontainer, as locally. Each smoke test
+  # gets a fresh cluster of its own, so they run side by side; none depends on another's state.
+  # Pull requests only: main receives what a pull request already checked, so after a merge
+  # level 1 is enough.
   cluster:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 40
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        smoke: [smoke-secrets, smoke-chart, smoke-init, smoke-apps]
+    name: cluster (${{ matrix.smoke }})
     steps:
       - uses: actions/checkout@v7
-      - name: Smoke tests against k3d (in the devcontainer)
+      - name: just ${{ matrix.smoke }} against k3d (in the devcontainer)
         uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
             set -e
             just cluster-up
-            just smoke-secrets
-            just smoke-chart
-            just smoke-init
-            just smoke-apps
+            just ${{ matrix.smoke }}

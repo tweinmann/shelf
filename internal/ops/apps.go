@@ -142,6 +142,9 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	if err != nil {
 		return err
 	}
+	if app.Name != opts.Name {
+		return fmt.Errorf("the artifact deploys app %q, not %q", app.Name, opts.Name)
+	}
 
 	stored, err := o.Cluster.AppSecrets(ctx, o.config(), opts.Name)
 	if err != nil {
