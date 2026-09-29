@@ -45,13 +45,15 @@ shelf reads it, generates the secrets it declares, and keeps the app on that tag
 </select>
 <label for="cloudflare">Cloudflare connection</label>
 <select id="cloudflare" name="cloudflare">
-<option value="">none: inside the cluster only</option>
+<option value="">none: a quick tunnel at a temporary trycloudflare.com address</option>
+<option value="@private">none: inside the cluster only</option>
 <option value="tobile">tobile (account acc-1)</option>
 </select>
 <p>Connections are defined once, on the <a href="/connections">connections page</a>, and chosen
 here. With a registry connection, the form offers the deploy artifacts and tags of its user.
 With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS record
-in its zone.</p>
+in its zone. Without one, it gets a quick tunnel: a random address that needs no account and no
+domain, but changes whenever the tunnel restarts, and is meant for trying things out.</p>
 </fieldset>
 <fieldset>
 <legend>Domain</legend>

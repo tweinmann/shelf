@@ -291,6 +291,47 @@ func runningPlatform() *fakePlatform {
 	}
 }
 
+// quickPlatform adds two apps with quick tunnels to runningPlatform: one whose cloudflared
+// reported its address, and one whose tunnel has none yet.
+func quickPlatform() *fakePlatform {
+	p := runningPlatform()
+	p.apps = append(p.apps,
+		ops.App{
+			AppState: cluster.AppState{
+				Name:     "notes",
+				Artifact: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/notes", Tag: "main"},
+				Revision: "main@" + digest,
+				Deployed: now.Add(-5 * time.Minute),
+				Phase:    cluster.PhaseReady,
+				Quick:    true, QuickURL: "https://some-random-words.trycloudflare.com/",
+			},
+			Host:   "some-random-words.trycloudflare.com",
+			Public: true,
+			URL:    "https://some-random-words.trycloudflare.com/",
+			Components: []ops.Component{
+				{
+					Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
+						Ports: []cluster.Port{{Name: "main", Number: 80}}, Path: "/"},
+					Address: "some-random-words.trycloudflare.com/",
+					URL:     "https://some-random-words.trycloudflare.com/",
+				},
+			},
+		},
+		ops.App{
+			AppState: cluster.AppState{
+				Name:     "draft",
+				Artifact: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/draft", Tag: "main"},
+				Phase:    cluster.PhaseWorking,
+				Quick:    true,
+			},
+			Host:   "draft-dev.example.com",
+			Public: true,
+		},
+	)
+	p.diagnoses["notes"] = p.diagnoses["greeter"]
+	return p
+}
+
 // testServer builds a server with its own directory and a fixed clock.
 func testServer(t *testing.T, platform server.Platform) (*server.Server, http.Handler) {
 	t.Helper()
@@ -426,6 +467,13 @@ func TestPages(t *testing.T) {
 		t.Parallel()
 		h, cookie := claimed(t, running)
 		golden(t, "new", get(h, "/apps/new", cookie))
+	})
+
+	t.Run("quick tunnels", func(t *testing.T) {
+		t.Parallel()
+		h, cookie := claimed(t, quickPlatform())
+		golden(t, "dashboard-quick", get(h, "/", cookie))
+		golden(t, "app-quick", get(h, "/apps/notes", cookie))
 	})
 
 	t.Run("connections", func(t *testing.T) {
@@ -878,12 +926,23 @@ func TestAccessForms(t *testing.T) {
 			name: "add without", path: "/apps",
 			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
 				"registry": {""}, "cloudflare": {""}},
-			want: ops.Access{RemoveRegistry: true, RemoveCloudflare: true},
+			want: ops.Access{RemoveRegistry: true, Quick: true},
+		},
+		{
+			name: "add a private app", path: "/apps",
+			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+				"registry": {""}, "cloudflare": {"@private"}},
+			want: ops.Access{RemoveRegistry: true, Private: true},
+		},
+		{
+			name: "move an app to a quick tunnel", path: "/apps/greeter/access",
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
+			want: ops.Access{Registry: "ghcr", Quick: true},
 		},
 		{
 			name: "take an app off the internet", path: "/apps/greeter/access",
-			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
-			want: ops.Access{Registry: "ghcr", RemoveCloudflare: true},
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {"@private"}},
+			want: ops.Access{Registry: "ghcr", Private: true},
 		},
 	}
 	for _, tt := range tests {

@@ -27,7 +27,12 @@ func newAppCmd(o Options) *cobra.Command {
 const accessHelp = `--registry names the registry connection the app pulls its deploy artifact and its images
 with; without one, it reads the registry anonymously. --cloudflare names the Cloudflare
 connection it is exposed through: it gets a tunnel of its own in that connection's account, and
-its domain has to be a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.`
+its domain has to be a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.
+
+Without a Cloudflare connection, an app is exposed through a quick tunnel: Cloudflare gives it a
+random https://<words>.trycloudflare.com address, which needs no account and no domain, but
+changes whenever the tunnel restarts, and is meant for trying things out. ` + "`shelf app status`" + `
+shows the current one. --private keeps the app inside the cluster instead.`
 
 // accessFlags choose what an app reaches its registry and the internet with.
 type accessFlags struct {
@@ -36,6 +41,8 @@ type accessFlags struct {
 	noRegistry   bool
 	cloudflare   string
 	noCloudflare bool
+	quick        bool
+	private      bool
 }
 
 // register adds the flags; removable adds the ones that take a connection away again.
@@ -44,25 +51,30 @@ func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 		"a domain of the app's own: it answers at <name><host-suffix>.<domain> (default: the cluster's)")
 	fs.StringVar(&f.registry, "registry", "", "the registry connection the app pulls with")
 	fs.StringVar(&f.cloudflare, "cloudflare", "", "the Cloudflare connection the app is exposed through")
+	fs.BoolVar(&f.private, "private", false,
+		"keep the app off the internet, even without a Cloudflare connection; a tunnel it had is deleted")
 	if removable {
 		fs.BoolVar(&f.noRegistry, "no-registry", false, "pull without a login")
-		fs.BoolVar(&f.noCloudflare, "no-cloudflare", false,
-			"take the app off the internet: delete its record and its tunnel")
+		fs.BoolVar(&f.quick, "quick", false,
+			"expose the app through a quick tunnel; a tunnel and a record it had are deleted")
+		fs.BoolVar(&f.noCloudflare, "no-cloudflare", false, "the same as --quick")
 	}
 }
 
 // changes reports whether any flag asks for a change.
 func (f *accessFlags) changes() bool {
-	return f.domain != "" || f.registry != "" || f.noRegistry || f.cloudflare != "" || f.noCloudflare
+	return f.domain != "" || f.registry != "" || f.noRegistry || f.cloudflare != "" || f.noCloudflare ||
+		f.quick || f.private
 }
 
 func (f *accessFlags) access() (ops.Access, error) {
 	a := ops.Access{
-		Domain:           f.domain,
-		Registry:         f.registry,
-		RemoveRegistry:   f.noRegistry,
-		Cloudflare:       f.cloudflare,
-		RemoveCloudflare: f.noCloudflare,
+		Domain:         f.domain,
+		Registry:       f.registry,
+		RemoveRegistry: f.noRegistry,
+		Cloudflare:     f.cloudflare,
+		Quick:          f.quick || f.noCloudflare,
+		Private:        f.private,
 	}
 	return a, a.Check()
 }
@@ -135,7 +147,8 @@ func newAppCredentialsCmd(o Options) *cobra.Command {
 deployed again from the artifact it is registered with. What is not given stays as it is.
 
 Moving the app to another domain or another Cloudflare connection deletes its record, and its
-tunnel if the account changes; --no-cloudflare takes it off the internet.
+tunnel if the account changes; --quick moves it to a quick tunnel, and --private takes it off
+the internet.
 
 ` + accessHelp,
 		Args: cobra.ExactArgs(1),
@@ -146,7 +159,7 @@ tunnel if the account changes; --no-cloudflare takes it off the internet.
 			}
 			if !access.changes() {
 				return fmt.Errorf("nothing to change; pass --domain, --registry, --cloudflare, " +
-					"--no-registry or --no-cloudflare")
+					"--no-registry, --quick or --private")
 			}
 			given, err := access.access()
 			if err != nil {
@@ -173,7 +186,7 @@ func newAppRmCmd(o Options) *cobra.Command {
 		Use:   "rm <name>",
 		Short: "Remove an app with all its data",
 		Long: `Remove an app: its namespace with all objects and volumes, its secrets in the cluster,
-and, if it is exposed, its DNS record and its Cloudflare tunnel. The secret backup on this
+and, if it is exposed through a Cloudflare connection, its DNS record and its Cloudflare tunnel. The secret backup on this
 machine is kept.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

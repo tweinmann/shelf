@@ -1,9 +1,9 @@
 # Every app is a ResourceSetInputProvider in shelf-system, labelled shelf.dev/app, created by
-# `shelf app add` with the inputs name, url, tag, insecure, domain, tunnel, registry and
+# `shelf app add` with the inputs name, url, tag, insecure, domain, tunnel, quick, registry and
 # cloudflare. For each one this
 # ResourceSet generates the app namespace and everything Flux needs to deploy the app from its
-# deploy artifact, and, for an app with a tunnel, the cloudflared that carries it to the
-# internet. Deleting the provider deletes all of it, including the namespace.
+# deploy artifact, and, for an app with a tunnel or a quick tunnel, the cloudflared that carries
+# it to the internet. Deleting the provider deletes all of it, including the namespace.
 #
 # What apps share is only what the user assigned to several of them: a registry connection, whose
 # login is copied into each of their namespaces. Namespace, secrets, tunnel and cloudflared are
@@ -173,6 +173,13 @@ spec:
   # An app with a tunnel reaches the internet through cloudflared in its own namespace. The DNS
   # record is not made here: shelf writes it when the app is added, with the token of the app's
   # Cloudflare connection, which never enters the cluster. One rule is enough, because Traefik routes by host name.
+  #
+  # An app with a quick tunnel instead has no Cloudflare connection: cloudflared asks
+  # trycloudflare.com for a random name, which changes whenever it restarts, and reports it on its
+  # metrics port at /quicktunnel. Every request arrives under that name, so cloudflared rewrites
+  # the Host header to the app's own host name, which is what Traefik routes by. The input is read
+  # with index, which is empty for a provider from before quick tunnels, where inputs.quick would
+  # fail the whole ResourceSet.
   resourcesTemplate: |
     <<- if inputs.tunnel >>
     ---
@@ -198,15 +205,19 @@ spec:
         no-autoupdate: true
         ingress:
           - service: http://traefik.traefik.svc.cluster.local:80
+    <<- end >>
+    <<- if or inputs.tunnel (index inputs "quick") >>
     ---
     apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: cloudflared
       namespace: << inputs.name >>
+      <<- if inputs.tunnel >>
       annotations:
         # Restarts cloudflared when the tunnel credentials or the rule change.
         fluxcd.controlplane.io/checksumFrom: Secret/<< inputs.name >>/shelf-tunnel,ConfigMap/<< inputs.name >>/cloudflared
+      <<- end >>
     spec:
       replicas: 1
       selector:
@@ -222,7 +233,19 @@ spec:
           containers:
             - name: cloudflared
               image: cloudflare/cloudflared:2026.9.1
+              <<- if inputs.tunnel >>
               args: [tunnel, --config, /etc/cloudflared/config/config.yaml, run]
+              <<- else >>
+              args:
+                - tunnel
+                - --no-autoupdate
+                - --metrics
+                - 0.0.0.0:2000
+                - --url
+                - http://traefik.traefik.svc.cluster.local:80
+                - --http-host-header
+                - "<< inputs.name >>${SHELF_HOST_SUFFIX:=}.<< if inputs.domain >><< inputs.domain >><< else >>${SHELF_DOMAIN}<< end >>"
+              <<- end >>
               ports:
                 - name: metrics
                   containerPort: 2000
@@ -243,6 +266,7 @@ spec:
                   memory: 64Mi
                 limits:
                   memory: 256Mi
+              <<- if inputs.tunnel >>
               volumeMounts:
                 - name: config
                   mountPath: /etc/cloudflared/config
@@ -255,4 +279,5 @@ spec:
             - name: credentials
               secret:
                 secretName: shelf-tunnel
+              <<- end >>
     <<- end >>

@@ -56,6 +56,11 @@ Also in 8b (2026-09-29): the forms offer the deploy artifacts and tags of the re
 (GitHub API, `internal/github`) and the zones of the Cloudflare connection as selects, with free
 text as the fallback; `shelf connection packages|zones` and `shelf app tags` list the same. Level 1
 green; `form.js` untested against real connections.
+Phase 8d in progress (2026-09-29): an app without a Cloudflare connection gets a quick tunnel
+(random `*.trycloudflare.com` name, changes when cloudflared restarts) unless it is `--private`;
+cloudflared rewrites the Host header to the app's own host, and shelf reads the name from
+`/quicktunnel` through the pod proxy. Apps from before stay private. LAN access (proxy + mDNS)
+was considered and rejected. Level 1 green; `just smoke-quick` not run yet.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
@@ -110,6 +115,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
 | `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token; needs a cluster with a host suffix |
+| `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` without a connection gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's domain; opens a public trycloudflare.com tunnel for a few minutes |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -140,6 +146,8 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   record by anything but its exact name, and never one without the `-dev` suffix.
 - `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
   this session.
+- A quick tunnel puts an app on the internet without any account. Smoke tests other than
+  `smoke-quick` add apps with `--private`; never give an app you did not create a quick tunnel.
 - `shelf init cluster` with a different `--host-suffix` moves every app to another host name, a
   different `--domain` every app without a domain of its own, and strands their DNS records. It
   refuses to do that while such apps exist unless `--move-hosts` is passed. The smoke tests install `dev.local` and refuse to run against a
@@ -159,8 +167,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   registry it is for (`ghcr.io`); `ops.Env.Pull` overrides it, the Docker keychain is the last
   resort. A machine running shelf as a service has no Docker config
 - Per app in `shelf-system`, all labelled `shelf.dev/app`: the provider `<app>` (inputs `name`,
-  `url`, `tag`, `insecure`, `domain`, `tunnel`, `registry`, `cloudflare` — the last two are
-  connection names), `app-<app>` (secret values), `tunnel-<app>`. Registry connections are
+  `url`, `tag`, `insecure`, `domain`, `tunnel`, `quick`, `registry`, `cloudflare` — the last two
+  are connection names; `tunnel` and `quick` never both), `app-<app>` (secret values),
+  `tunnel-<app>` (named tunnels only). Registry connections are
   `connection-registry-<name>` (label `shelf.dev/connection=registry`), and `registry-anonymous`
   is what an app without one gets. An app's tunnel is `shelf<host-suffix>-<app>`, its host
   `<app><host-suffix>.<own domain or the cluster's>`

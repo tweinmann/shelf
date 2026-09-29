@@ -46,7 +46,7 @@ This is what the admin UI shows on its pages, in text.`,
 				return err
 			}
 			printApp(out, app)
-			printComponents(out, app.Components, app.Public)
+			printComponents(out, app.Components, app.Public || app.Quick)
 			printChain(out, diagnosis)
 			return nil
 		},
@@ -91,6 +91,10 @@ func printApp(out io.Writer, app ops.App) {
 		fmt.Fprintf(out, "  exposed   through connection %s, which this machine does not hold\n", app.Cloudflare)
 	case app.Cloudflare != "":
 		fmt.Fprintf(out, "  exposed   through connection %s, account %s\n", app.Cloudflare, app.CloudflareAccount)
+	case app.Quick && app.URL == "":
+		fmt.Fprintln(out, "  exposed   through a quick tunnel, which has no address yet")
+	case app.Quick:
+		fmt.Fprintln(out, "  exposed   through a quick tunnel; the address changes when it restarts")
 	}
 	if app.Revision != "" {
 		fmt.Fprintf(out, "  running   %s\n", app.Revision)

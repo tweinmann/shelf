@@ -225,7 +225,8 @@ func TestPlatformObjects(t *testing.T) {
 		TunnelSecret("hello", []byte(`{"TunnelID":"t-1","TunnelSecret":"not-a-real-secret"}`)),
 		AppProvider(AppOptions{Name: "hello", Artifact: app, Domain: "example.com", TunnelID: "t-1",
 			Registry: "ghcr", Cloudflare: "tobile"}),
-		AppProvider(AppOptions{Name: "empty", Artifact: app}))
+		AppProvider(AppOptions{Name: "empty", Artifact: app}),
+		AppProvider(AppOptions{Name: "quick", Artifact: app, Quick: true}))
 
 	var out []byte
 	for _, obj := range objs {

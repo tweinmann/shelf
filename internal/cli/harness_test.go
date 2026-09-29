@@ -82,7 +82,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	}
 	config := &cluster.AppConfig{
 		Artifact: o.Artifact, Insecure: o.Insecure, Domain: o.Domain, Registry: o.Registry,
-		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials,
+		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials, Quick: o.Quick,
 	}
 	if previous := f.configs[o.Name]; previous != nil && o.TunnelCredentials == nil && o.TunnelID != "" {
 		config.TunnelCredentials = previous.TunnelCredentials
@@ -91,7 +91,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	// The states follow what is registered, as they do in a cluster.
 	f.states = slices.DeleteFunc(f.states, func(s cluster.AppState) bool { return s.Name == o.Name })
 	f.states = append(f.states, cluster.AppState{
-		Name: o.Name, Artifact: o.Artifact, Domain: o.Domain, Tunnel: o.TunnelID,
+		Name: o.Name, Artifact: o.Artifact, Domain: o.Domain, Tunnel: o.TunnelID, Quick: o.Quick,
 		Registry: o.Registry, Cloudflare: o.Cloudflare,
 	})
 	return nil

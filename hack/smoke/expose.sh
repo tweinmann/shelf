@@ -130,7 +130,7 @@ cf "/zones/$zone/dns_records/$(jq -r '.id' <<<"$rec")" -X PATCH -H 'Content-Type
 [[ "$(record | jq -r '.content')" == "$target" ]] || die "the record still points somewhere else"
 
 step "off the internet again: record, tunnel and cloudflared are gone"
-"$work/shelf" app credentials "$app" --no-cloudflare | tee "$work/off.txt"
+"$work/shelf" app credentials "$app" --private | tee "$work/off.txt"
 [[ -z "$(record)" ]] || die "the record of $host is still there"
 [[ -z "$(find_tunnel "$tunnel_name")" ]] || die "tunnel $tunnel_name is still there"
 kubectl -n "$app" get deploy cloudflared >/dev/null 2>&1 && die "cloudflared still runs"

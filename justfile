@@ -101,6 +101,10 @@ smoke-apps:
 smoke-expose app domain:
     hack/smoke/expose.sh {{app}} {{domain}}
 
+# Phase 8c acceptance: an app without a Cloudflare connection gets a quick tunnel (needs network)
+smoke-quick app="hello-quick":
+    hack/smoke/quick.sh {{app}}
+
 # Phase 4 acceptance with a real tenant repository and GHCR (asks for the GHCR login)
 smoke-tenant app artifact:
     hack/smoke/tenant.sh {{app}} {{artifact}}

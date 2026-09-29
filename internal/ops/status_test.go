@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tweinmann/shelf/internal/cluster"
@@ -96,6 +97,55 @@ func TestSiblingAddress(t *testing.T) {
 			t.Parallel()
 			if got := siblingAddress(tt.component); got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAppAddress covers where an app is said to answer: a named tunnel links the app's own host
+// name, but only on a public domain; a quick tunnel links whatever name cloudflared was given,
+// on any domain, once it has one.
+func TestAppAddress(t *testing.T) {
+	t.Parallel()
+	settings := cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
+	tests := map[string]struct {
+		state    cluster.AppState
+		wantHost string
+		wantURL  string
+	}{
+		"not exposed": {
+			state:    cluster.AppState{Name: "hello"},
+			wantHost: "hello-dev.dev.local",
+		},
+		"named tunnel on a reserved domain": {
+			state:    cluster.AppState{Name: "hello", Tunnel: "t-1"},
+			wantHost: "hello-dev.dev.local",
+		},
+		"named tunnel on a public domain": {
+			state:    cluster.AppState{Name: "hello", Tunnel: "t-1", Domain: "example.com"},
+			wantHost: "hello-dev.example.com",
+			wantURL:  "https://hello-dev.example.com/",
+		},
+		"quick tunnel without an address yet": {
+			state:    cluster.AppState{Name: "hello", Quick: true},
+			wantHost: "hello-dev.dev.local",
+		},
+		"quick tunnel": {
+			state:    cluster.AppState{Name: "hello", Quick: true, QuickURL: "https://some-words.trycloudflare.com/"},
+			wantHost: "some-words.trycloudflare.com",
+			wantURL:  "https://some-words.trycloudflare.com/",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			a := app(tt.state, settings)
+			if a.Host != tt.wantHost || a.URL != tt.wantURL {
+				t.Errorf("host %q, URL %q; want %q, %q", a.Host, a.URL, tt.wantHost, tt.wantURL)
+			}
+			comps := components([]cluster.Component{{Name: "web", Path: "/app"}}, a.Host, a.URL != "")
+			if want := strings.TrimSuffix(tt.wantURL, "/") + "/app"; tt.wantURL != "" && comps[0].URL != want {
+				t.Errorf("component URL %q, want %q", comps[0].URL, want)
 			}
 		})
 	}

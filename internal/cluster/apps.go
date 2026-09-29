@@ -56,11 +56,14 @@ type AppOptions struct {
 	// Cloudflare is the Cloudflare connection the app is exposed through. The cluster only keeps
 	// its name; the token stays on the machine that runs shelf.
 	Cloudflare string
-	// TunnelID is the app's Cloudflare tunnel; empty means the app is not exposed, and the
-	// platform stops its cloudflared.
+	// TunnelID is the app's Cloudflare tunnel; empty means the app has no tunnel of its own.
 	TunnelID string
 	// TunnelCredentials is the credentials.json of that tunnel, or nil to keep the stored one.
 	TunnelCredentials []byte
+	// Quick gives an app without a tunnel of its own a quick tunnel at a random
+	// trycloudflare.com name. Without either, the app is not exposed, and the platform stops its
+	// cloudflared.
+	Quick bool
 	// Secrets are all secret values of the app; they replace the stored ones.
 	Secrets map[string]string
 	Timeout time.Duration
@@ -109,6 +112,7 @@ func AppProvider(o AppOptions) *unstructured.Unstructured {
 				"insecure":   o.Insecure,
 				"domain":     o.Domain,
 				"tunnel":     o.TunnelID,
+				"quick":      o.Quick,
 				"registry":   o.Registry,
 				"cloudflare": o.Cloudflare,
 			},
@@ -143,7 +147,8 @@ func AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]s
 
 // AddApp stores the app's secrets, its tunnel and its provider, then waits
 // until Flux has deployed the current artifact and the HelmRelease is ready, and until the app's
-// cloudflared runs — or, for an app that is no longer exposed, until it is gone. Running it again
+// cloudflared runs — or, for an app that is no longer exposed, until it is gone. For a quick
+// tunnel, the wait ends with its address. Running it again
 // updates all of it and waits again.
 func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
@@ -153,6 +158,11 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		return err
 	}
 	rep := progress.OrDiscard(o.Report)
+	if o.Quick {
+		if err := c.checkQuickTunnels(ctx); err != nil {
+			return err
+		}
+	}
 
 	objs := []*unstructured.Unstructured{AppSecret(o.Name, o.Secrets)}
 	if o.TunnelCredentials != nil {
@@ -174,7 +184,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 	if err := c.rollOut(ctx, rep, o.Name, o.Artifact); err != nil {
 		return err
 	}
-	return c.waitForTunnel(ctx, rep, o.Name, o.TunnelID)
+	return c.waitForTunnel(ctx, rep, o.Name, o.TunnelID, o.Quick)
 }
 
 // AppConfig is how an app is registered: what `shelf app add` stored, read back.
@@ -187,10 +197,12 @@ type AppConfig struct {
 	Registry string
 	// Cloudflare is the app's Cloudflare connection, empty when it is not exposed.
 	Cloudflare string
-	// TunnelID is the app's Cloudflare tunnel, empty when it is not exposed.
+	// TunnelID is the app's Cloudflare tunnel, empty when it has none of its own.
 	TunnelID string
 	// TunnelCredentials is the credentials.json the cluster holds for that tunnel.
 	TunnelCredentials []byte
+	// Quick means the app is exposed through a quick tunnel.
+	Quick bool
 }
 
 // ReadAppConfig returns how an app is registered, or nil when there is no such app.
@@ -210,6 +222,7 @@ func ReadAppConfig(ctx context.Context, cfg *rest.Config, app string) (*AppConfi
 	config.Insecure, _ = values["insecure"].(bool)
 	config.Domain, _ = values["domain"].(string)
 	config.TunnelID, _ = values["tunnel"].(string)
+	config.Quick, _ = values["quick"].(bool)
 	config.Registry, _ = values["registry"].(string)
 	config.Cloudflare, _ = values["cloudflare"].(string)
 

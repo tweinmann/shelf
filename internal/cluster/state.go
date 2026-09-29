@@ -79,8 +79,12 @@ type AppState struct {
 	Insecure bool     `json:"insecure,omitempty"`
 	// Domain is the app's own domain, empty when it answers under the cluster's.
 	Domain string `json:"domain,omitempty"`
-	// Tunnel is the app's Cloudflare tunnel, empty when the app is not exposed.
+	// Tunnel is the app's Cloudflare tunnel, empty when the app has none of its own.
 	Tunnel string `json:"tunnel,omitempty"`
+	// Quick means the app is exposed through a quick tunnel.
+	Quick bool `json:"quick,omitempty"`
+	// QuickURL is the current address of that quick tunnel, empty while cloudflared has none.
+	QuickURL string `json:"quickURL,omitempty"`
 	// Registry is the app's registry connection, empty when it pulls without a login.
 	Registry string `json:"registry,omitempty"`
 	// Cloudflare is the app's Cloudflare connection, empty when it is not exposed.
@@ -107,7 +111,7 @@ type appObjects struct {
 }
 
 // AppStates returns every registered app with its current state. It reads the whole cluster in
-// five list calls, however many apps there are.
+// five list calls, however many apps there are, plus two for each app with a quick tunnel.
 func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	c, err := newClient(cfg)
 	if err != nil {
@@ -119,7 +123,13 @@ func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	}
 	states := make([]AppState, 0, len(apps))
 	for _, name := range slices.Sorted(maps.Keys(apps)) {
-		states = append(states, appState(name, apps[name]))
+		state := appState(name, apps[name])
+		if state.Quick {
+			// A quick tunnel's name exists only in its cloudflared. One that cannot be asked
+			// yet has no address, which the page says; it is not a reason to fail the list.
+			state.QuickURL, _ = c.quickURL(ctx, name)
+		}
+		states = append(states, state)
 	}
 	return states, nil
 }
@@ -229,6 +239,7 @@ func providerState(provider *unstructured.Unstructured) AppState {
 	state.Insecure, _ = values["insecure"].(bool)
 	state.Domain, _ = values["domain"].(string)
 	state.Tunnel, _ = values["tunnel"].(string)
+	state.Quick, _ = values["quick"].(bool)
 	state.Registry, _ = values["registry"].(string)
 	state.Cloudflare, _ = values["cloudflare"].(string)
 	return state

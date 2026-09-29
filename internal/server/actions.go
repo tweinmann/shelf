@@ -90,16 +90,28 @@ func (s *Server) addApp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// privateChoice is the value of the Cloudflare choice that keeps an app off the internet. It
+// cannot be the name of a connection, which is a DNS label.
+const privateChoice = "@private"
+
 // accessFromForm reads what a form chooses for an app: a domain, and a connection of each kind.
-// The choice of a connection is the whole of it, so "none" takes one away. An empty domain keeps
-// the one the app has.
+// The choice of a connection is the whole of it, so "none" takes one away: without a Cloudflare
+// connection the app gets a quick tunnel, unless it is kept private. An empty domain keeps the
+// one the app has.
 func accessFromForm(r *http.Request) (ops.Access, error) {
 	a := ops.Access{
-		Domain:     strings.TrimSpace(r.PostFormValue("domain")),
-		Registry:   r.PostFormValue("registry"),
-		Cloudflare: r.PostFormValue("cloudflare"),
+		Domain:   strings.TrimSpace(r.PostFormValue("domain")),
+		Registry: r.PostFormValue("registry"),
 	}
-	a.RemoveRegistry, a.RemoveCloudflare = a.Registry == "", a.Cloudflare == ""
+	a.RemoveRegistry = a.Registry == ""
+	switch choice := r.PostFormValue("cloudflare"); choice {
+	case "":
+		a.Quick = true
+	case privateChoice:
+		a.Private = true
+	default:
+		a.Cloudflare = choice
+	}
 	return a, a.Check()
 }
 

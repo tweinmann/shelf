@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 
 	"github.com/tweinmann/shelf/internal/progress"
@@ -64,11 +67,32 @@ func tunnelCredentials(obj *unstructured.Unstructured) ([]byte, error) {
 	return credentials, nil
 }
 
-// waitForTunnel waits until cloudflared in the app namespace runs for the given tunnel, or,
-// without one, until it is gone. Closing matters as much as opening: Cloudflare refuses to delete
-// a tunnel that still has connections, and shelf deletes the old tunnel right after this.
-func (c *client) waitForTunnel(ctx context.Context, rep progress.Reporter, app, tunnel string) error {
+// waitForTunnel waits until cloudflared in the app namespace runs for the given tunnel, or for
+// a quick tunnel and has its address, or, without either, until it is gone. Closing matters as
+// much as opening: Cloudflare refuses to delete a tunnel that still has connections, and shelf
+// deletes the old tunnel right after this.
+func (c *client) waitForTunnel(ctx context.Context, rep progress.Reporter, app, tunnel string, quick bool) error {
 	deployment := ref{gvk: deploymentGVK, namespace: app, name: CloudflaredName}
+	if tunnel == "" && quick {
+		return c.step(ctx, rep, "the tunnel", func(ctx context.Context) (string, error) {
+			// A cloudflared that still runs a named tunnel must not pass.
+			err := c.waitFor(ctx, deployment, func(obj *unstructured.Unstructured) (bool, string, error) {
+				return isQuick(obj), "waiting for the platform to configure cloudflared", nil
+			})
+			if err != nil {
+				return "", err
+			}
+			if err := c.waitFor(ctx, deployment, current); err != nil {
+				return "", err
+			}
+			var url string
+			err = wait.PollUntilContextCancel(ctx, pollInterval, true, func(ctx context.Context) (bool, error) {
+				url, _ = c.quickURL(ctx, app)
+				return url != "", nil
+			})
+			return url, err
+		})
+	}
 	if tunnel == "" {
 		obj, err := c.get(ctx, deployment)
 		if err != nil || obj == nil {
@@ -139,4 +163,89 @@ func (c *client) applyReport(ctx context.Context, rep progress.Reporter, obj *un
 	}
 	rep.Report(progress.Applied(describe(obj), string(action), ""))
 	return nil
+}
+
+var resourceSetGVK = schema.GroupVersionKind{Group: "fluxcd.controlplane.io", Version: "v1", Kind: "ResourceSet"}
+
+// appsResourceSet is the ResourceSet of the platform that deploys every app.
+const appsResourceSet = "apps"
+
+// quickInput is how the platform refers to the input of a quick tunnel.
+const quickInput = `"quick"`
+
+// checkQuickTunnels fails when the platform in the cluster is older than quick tunnels: it would
+// never start cloudflared for one, and a wait for it would only end at the timeout.
+func (c *client) checkQuickTunnels(ctx context.Context) error {
+	obj, err := c.get(ctx, ref{gvk: resourceSetGVK, namespace: SystemNamespace, name: appsResourceSet})
+	if err != nil {
+		return err
+	}
+	template := ""
+	if obj != nil {
+		template, _, _ = unstructured.NestedString(obj.Object, "spec", "resourcesTemplate")
+	}
+	if !strings.Contains(template, quickInput) {
+		return errors.New("the platform in this cluster does not run quick tunnels yet; " +
+			"install the platform of this shelf with `shelf init cluster` first, or add the app with --private")
+	}
+	return nil
+}
+
+// quickArg is what tells the cloudflared of a quick tunnel from that of a named one.
+const quickArg = "--url"
+
+// isQuick reports whether a cloudflared Deployment runs a quick tunnel.
+func isQuick(deployment *unstructured.Unstructured) bool {
+	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+	for _, c := range containers {
+		container, _ := c.(map[string]any)
+		args, _, _ := unstructured.NestedStringSlice(container, "args")
+		if slices.Contains(args, quickArg) {
+			return true
+		}
+	}
+	return false
+}
+
+// metricsPort is where cloudflared answers /ready and, for a quick tunnel, /quicktunnel.
+const metricsPort = "2000"
+
+// quickURL asks the running cloudflared of an app for the name of its quick tunnel, through the
+// API server's proxy to the pod. It is empty while no cloudflared is ready to answer.
+func (c *client) quickURL(ctx context.Context, app string) (string, error) {
+	core, err := corev1client.NewForConfig(c.cfg)
+	if err != nil {
+		return "", err
+	}
+	pods, err := c.list(ctx, podGVK, app, "app.kubernetes.io/name="+CloudflaredName)
+	if err != nil {
+		return "", err
+	}
+	for _, pod := range pods {
+		// A pod on its way out still answers, with the name that is about to go away.
+		if ready := condition(pod, "Ready"); pod.GetDeletionTimestamp() != nil || ready == nil || ready["status"] != "True" {
+			continue
+		}
+		body, err := core.Pods(app).ProxyGet("http", pod.GetName(), metricsPort, "quicktunnel", nil).DoRaw(ctx)
+		if err != nil {
+			return "", err
+		}
+		return parseQuickTunnel(body)
+	}
+	return "", nil
+}
+
+// parseQuickTunnel reads the answer of cloudflared's /quicktunnel, such as
+// {"hostname":"some-words.trycloudflare.com"}, into a URL.
+func parseQuickTunnel(body []byte) (string, error) {
+	var answer struct {
+		Hostname string `json:"hostname"`
+	}
+	if err := json.Unmarshal(body, &answer); err != nil {
+		return "", fmt.Errorf("reading the quick tunnel of cloudflared: %w", err)
+	}
+	if answer.Hostname == "" {
+		return "", nil
+	}
+	return "https://" + answer.Hostname + "/", nil
 }

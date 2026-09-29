@@ -43,8 +43,24 @@ type Access struct {
 	// Cloudflare is the Cloudflare connection the app is exposed through, with a tunnel of its
 	// own in that connection's account.
 	Cloudflare string
-	// RemoveCloudflare takes the app off the internet: its record and its tunnel are deleted.
-	RemoveCloudflare bool
+	// Quick exposes the app through a quick tunnel at a random trycloudflare.com name instead:
+	// no Cloudflare connection, no domain of its own needed. A tunnel and a record the app had
+	// through a connection are deleted. A new app without a connection gets one unless Private.
+	Quick bool
+	// Private takes the app off the internet: it answers inside the cluster only, and a tunnel
+	// and a record it had are deleted.
+	Private bool
+}
+
+// exposures counts how many ways to reach the internet an Access asks for at once.
+func (a Access) exposures() int {
+	n := 0
+	for _, set := range []bool{a.Cloudflare != "", a.Quick, a.Private} {
+		if set {
+			n++
+		}
+	}
+	return n
 }
 
 // Check rejects access that contradicts itself. The messages carry no field name, so a caller
@@ -63,10 +79,10 @@ func (a Access) Check() error {
 			return err
 		}
 	}
+	if a.exposures() > 1 {
+		return errors.New("an app is exposed through a Cloudflare connection, through a quick tunnel, or not at all; choose one")
+	}
 	if a.Cloudflare != "" {
-		if a.RemoveCloudflare {
-			return errors.New("a Cloudflare connection cannot be given and removed at once")
-		}
 		if err := CheckConnectionName(a.Cloudflare); err != nil {
 			return err
 		}
@@ -87,9 +103,10 @@ type AddOptions struct {
 
 // AddApp registers an app and waits until it runs: it reads the deploy artifact, works out the
 // app's secret values, writes them to the backup and to the cluster, and exposes the app through
-// its own tunnel if it has a Cloudflare connection. Running it again updates the artifact reference,
-// keeps every value that exists, generates the ones that were added to app.yaml since, and
-// keeps the app's access except where it is changed.
+// its own tunnel if it has a Cloudflare connection, or else, unless it is private, through a
+// quick tunnel. Running it again updates the artifact reference, keeps every value that exists,
+// generates the ones that were added to app.yaml since, and keeps the app's access except where
+// it is changed.
 func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Reporter) error {
 	rep := progress.OrDiscard(report)
 	if err := opts.Access.Check(); err != nil {
@@ -100,9 +117,14 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		return err
 	}
 	if current == nil {
-		current = &cluster.AppConfig{}
+		// A new app goes on the internet the way that needs nothing set up, unless it is told
+		// otherwise.
+		current = &cluster.AppConfig{Quick: opts.Access.exposures() == 0}
+		if current.Quick {
+			rep.Report(progress.Info("internet: a quick tunnel, as there is no Cloudflare connection"))
+		}
 	}
-	registry, cloudflare := current.Registry, current.Cloudflare
+	registry, cloudflare, quick := current.Registry, current.Cloudflare, current.Quick
 	switch {
 	case opts.Access.RemoveRegistry:
 		registry = ""
@@ -112,11 +134,14 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		rep.Report(progress.Info("registry connection: %s", registry))
 	}
 	switch {
-	case opts.Access.RemoveCloudflare:
-		cloudflare = ""
-		rep.Report(progress.Info("Cloudflare connection: none"))
+	case opts.Access.Private:
+		cloudflare, quick = "", false
+		rep.Report(progress.Info("internet: none, inside the cluster only"))
+	case opts.Access.Quick:
+		cloudflare, quick = "", true
+		rep.Report(progress.Info("internet: a quick tunnel"))
 	case opts.Access.Cloudflare != "":
-		cloudflare = opts.Access.Cloudflare
+		cloudflare, quick = opts.Access.Cloudflare, false
 		rep.Report(progress.Info("Cloudflare connection: %s", cloudflare))
 	}
 	if opts.Access.Cloudflare != "" && opts.Access.Cloudflare != current.Cloudflare {
@@ -183,6 +208,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		Cloudflare:        cloudflare,
 		TunnelID:          exposure.tunnelID(),
 		TunnelCredentials: exposure.credentials,
+		Quick:             quick,
 		Secrets:           values,
 		Timeout:           opts.Timeout,
 		Report:            rep,

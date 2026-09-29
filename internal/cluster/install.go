@@ -174,10 +174,11 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 	}
 	for _, p := range providers {
 		// The platform refers to every input, so an app registered before the inputs existed
-		// gets them: the shared login as its connection, the cluster's domain and no tunnel.
+		// gets them: the shared login as its connection, the cluster's domain and no tunnel —
+		// not even a quick one, so that an upgrade never puts an app on the internet.
 		values, _, _ := unstructured.NestedMap(p.Object, "spec", "defaultValues")
 		missing := false
-		for _, key := range []string{"domain", "tunnel", "registry", "cloudflare"} {
+		for _, key := range []string{"domain", "tunnel", "quick", "registry", "cloudflare"} {
 			if _, ok := values[key]; !ok {
 				missing = true
 			}
@@ -192,7 +193,8 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 		}
 		if err := c.applyReport(ctx, rep, AppProvider(AppOptions{
 			Name: state.Name, Artifact: state.Artifact, Insecure: state.Insecure,
-			Domain: state.Domain, TunnelID: state.Tunnel, Registry: registry, Cloudflare: state.Cloudflare,
+			Domain: state.Domain, TunnelID: state.Tunnel, Quick: state.Quick, Registry: registry,
+			Cloudflare: state.Cloudflare,
 		})); err != nil {
 			return err
 		}

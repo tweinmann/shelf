@@ -305,6 +305,41 @@ func TestAppAddWithCloudflare(t *testing.T) {
 	}
 }
 
+// TestAppAddQuickByDefault covers an app without a Cloudflare connection: it goes on the internet
+// through a quick tunnel, which needs neither Cloudflare nor a public domain, unless it is private.
+func TestAppAddQuickByDefault(t *testing.T) {
+	t.Parallel()
+	h := cloudflareHarness(t)
+	h.cluster.settings = cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
+
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact)
+	if added := h.lastAdded(t); !added.Quick || added.TunnelID != "" || added.Cloudflare != "" {
+		t.Errorf("quick %t, tunnel %q, connection %q; a new app gets a quick tunnel", added.Quick, added.TunnelID, added.Cloudflare)
+	}
+	if !strings.Contains(stdout, "internet: a quick tunnel, as there is no Cloudflare connection") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+	if len(h.api.created)+len(h.api.records)+len(h.api.zoneFor) != 0 {
+		t.Error("a quick tunnel needs nothing from the Cloudflare API")
+	}
+
+	// The next deploy keeps it.
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
+	if added := h.lastAdded(t); !added.Quick {
+		t.Error("a deploy without flags keeps the quick tunnel")
+	}
+
+	// A private app stays private, and so does an app registered before quick tunnels existed.
+	h.mustRun(t, "app", "add", "notes", greeterArtifact, "--private")
+	if added := h.lastAdded(t); added.Quick || added.TunnelID != "" {
+		t.Errorf("quick %t, tunnel %q; --private keeps the app inside the cluster", added.Quick, added.TunnelID)
+	}
+	h.mustRun(t, "app", "add", "notes", greeterArtifact)
+	if added := h.lastAdded(t); added.Quick {
+		t.Error("a deploy without flags keeps a private app private")
+	}
+}
+
 func TestAppAddWithADomainOfItsOwn(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
@@ -338,6 +373,7 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 		wantRecords []string
 		wantGone    []string
 		wantTunnel  string
+		wantQuick   bool
 	}{
 		{
 			name:        "another domain in the same account",
@@ -356,8 +392,22 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			wantTunnel:  "tunnel-2",
 		},
 		{
-			name:        "off the internet",
+			name:        "to a quick tunnel",
+			args:        []string{"--quick"},
+			wantDeleted: []string{"tunnel-1"},
+			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
+			wantQuick:   true,
+		},
+		{
+			name:        "without a connection, which is a quick tunnel",
 			args:        []string{"--no-cloudflare"},
+			wantDeleted: []string{"tunnel-1"},
+			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
+			wantQuick:   true,
+		},
+		{
+			name:        "off the internet",
+			args:        []string{"--private"},
 			wantDeleted: []string{"tunnel-1"},
 			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
 		},
@@ -384,8 +434,8 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 				t.Errorf("deleted records %v, want %v", h.api.deletedRecords, tt.wantGone)
 			}
 			added := h.lastAdded(t)
-			if added.TunnelID != tt.wantTunnel || added.Artifact.String() != greeterArtifact {
-				t.Errorf("the cluster got tunnel %q and artifact %s", added.TunnelID, added.Artifact)
+			if added.TunnelID != tt.wantTunnel || added.Quick != tt.wantQuick || added.Artifact.String() != greeterArtifact {
+				t.Errorf("the cluster got tunnel %q, quick %t and artifact %s", added.TunnelID, added.Quick, added.Artifact)
 			}
 			if stored, _ := h.conns.Cloudflare("tobile"); stored == nil {
 				t.Error("a connection belongs to no app; it stays when an app leaves it")
@@ -505,9 +555,19 @@ func TestAccessErrors(t *testing.T) {
 			wantErr: "nothing to change",
 		},
 		{
-			name:    "given and removed",
+			name:    "a connection and a quick tunnel",
 			args:    []string{"app", "credentials", "greeter", "--cloudflare", "tobile", "--no-cloudflare"},
-			wantErr: "given and removed at once",
+			wantErr: "or not at all; choose one",
+		},
+		{
+			name:    "a quick tunnel and private",
+			args:    []string{"app", "credentials", "greeter", "--quick", "--private"},
+			wantErr: "or not at all; choose one",
+		},
+		{
+			name:    "private with a connection",
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--private"},
+			wantErr: "or not at all; choose one",
 		},
 		{
 			name:    "unknown app",

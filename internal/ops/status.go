@@ -13,7 +13,7 @@ import (
 type App struct {
 	cluster.AppState
 	// Host is the name the app answers under, empty when neither the app nor the cluster has a
-	// domain.
+	// domain. For an app with a quick tunnel that has its address, it is the tunnel's random name.
 	Host string `json:"host,omitempty"`
 	// Public is false when the app's domain cannot exist on the internet, as dev.local cannot.
 	// The app then answers inside the cluster only, whatever else is set up.
@@ -150,9 +150,15 @@ func app(state cluster.AppState, settings cluster.Settings) App {
 	}
 	a.Host = AppHost(state.Name, settings.HostSuffix, domain)
 	a.Public = PublicDomain(domain)
+	switch {
+	// A quick tunnel does not need the domain to exist: the app answers under the random name
+	// cloudflared was given, as long as it has one.
+	case state.Quick && state.QuickURL != "":
+		a.URL = state.QuickURL
+		a.Host = strings.TrimSuffix(strings.TrimPrefix(state.QuickURL, "https://"), "/")
 	// Only a name that exists on the internet and a tunnel that carries it make a link that
 	// works; otherwise the host name is a fact about the cluster, not an address.
-	if state.Tunnel != "" && a.Public {
+	case state.Tunnel != "" && a.Public:
 		a.URL = "https://" + a.Host + "/"
 	}
 	return a

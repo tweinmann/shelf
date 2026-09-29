@@ -214,7 +214,8 @@
     }
 
     async function load() {
-      if (!source.value) {
+      // An empty choice or one starting with "@" (a quick tunnel, or none) is no connection.
+      if (!source.value || source.value.startsWith("@")) {
         zones(Promise.resolve(null));
         return manual("");
       }

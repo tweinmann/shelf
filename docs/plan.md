@@ -170,7 +170,7 @@ connections the apps choose:
 
 | Question | Decision |
 |---|---|
-| Scope | **No platform-wide credentials.** The shared PAT, `shelf init expose` and the shared tunnel are gone. Registry logins and Cloudflare tokens are **connections**: defined once, by name, and chosen per app. An app without a registry connection reads its registry anonymously (public packages, the dev registry); an app without a Cloudflare connection runs inside the cluster only. The first cut (2026-09-28) gave every app its own token directly; the maintainer asked the next day for connections, so that a token is typed once, a new one reaches every app that uses it, and the UI offers a choice instead of password fields. |
+| Scope | **No platform-wide credentials.** The shared PAT, `shelf init expose` and the shared tunnel are gone. Registry logins and Cloudflare tokens are **connections**: defined once, by name, and chosen per app. An app without a registry connection reads its registry anonymously (public packages, the dev registry); an app without a Cloudflare connection runs inside the cluster only (since Phase 8d: behind a quick tunnel, unless private). The first cut (2026-09-28) gave every app its own token directly; the maintainer asked the next day for connections, so that a token is typed once, a new one reaches every app that uses it, and the UI offers a choice instead of password fields. |
 | Isolation | **Apps share only what the user assigns to several of them: a connection.** Namespace, secret values, tunnel and cloudflared stay every app's own. The shared login and tunnel before this phase were shared by the platform, without anyone choosing it — one tenant's token pulled every tenant's packages. |
 | Registry connection | **In the cluster, `shelf-system/connection-registry-<name>`** (dockerconfigjson, label `shelf.dev/connection=registry`). The ResourceSet copies it into the namespace of every app that chooses it, and an app without one gets `shelf-system/registry-anonymous`, which holds no login, so the copy always has a source. The cluster pulls with it anyway, and a new login reaches every app at once through the watch label. shelf reads the artifact with the same login, so the machine running shelf needs no Docker config. |
 | Cloudflare connection | **Token and account, in `~/.shelf/connections/cloudflare/<name>.yaml`** (0600 in a 0700 directory, through `internal/hostcfg`), never in the cluster. The Phase 5 rule holds: nothing in the cluster needs the token, and a pod that escapes into the VM does not reach it. The price is that only the machine holding the file can expose, move or withdraw apps through it — in practice the mini. Without the file nothing fails silently: shelf leaves record and tunnel as they are and says so, and `shelf connection add cloudflare <name>` defines it again. A Secret in `shelf-system` was considered and rejected: anyone who can read that namespace would own the zones of all apps. |
@@ -202,6 +202,22 @@ from the app's name in shelf:
 | Artifacts from before | **Refused with a hint**: an artifact whose ConfigMap is still `<name>-values` was rendered by a shelf older than v0.5.0 and must be pushed again. No transition code; a running app stays on its last revision until its tenant pushes. |
 | `shelf build-plan` | **Prints `{package, builds}`** instead of `{app, builds}`, and the workflow reads `.package`. The fix to `release.yml` switches workflow and binary together. |
 | Phase | No phase of its own: a change to Phase 8b's conventions, released as v0.5.0. |
+
+Decided on 2026-09-29 (Phase 8d), when the maintainer asked how apps could be reached without a
+Cloudflare account of their own:
+
+| Question | Decision |
+|---|---|
+| LAN access | **Not built.** Considered: the host service proxies port 80 on the LAN to a NodePort of Traefik, and answers mDNS for `<app>.shelf.local`. It would have needed a second port on the LAN, an mDNS responder, a second host name per Ingress, and it cannot be tested beyond the devcontainer, because Docker Desktop does not pass multicast to the real network. Rejected in favour of keeping tunnels the only way in. |
+| An app without a Cloudflare connection | **Gets a quick tunnel by default**: cloudflared without an account asks trycloudflare.com for a random `https://<words>.trycloudflare.com` name. No token, no zone, no DNS record, no port on the mini, and it works on a reserved domain such as `dev.local`. `--private` (UI: "none: inside the cluster only") keeps an app inside the cluster. |
+| Its limits | Written into the help texts and the UI rather than hidden: the name is random and **changes whenever cloudflared restarts**; the app is public to anyone who has the name; Cloudflare offers quick tunnels for trying things out, with no uptime guarantee, a limit of concurrent requests and no server-sent events. A stable name needs a domain and a Cloudflare connection, as before. |
+| Routing | cloudflared rewrites the Host header to the app's own `<app><host-suffix>.<domain>` (`--http-host-header`), so Traefik routes as it does for a named tunnel and the chart stays unchanged. The app sees its own host name, not the trycloudflare one. |
+| Where the name comes from | cloudflared reports it on its metrics port at `/quicktunnel` (`{"hostname": …}`, checked against `cloudflare/cloudflared:2026.9.1`). shelf reads it through the API server's pod proxy, so `internal/cluster` still talks to the API server only; nothing stores the name, every status reads it anew. `shelf app add` prints it as the detail of the wait for the tunnel. |
+| Apps registered before | **Stay inside the cluster.** `init cluster` gives their providers `quick: false`, and the ResourceSet reads the input with `index inputs "quick"`, which is empty for a provider without it, where `inputs.quick` would fail the whole ResourceSet under `missingkey=error` — in the dev cluster Flux can pick up a pushed platform before `init cluster` migrates. An upgrade never puts an app on the internet. Only a new app gets the quick tunnel by default. |
+| Old platform, new shelf | **Refused before anything is written.** A shelf that adds a quick tunnel to a cluster whose ResourceSet does not know the input would wait for a cloudflared that never comes; `cluster.AddApp` checks the ResourceSet first and says to run `shelf init cluster` (or `--private`). Found in the first manual run: the job hung at "waiting for the tunnel" until its timeout. |
+| Flags | `shelf app add` takes `--private`; `shelf app credentials` takes `--quick` and `--private`, and `--no-cloudflare` now means `--quick`. A Cloudflare connection, a quick tunnel and private exclude each other. |
+| Smoke tests | `apps.sh`, `tenant.sh` and `expose.sh` pass `--private`, so they open no public tunnel; only `just smoke-quick` does. |
+| Phase | **8d**, before the Mac mini. (8c is the name the reverted change of the same day had.) |
 
 ## Validated assumptions
 
@@ -545,7 +561,7 @@ an encrypted volume.
 | App rendering | Helm chart `shelf-app`, rendered by helm-controller |
 | App registration | Flux Operator `ResourceSet` + `ResourceSetInputProvider` |
 | Ingress | Traefik (Helm, ClusterIP — no LoadBalancer) |
-| Exposure | `cloudflared` in-cluster, one catch-all rule pointing at Traefik |
+| Exposure | `cloudflared` in the app namespace, one catch-all rule pointing at Traefik: a named tunnel with a Cloudflare connection, otherwise a quick tunnel with the Host header rewritten |
 | DNS | one proxied CNAME per app, written by the CLI through the Cloudflare API |
 
 Platform components are installed by Flux from an OCI artifact of the shelf release: the
@@ -1662,6 +1678,54 @@ Results so far (2026-09-29):
 - Not run yet: level 2 and 3. The dev cluster still serves `greeter-dev.tobile.ch` through the
   shared tunnel of Phase 5; the migration switches that off, and exposing the app again needs the
   Cloudflare token. That is the maintainer's call, not a side effect of a test.
+
+### Phase 8d – Quick tunnels
+An app without a Cloudflare connection used to be reachable from inside the cluster only. It now
+gets a quick tunnel at a random trycloudflare.com name, unless it is private. The decisions are in
+the table "Decided on 2026-09-29 (Phase 8d)" above.
+
+Design:
+
+- **Provider input `quick`** (bool) next to `tunnel`; at most one of them is set.
+  `cluster.AppOptions`, `AppConfig` and `AppState` carry it, `AppState.QuickURL` the current name.
+- **Platform**: `resourcesTemplate` renders the Secret and the ConfigMap only for a named tunnel,
+  and the cloudflared Deployment for either; for a quick tunnel it runs
+  `tunnel --no-autoupdate --metrics 0.0.0.0:2000 --url http://traefik… --http-host-header <app host>`.
+- **`internal/cluster`**: `waitForTunnel` waits for a cloudflared that runs a quick tunnel
+  (`--url` in its arguments, so the one of a named tunnel does not pass), then for the rollout,
+  then for a name at `/quicktunnel`, read through the pod proxy from a ready pod that is not being
+  deleted. `AppStates` asks each app with a quick tunnel; one that cannot answer has no address.
+- **`ops`**: `Access` has `Quick` and `Private` instead of `RemoveCloudflare`. A new app with no
+  choice gets a quick tunnel; an existing one keeps what it has. Leaving a Cloudflare connection
+  reuses the Phase 8b cleanup (record and tunnel deleted after cloudflared moved). `app()` links
+  the quick name, on any domain, and the components' links follow it.
+- **Admin UI**: the Cloudflare select starts with "none: a quick tunnel …" and
+  "none: inside the cluster only" (`@private`, which no connection name can be); the pages say
+  that the address is temporary, or that the tunnel has none yet.
+
+**Acceptance:** an app added without a connection answers at the trycloudflare name shelf
+printed, with its own host name in the Host header; `shelf app status` and the UI show the new
+name after cloudflared restarts; `--private` stops cloudflared, `--quick` starts it again; apps
+from before stay private; the smoke tests of earlier phases open no public tunnel.
+
+Results so far (2026-09-29):
+
+- Level 1 is green (`just test`). New tests: the quick default, `--private` and a private app
+  that stays private on the next deploy, the moves from a named tunnel to a quick one and to
+  private (record and tunnel deleted), the exclusive flags, the addresses in `app()` and its
+  components, `/quicktunnel` parsing, telling the two cloudflared apart, the form choices, and the
+  golden pages `dashboard-quick` and `app-quick`.
+- The ResourceSet template was rendered offline for a named tunnel, a quick tunnel on the
+  cluster's domain and on one of its own, and a private app; every document is valid YAML.
+- cloudflared 2026.9.1 was run once in the devcontainer against a dead origin: `/quicktunnel`
+  answered with the name before `/ready` turned 200, which is why the wait checks both.
+- `just smoke-quick` keeps the cluster's domain and host suffix, since a quick tunnel needs
+  neither, and re-installs the platform with them. Not run yet.
+- Manual level 2 in the dev cluster (`tobile.ch`, suffix `-dev`): the app `honk`, added from the
+  admin UI, first hung at the tunnel because the cluster still ran the old platform (see "Old
+  platform, new shelf"). After `platform-push` and `init cluster` with the cluster's settings, the
+  provider of `vermiet` got `quick: false` and kept its named tunnel, `honk` got cloudflared, and
+  `https://<words>.trycloudflare.com/` answered with the app within seconds.
 
 ### Phase 9 – Mac mini: host, Colima, doctor, destroy
 The old Phase 6, without the installer. `shelf init host`: preflight (Apple Silicon, RAM, disk,

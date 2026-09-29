@@ -89,6 +89,7 @@ spec:
     domain: example.com
     insecure: false
     name: hello
+    quick: false
     registry: ghcr
     tag: main
     tunnel: t-1
@@ -108,6 +109,27 @@ spec:
     domain: ""
     insecure: false
     name: empty
+    quick: false
+    registry: ""
+    tag: main
+    tunnel: ""
+    url: oci://ghcr.io/tweinmann/hello-deploy
+  type: Static
+---
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  labels:
+    shelf.dev/app: quick
+  name: quick
+  namespace: shelf-system
+spec:
+  defaultValues:
+    cloudflare: ""
+    domain: ""
+    insecure: false
+    name: quick
+    quick: true
     registry: ""
     tag: main
     tunnel: ""

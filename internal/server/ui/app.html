@@ -17,9 +17,10 @@
 
 <section class="card">
 <dl class="facts">
-{{if .App.URL}}<dt>Address</dt><dd><a href="{{.App.URL}}">{{.App.Host}}</a></dd>
+{{if .App.URL}}<dt>Address</dt><dd><a href="{{.App.URL}}">{{.App.Host}}</a>{{if .App.Quick}}
+<span class="muted">temporary, changes when the tunnel restarts</span>{{end}}</dd>
 {{else if .App.Host}}<dt>Address</dt><dd>{{.App.Host}}
-<span class="muted">{{if .App.Public}}not exposed{{else}}inside the cluster only{{end}}</span></dd>{{end}}
+<span class="muted">{{if .App.Quick}}the quick tunnel has no address yet{{else if .App.Public}}not exposed{{else}}inside the cluster only{{end}}</span></dd>{{end}}
 <dt>Artifact</dt><dd>{{.App.Artifact}}</dd>
 {{if .App.Revision}}<dt>Running</dt><dd><span title="{{.App.Revision}}">{{short .App.Revision}}</span></dd>{{end}}
 {{with ago .App.Deployed}}<dt>Deployed</dt><dd>{{.}}</dd>{{end}}
@@ -38,7 +39,7 @@ pipeline publish a new artifact.</p>
 <div class="app-head"><span class="name">{{.Name}}</span><span class="pill {{.Phase}}">{{.Phase}}</span></div>
 {{if .URL}}<p class="address"><a href="{{.URL}}">{{.URL}}</a></p>
 {{- else}}<p class="address">{{with .Address}}{{.}} {{end}}<span class="muted">
-{{- if and (not .Internal) $.App.Public}}not exposed{{else}}inside the cluster only{{end}}</span></p>{{end}}
+{{- if and (not .Internal) (or $.App.Public $.App.Quick)}}not exposed{{else}}inside the cluster only{{end}}</span></p>{{end}}
 </li>
 {{end}}
 </ul>
@@ -82,6 +83,7 @@ you come forward again.</p>
 <dt>Registry</dt><dd>{{with .App.Registry}}{{.}}{{else}}<span class="muted">no connection, pulls without a login</span>{{end}}</dd>
 <dt>Internet</dt><dd>{{if .App.CloudflareMissing}}{{.App.Cloudflare}} <span class="muted">this machine does not hold this connection</span>
 {{- else if .App.Cloudflare}}{{.App.Cloudflare}} <span class="muted">its own tunnel, account {{.App.CloudflareAccount}}</span>
+{{- else if .App.Quick}}a quick tunnel <span class="muted">its address changes whenever the tunnel restarts</span>
 {{- else}}<span class="muted">not exposed</span>{{end}}</dd>
 </dl>
 <form method="post" action="/apps/{{.App.Name}}/access">
@@ -93,7 +95,8 @@ you come forward again.</p>
 {{end}}</select>
 <label for="cloudflare">Cloudflare connection</label>
 <select id="cloudflare" name="cloudflare">
-<option value="">none: take it off the internet</option>
+<option value="">none: a quick tunnel at a temporary trycloudflare.com address</option>
+<option value="@private"{{if not (or .App.Cloudflare .App.Quick)}} selected{{end}}>none: inside the cluster only</option>
 {{range .Connections.Cloudflare}}<option value="{{.Name}}"{{if eq .Name $.App.Cloudflare}} selected{{end}}>{{.Name}}{{if .Missing}} (not on this machine){{else}} (account {{.Account}}){{end}}</option>
 {{end}}</select>
 <label for="domain">A domain of its own</label>
@@ -102,7 +105,8 @@ you come forward again.</p>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
 page</a>. A new domain or a Cloudflare connection in another account moves the app's record, and
-its tunnel with it; the app is deployed again from the artifact above.</p>
+its tunnel with it; the app is deployed again from the artifact above. Without a Cloudflare
+connection, a quick tunnel gives the app a random address that changes whenever it restarts.</p>
 </section>
 
 <section class="card">
