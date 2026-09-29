@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -11,10 +12,18 @@ import (
 // App is an app as a caller wants to show it: its state in the cluster, plus where it answers.
 type App struct {
 	cluster.AppState
-	// Host is the name the app answers under, empty when the cluster has no domain yet.
+	// Host is the name the app answers under, empty when neither the app nor the cluster has a
+	// domain.
 	Host string `json:"host,omitempty"`
-	// URL is where a browser reaches the app, empty until the cluster is exposed.
+	// Public is false when the app's domain cannot exist on the internet, as dev.local cannot.
+	// The app then answers inside the cluster only, whatever else is set up.
+	Public bool `json:"public"`
+	// URL is where a browser reaches the app, empty until the app is exposed.
 	URL string `json:"url,omitempty"`
+	// CloudflareAccount is the account the app is exposed through, filled by App but not by
+	// Apps, and only when this machine holds the app's Cloudflare access. The token never
+	// leaves the file it is kept in.
+	CloudflareAccount string `json:"cloudflareAccount,omitempty"`
 	// Components is what the app is made of, filled by App but not by Apps: a list of apps
 	// does not need it, and it costs a read per app.
 	Components []Component `json:"components,omitempty"`
@@ -47,13 +56,12 @@ type Status struct {
 	// not run against it.
 	Installed bool             `json:"installed"`
 	Settings  cluster.Settings `json:"-"`
-	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com.
+	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com, unless they
+	// have a domain of their own.
 	Hosts string `json:"hosts,omitempty"`
-	// Public is false when the domain cannot exist on the internet, as dev.local cannot. The
-	// apps then answer inside the cluster only, whatever else is set up.
+	// Public is false when the cluster's domain cannot exist on the internet, as dev.local
+	// cannot. An app without a domain of its own then answers inside the cluster only.
 	Public bool `json:"public"`
-	// Exposed is true once a tunnel carries the apps to the internet.
-	Exposed bool `json:"exposed"`
 }
 
 // Status reads how the cluster is doing.
@@ -72,7 +80,6 @@ func (o *Ops) Status(ctx context.Context) Status {
 	s.Installed = settings.Domain != ""
 	s.Hosts = Hosts(settings.Domain, settings.HostSuffix)
 	s.Public = PublicDomain(settings.Domain)
-	s.Exposed = s.Public && settings.TunnelTarget != ""
 	return s
 }
 
@@ -107,6 +114,13 @@ func (o *Ops) App(ctx context.Context, name string) (App, error) {
 		if err != nil {
 			return App{}, err
 		}
+		access, err := o.Env.Access.Cloudflare(name)
+		if err != nil {
+			return App{}, err
+		}
+		if access != nil {
+			a.CloudflareAccount = access.Account
+		}
 		a.Components = components(list, a.Host, a.URL != "")
 		return a, nil
 	}
@@ -126,13 +140,15 @@ func (e *NotFoundError) Error() string { return "app " + e.Name + " does not exi
 
 func app(state cluster.AppState, settings cluster.Settings) App {
 	a := App{AppState: state}
-	if settings.Domain == "" {
+	domain := cmp.Or(state.Domain, settings.Domain)
+	if domain == "" {
 		return a
 	}
-	a.Host = AppHost(settings, state.Name)
+	a.Host = AppHost(state.Name, settings.HostSuffix, domain)
+	a.Public = PublicDomain(domain)
 	// Only a name that exists on the internet and a tunnel that carries it make a link that
 	// works; otherwise the host name is a fact about the cluster, not an address.
-	if settings.TunnelTarget != "" && PublicDomain(settings.Domain) {
+	if state.Tunnel != "" && a.Public {
 		a.URL = "https://" + a.Host + "/"
 	}
 	return a

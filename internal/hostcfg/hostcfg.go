@@ -1,6 +1,6 @@
 // Package hostcfg holds the state shelf keeps on the machine it runs on, under ~/.shelf: who
-// may use the admin UI, and which sessions are open. The secret backups of the apps live in the
-// same directory but belong to internal/secrets.
+// may use the admin UI, which sessions are open, and the Cloudflare access of each app. The
+// secret backups of the apps live in the same directory but belong to internal/secrets.
 //
 // Everything here is written with mode 0600 in a directory with mode 0700, and replaced
 // atomically, so a crash never leaves half a file behind. Nothing in this package is encrypted:

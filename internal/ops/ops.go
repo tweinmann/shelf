@@ -21,16 +21,10 @@ import (
 
 	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/deploy"
+	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/progress"
 	"github.com/tweinmann/shelf/internal/schema"
 	"github.com/tweinmann/shelf/internal/secrets"
-)
-
-// Environment variables the command line takes the Cloudflare credentials from. ops never reads
-// them — the caller does — but it names the token when it has to explain that it is missing.
-const (
-	EnvCloudflareToken   = "CF_API_TOKEN"
-	EnvCloudflareAccount = "CF_ACCOUNT_ID"
 )
 
 // Target is the cluster an operation works on.
@@ -62,23 +56,17 @@ func LoadTarget(kubeconfig, context string) (Target, error) {
 	return Target{Context: name, Config: rest.CopyConfig(cfg)}, nil
 }
 
-// Env is what the machine shelf runs on supplies: where secrets are backed up, and the
-// credentials for the registry and for Cloudflare. The command line fills it from environment
-// variables, the admin UI from the files it keeps.
+// Env is what the machine shelf runs on supplies: where secrets are backed up, and where the
+// Cloudflare access of each app is kept. Both live under ~/.shelf, for the command line and the
+// admin UI alike.
 type Env struct {
 	// Backup is where the generated secret values of an app are kept outside the cluster.
 	Backup secrets.Backup
-	// Registry is the login the cluster stores to pull images and deploy artifacts. Nil keeps
-	// the login that is already in the cluster.
-	Registry *cluster.RegistryAuth
-	// Pull are the credentials for reading a deploy artifact from here. Nil takes them from
-	// the Docker config, which is what the command line does.
+	// Access is where the Cloudflare access of an app is kept. It never goes into the cluster.
+	Access hostcfg.AppAccess
+	// Pull are the credentials for reading a deploy artifact from here. Nil takes the app's
+	// own login, and without one the Docker config.
 	Pull authn.Authenticator
-	// CloudflareToken is needed to write DNS records; without it an app still runs, it is only
-	// not published.
-	CloudflareToken string
-	// CloudflareAccount picks the account when the token can see several.
-	CloudflareAccount string
 }
 
 // Cluster is the part of internal/cluster the operations use. Tests replace it; everything
@@ -90,15 +78,14 @@ type Cluster interface {
 		rep progress.Reporter) (bool, error)
 	Redeploy(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
 		rep progress.Reporter) error
-	Expose(ctx context.Context, cfg *rest.Config, o cluster.ExposeOptions) error
 	AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]string, error)
 	AppNames(ctx context.Context, cfg *rest.Config) ([]string, error)
 	AppStates(ctx context.Context, cfg *rest.Config) ([]cluster.AppState, error)
 	AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]cluster.Component, error)
 	AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
-	RegistryLogin(ctx context.Context, cfg *rest.Config) (*cluster.RegistryAuth, error)
-	TunnelCredentials(ctx context.Context, cfg *rest.Config) ([]byte, error)
+	// AppConfig returns how an app is registered, or nil when there is no such app.
+	AppConfig(ctx context.Context, cfg *rest.Config, app string) (*cluster.AppConfig, error)
 }
 
 // liveCluster is internal/cluster itself.
@@ -120,10 +107,6 @@ func (liveCluster) RemoveApp(ctx context.Context, cfg *rest.Config, app string, 
 func (liveCluster) Redeploy(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
 	rep progress.Reporter) error {
 	return cluster.Redeploy(ctx, cfg, app, timeout, rep)
-}
-
-func (liveCluster) Expose(ctx context.Context, cfg *rest.Config, o cluster.ExposeOptions) error {
-	return cluster.Expose(ctx, cfg, o)
 }
 
 func (liveCluster) AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]string, error) {
@@ -150,12 +133,8 @@ func (liveCluster) Settings(ctx context.Context, cfg *rest.Config) (cluster.Sett
 	return cluster.ClusterSettings(ctx, cfg)
 }
 
-func (liveCluster) RegistryLogin(ctx context.Context, cfg *rest.Config) (*cluster.RegistryAuth, error) {
-	return cluster.RegistryLogin(ctx, cfg)
-}
-
-func (liveCluster) TunnelCredentials(ctx context.Context, cfg *rest.Config) ([]byte, error) {
-	return cluster.TunnelCredentials(ctx, cfg)
+func (liveCluster) AppConfig(ctx context.Context, cfg *rest.Config, app string) (*cluster.AppConfig, error) {
+	return cluster.ReadAppConfig(ctx, cfg, app)
 }
 
 // FetchFunc reads a deploy artifact from a registry.

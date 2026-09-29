@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/tweinmann/shelf/internal/cluster"
+	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/progress"
 	"github.com/tweinmann/shelf/internal/schema"
@@ -43,18 +44,17 @@ type fakeCluster struct {
 	settingsErr error
 	// stored are the secret values of the app in the cluster.
 	stored map[string]string
-	// login is the registry credential the cluster holds.
-	login       *cluster.RegistryAuth
-	tunnelCreds []byte
-	apps        []string
-	states      []cluster.AppState
-	components  []cluster.Component
-	stages      []cluster.Stage
-	found       bool
+	// configs are the apps as they are registered, by name. AddApp writes them, as the real
+	// cluster does, so that a second command sees what the first one stored.
+	configs    map[string]*cluster.AppConfig
+	apps       []string
+	states     []cluster.AppState
+	components []cluster.Component
+	stages     []cluster.Stage
+	found      bool
 
 	installed  []cluster.Options
 	added      []cluster.AppOptions
-	exposed    []cluster.ExposeOptions
 	removed    []string
 	redeployed []string
 	// host is the API server the operation was pointed at.
@@ -70,23 +70,30 @@ func (f *fakeCluster) Install(_ context.Context, cfg *rest.Config, o cluster.Opt
 func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOptions) error {
 	f.added = append(f.added, o)
 	f.stored = o.Secrets
+	if f.configs == nil {
+		f.configs = map[string]*cluster.AppConfig{}
+	}
+	config := &cluster.AppConfig{
+		Artifact: o.Artifact, Insecure: o.Insecure, Domain: o.Domain, Registry: o.Registry,
+		TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials,
+	}
+	if previous := f.configs[o.Name]; previous != nil && o.TunnelCredentials == nil && o.TunnelID != "" {
+		config.TunnelCredentials = previous.TunnelCredentials
+	}
+	f.configs[o.Name] = config
 	return nil
 }
 
 func (f *fakeCluster) RemoveApp(_ context.Context, _ *rest.Config, app string, _ time.Duration,
 	_ progress.Reporter) (bool, error) {
 	f.removed = append(f.removed, app)
+	delete(f.configs, app)
 	return f.found, nil
 }
 
 func (f *fakeCluster) Redeploy(_ context.Context, _ *rest.Config, app string, _ time.Duration,
 	_ progress.Reporter) error {
 	f.redeployed = append(f.redeployed, app)
-	return nil
-}
-
-func (f *fakeCluster) Expose(_ context.Context, _ *rest.Config, o cluster.ExposeOptions) error {
-	f.exposed = append(f.exposed, o)
 	return nil
 }
 
@@ -112,12 +119,8 @@ func (f *fakeCluster) Settings(context.Context, *rest.Config) (cluster.Settings,
 	return f.settings, f.settingsErr
 }
 
-func (f *fakeCluster) RegistryLogin(context.Context, *rest.Config) (*cluster.RegistryAuth, error) {
-	return f.login, nil
-}
-
-func (f *fakeCluster) TunnelCredentials(context.Context, *rest.Config) ([]byte, error) {
-	return f.tunnelCreds, nil
+func (f *fakeCluster) AppConfig(_ context.Context, _ *rest.Config, app string) (*cluster.AppConfig, error) {
+	return f.configs[app], nil
 }
 
 // harness runs commands against fakes. Everything a command reads from the outside world is a
@@ -127,6 +130,7 @@ type harness struct {
 	kubeconfig string
 	env        map[string]string
 	backup     secrets.Backup
+	access     hostcfg.AppAccess
 	version    string
 
 	cluster *fakeCluster
@@ -152,17 +156,16 @@ func newHarness(t *testing.T) *harness {
 		kubeconfig: kubeconfig,
 		env:        map[string]string{"SHELF_HOME": home},
 		backup:     secrets.Backup{Dir: filepath.Join(home, "apps")},
+		access:     hostcfg.AppAccess{Dir: filepath.Join(home, "apps")},
 		version:    "v0.0.0-test",
 		cluster:    &fakeCluster{},
 		api:        &fakeCloudflare{accounts: []string{"acc-1"}},
 	}
 }
 
-// exposed makes the cluster one whose apps are reachable from the internet.
-func (h *harness) exposed() *harness {
-	h.cluster.settings = cluster.Settings{
-		Domain: "example.com", HostSuffix: "-dev", TunnelTarget: "t-1.cfargotunnel.com",
-	}
+// public makes the cluster one whose domain exists on the internet, so its apps can be exposed.
+func (h *harness) public() *harness {
+	h.cluster.settings = cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
 	return h
 }
 

@@ -1,31 +1,47 @@
-{{define "content"}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add an app · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+
+</header>
+<main>
+
 <nav class="crumbs"><a href="/">Apps</a> / add</nav>
 <section class="card narrow">
 <h1>Add an app</h1>
 <p>An app comes from its deploy artifact: the package your pipeline publishes to the registry.
 shelf reads it, generates the secrets it declares, and keeps the app on that tag from then on.</p>
-{{if .Error}}<p class="problem-line">{{.Error}}</p>{{end}}
+
 <form method="post" action="/apps">
-<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="csrf" value="CSRF">
 <label for="name">Name</label>
-<input id="name" name="name" value="{{.Name}}" placeholder="greeter" autofocus required>
+<input id="name" name="name" value="" placeholder="greeter" autofocus required>
 <label for="artifact">Deploy artifact</label>
-<input id="artifact" name="artifact" value="{{.Artifact}}" placeholder="oci://ghcr.io/owner/greeter:main" required>
-{{if .Status.Settings.InsecureRegistry}}
-<label class="check"><input type="checkbox" name="insecure" {{if .Insecure}}checked{{end}}>
-Registry without TLS (this cluster uses one)</label>
-{{end}}
+<input id="artifact" name="artifact" value="" placeholder="oci://ghcr.io/owner/greeter:main" required>
+
 <fieldset>
 <legend>Domain</legend>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="{{.Domain}}" placeholder="{{.Status.Settings.Domain}}">
-<p>{{if .Status.Hosts}}Empty, it answers at {{.Status.Hosts}}, with its name in place of &lt;app&gt;.{{end}}
+<input id="domain" name="domain" value="" placeholder="example.com">
+<p>Empty, it answers at &lt;app&gt;-dev.example.com, with its name in place of &lt;app&gt;.
 To reach it from the internet, the domain has to be a Cloudflare zone.</p>
 </fieldset>
 <fieldset>
 <legend>Registry login</legend>
 <label for="registry-user">GitHub user</label>
-<input id="registry-user" name="registry-user" value="{{.RegistryUser}}" autocomplete="off">
+<input id="registry-user" name="registry-user" value="" autocomplete="off">
 <label for="registry-token">Token</label>
 <input id="registry-token" name="registry-token" type="password" autocomplete="new-password">
 <p>A classic token with read:packages, for a private deploy artifact and private images on
@@ -36,7 +52,7 @@ ghcr.io. Only this app uses it. Empty, the registry is read without a login.</p>
 <label for="cloudflare-token">Cloudflare API token</label>
 <input id="cloudflare-token" name="cloudflare-token" type="password" autocomplete="new-password">
 <label for="cloudflare-account">Cloudflare account ID</label>
-<input id="cloudflare-account" name="cloudflare-account" value="{{.CloudflareAccount}}" autocomplete="off">
+<input id="cloudflare-account" name="cloudflare-account" value="" autocomplete="off">
 <p>With a token, the app gets a tunnel of its own in that account and a DNS record in its zone.
 The token needs Cloudflare Tunnel:Edit and DNS:Edit; the account is only needed when it sees
 several. It is kept on this machine, never in the cluster.</p>
@@ -44,4 +60,8 @@ several. It is kept on this machine, never in the cluster.</p>
 <button type="submit">Add the app</button>
 </form>
 </section>
-{{end}}
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

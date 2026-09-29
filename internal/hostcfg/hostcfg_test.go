@@ -149,3 +149,59 @@ func TestNewTokenIsRandom(t *testing.T) {
 		seen[token] = true
 	}
 }
+
+func TestCloudflareAccess(t *testing.T) {
+	t.Parallel()
+	access := hostcfg.AppAccess{Dir: filepath.Join(t.TempDir(), "apps")}
+	got, err := access.Cloudflare("greeter")
+	if err != nil || got != nil {
+		t.Fatalf("an app without access: %+v, %v", got, err)
+	}
+	want := hostcfg.Cloudflare{Token: "not-a-real-token", Account: "acc-1"}
+	if err := access.SaveCloudflare("greeter", want); err != nil {
+		t.Fatal(err)
+	}
+	got, err = access.Cloudflare("greeter")
+	if err != nil || got == nil || *got != want {
+		t.Fatalf("read back %+v, %v", got, err)
+	}
+	info, err := os.Stat(access.Path("greeter"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("file mode %v", info.Mode().Perm())
+	}
+	dir, err := os.Stat(filepath.Dir(access.Path("greeter")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir.Mode().Perm() != 0o700 {
+		t.Errorf("directory mode %v", dir.Mode().Perm())
+	}
+
+	// A file copied from another app is refused rather than used for the wrong zone.
+	if err := os.MkdirAll(filepath.Dir(access.Path("shop")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(access.Path("greeter"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(access.Path("shop"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := access.Cloudflare("shop"); err == nil || !strings.Contains(err.Error(), `belongs to app "greeter"`) {
+		t.Errorf("a file of another app: %v", err)
+	}
+
+	if err := access.DeleteCloudflare("greeter"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := access.Cloudflare("greeter"); err != nil || got != nil {
+		t.Errorf("after delete: %+v, %v", got, err)
+	}
+	if err := access.DeleteCloudflare("greeter"); err != nil {
+		t.Errorf("deleting twice: %v", err)
+	}
+}

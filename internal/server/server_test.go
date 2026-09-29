@@ -42,6 +42,8 @@ type fakePlatform struct {
 	block chan struct{}
 	// fail is the error every change returns.
 	fail error
+	// access is the access the last change gave an app.
+	access ops.Access
 }
 
 func (f *fakePlatform) Secrets(_ context.Context, _ string) (map[string]string, error) {
@@ -74,7 +76,24 @@ func (f *fakePlatform) made() []string {
 }
 
 func (f *fakePlatform) AddApp(_ context.Context, o ops.AddOptions, rep progress.Reporter) error {
+	f.mu.Lock()
+	f.access = o.Access
+	f.mu.Unlock()
 	return f.change("add "+o.Name+" "+o.Artifact.String(), rep)
+}
+
+func (f *fakePlatform) SetAccess(_ context.Context, name string, access ops.Access, _ time.Duration,
+	rep progress.Reporter) error {
+	f.mu.Lock()
+	f.access = access
+	f.mu.Unlock()
+	return f.change("access "+name, rep)
+}
+
+func (f *fakePlatform) lastAccess() ops.Access {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.access
 }
 
 func (f *fakePlatform) RemoveApp(_ context.Context, name string, _ time.Duration, rep progress.Reporter) error {
@@ -113,12 +132,12 @@ func (f *fakePlatform) Diagnose(_ context.Context, name string) (cluster.Diagnos
 
 // runningPlatform is a healthy cluster with one working and one broken app.
 func runningPlatform() *fakePlatform {
-	settings := cluster.Settings{Domain: "example.com", HostSuffix: "-dev", TunnelTarget: "t-1.cfargotunnel.com"}
+	settings := cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
 	return &fakePlatform{
 		status: ops.Status{
 			Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 			Reachable: true, Installed: true, Settings: settings,
-			Hosts: "<app>-dev.example.com", Public: true, Exposed: true,
+			Hosts: "<app>-dev.example.com", Public: true,
 		},
 		apps: []ops.App{
 			{
@@ -128,9 +147,12 @@ func runningPlatform() *fakePlatform {
 					Revision: "main@" + digest,
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
+					Tunnel:   "t-1", RegistryUser: "tobi",
 				},
-				Host: "greeter-dev.example.com",
-				URL:  "https://greeter-dev.example.com/",
+				Host:              "greeter-dev.example.com",
+				Public:            true,
+				URL:               "https://greeter-dev.example.com/",
+				CloudflareAccount: "acc-1",
 				Components: []ops.Component{
 					{
 						Component: cluster.Component{Name: "check", Phase: cluster.PhaseWorking},
@@ -159,15 +181,18 @@ func runningPlatform() *fakePlatform {
 					Phase:    cluster.PhaseFailed,
 					Stage:    "the deploy artifact",
 					Reason:   "MANIFEST_UNKNOWN: manifest unknown",
+					Domain:   "shop.ch",
+					Tunnel:   "t-2",
 				},
-				Host: "shop-dev.example.com",
-				URL:  "https://shop-dev.example.com/",
+				Host:   "shop-dev.shop.ch",
+				Public: true,
+				URL:    "https://shop-dev.shop.ch/",
 				Components: []ops.Component{
 					{
 						Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
 							Ports: []cluster.Port{{Name: "http", Number: 8080}}, Path: "/"},
-						Address: "shop-dev.example.com/",
-						URL:     "https://shop-dev.example.com/",
+						Address: "shop-dev.shop.ch/",
+						URL:     "https://shop-dev.shop.ch/",
 					},
 				},
 			},
@@ -331,6 +356,12 @@ func TestPages(t *testing.T) {
 		golden(t, "app-failed", get(h, "/apps/shop", cookie))
 	})
 
+	t.Run("add form", func(t *testing.T) {
+		t.Parallel()
+		h, cookie := claimed(t, running)
+		golden(t, "new", get(h, "/apps/new", cookie))
+	})
+
 	// An app that was just added has no values in the cluster yet, so shelf cannot say what it is
 	// made of. The page says so rather than claiming the app has no components.
 	t.Run("components not known yet", func(t *testing.T) {
@@ -366,7 +397,7 @@ func TestPages(t *testing.T) {
 			status: ops.Status{
 				Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 				Reachable: true, Installed: true,
-				Settings: cluster.Settings{Domain: "dev.local", TunnelTarget: "t-1.cfargotunnel.com"},
+				Settings: cluster.Settings{Domain: "dev.local"},
 				Hosts:    "<app>.dev.local",
 			},
 			apps: []ops.App{{
@@ -635,7 +666,7 @@ func TestAPIStatus(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Errorf("content type %q", got)
 	}
-	for _, want := range []string{`"greeter"`, `"Failed"`, `"exposed": true`} {
+	for _, want := range []string{`"greeter"`, `"Failed"`, `"tunnel": "t-1"`, `"registryUser": "tobi"`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("body lacks %s:\n%s", want, rec.Body)
 		}
@@ -690,6 +721,10 @@ func TestChangeApps(t *testing.T) {
 			form: url.Values{}, wantCall: "redeploy greeter",
 		},
 		{
+			name: "change the access", path: "/apps/greeter/access",
+			form: url.Values{"domain": {"greeter.ch"}}, wantCall: "access greeter",
+		},
+		{
 			name: "remove", path: "/apps/greeter/delete",
 			form: url.Values{"confirm": {"greeter"}}, wantCall: "remove greeter",
 		},
@@ -716,6 +751,91 @@ func TestChangeApps(t *testing.T) {
 	}
 }
 
+// TestAccessForms checks that the credentials typed into a form reach the operation, and that a
+// token never comes back: not on the page of a form that was refused, and not in the audit log.
+func TestAccessForms(t *testing.T) {
+	t.Parallel()
+	const registryToken, cloudflareToken = "ghp-not-a-real-token", "cf-not-a-real-token"
+	// full returns a new form every time: withCSRF writes into it, and the subtests run in
+	// parallel.
+	full := func() url.Values {
+		return url.Values{
+			"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+			"domain": {"greeter.ch"}, "registry-user": {"tobi"}, "registry-token": {registryToken},
+			"cloudflare-token": {cloudflareToken}, "cloudflare-account": {"acc-1"},
+		}
+	}
+
+	t.Run("add with access", func(t *testing.T) {
+		t.Parallel()
+		platform := runningPlatform()
+		h, cookie := claimed(t, platform)
+		rec := post(h, "/apps", withCSRF(t, h, cookie, full()), cookie)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("status %d\n%s", rec.Code, rec.Body)
+		}
+		waitForJob(t, h, cookie, "job-1")
+		got := platform.lastAccess()
+		if got.Domain != "greeter.ch" || got.Registry == nil || got.Registry.Token != registryToken ||
+			got.Cloudflare == nil || got.Cloudflare.Token != cloudflareToken || got.Cloudflare.Account != "acc-1" {
+			t.Errorf("access %+v", got)
+		}
+	})
+
+	refused := []struct {
+		name    string
+		path    string
+		form    url.Values
+		wantErr string
+	}{
+		{
+			name: "an invalid domain", path: "/apps",
+			form:    url.Values{"domain": {"Not A Domain"}},
+			wantErr: "the domain must be a DNS name",
+		},
+		{
+			name: "a registry token without a user", path: "/apps",
+			form:    url.Values{"registry-user": {""}},
+			wantErr: "a registry login needs a user name and a token",
+		},
+		{
+			name: "an account without a token", path: "/apps/greeter/access",
+			form:    url.Values{"cloudflare-token": {""}},
+			wantErr: "a Cloudflare account needs the API token",
+		},
+		{
+			name: "nothing to change", path: "/apps/greeter/access",
+			form:    url.Values{"domain": {""}, "registry-user": {""}, "registry-token": {""}, "cloudflare-token": {""}, "cloudflare-account": {""}},
+			wantErr: "nothing to change",
+		},
+	}
+	for _, tt := range refused {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			platform := runningPlatform()
+			h, cookie := claimed(t, platform)
+			form := full()
+			for k, v := range tt.form {
+				form[k] = v
+			}
+			rec := post(h, tt.path, withCSRF(t, h, cookie, form), cookie)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400", rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, tt.wantErr) {
+				t.Errorf("the page lacks %q:\n%s", tt.wantErr, body)
+			}
+			if strings.Contains(body, registryToken) || strings.Contains(body, cloudflareToken) {
+				t.Errorf("a token was sent back:\n%s", body)
+			}
+			if calls := platform.made(); len(calls) != 0 {
+				t.Errorf("something changed anyway: %v", calls)
+			}
+		})
+	}
+}
+
 // TestChangesNeedTheFormToken checks that a page from another site cannot change anything, even
 // with the session cookie in hand.
 func TestChangesNeedTheFormToken(t *testing.T) {
@@ -726,6 +846,7 @@ func TestChangesNeedTheFormToken(t *testing.T) {
 		"/apps":                  {"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"}},
 		"/apps/greeter/deploy":   {"artifact": {"oci://ghcr.io/o/greeter:main"}},
 		"/apps/greeter/redeploy": {},
+		"/apps/greeter/access":   {"domain": {"greeter.ch"}},
 		"/apps/greeter/delete":   {"confirm": {"greeter"}},
 		"/apps/greeter/secrets":  {"password": {password}},
 	}

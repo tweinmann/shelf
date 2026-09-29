@@ -9,21 +9,17 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/rest"
 )
 
 var configMapGVK = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 
 const (
-	// SystemNamespace holds the app providers, their secrets and the registry credential.
+	// SystemNamespace holds the app providers and their secrets.
 	SystemNamespace = "shelf-system"
 	// ConfigName is the ConfigMap in FluxNamespace whose keys Flux substitutes into the
 	// platform manifests.
 	ConfigName = "shelf-config"
-	// RegistrySecretName is the registry credential in SystemNamespace; the platform copies it
-	// into every app namespace.
-	RegistrySecretName = "registry"
-	// RegistryHost is the registry the credential is for.
+	// RegistryHost is the registry an app's login is for.
 	RegistryHost = "ghcr.io"
 	// WatchLabel makes the platform ResourceSet copy a Secret into the app namespaces as soon
 	// as it changes, instead of at its next interval.
@@ -38,10 +34,6 @@ type Settings struct {
 	// certificate covers one level of subdomain, so the suffix goes into the app label rather
 	// than into another level.
 	HostSuffix string
-	// TunnelTarget is what shelf points an app's DNS record at,
-	// <tunnel-uuid>.cfargotunnel.com. Empty until `shelf init expose` ran, and the sign that
-	// this cluster is exposed at all.
-	TunnelTarget string
 	// Chart is the shelf-app chart every app is installed with.
 	Chart Artifact
 	// InsecureRegistry allows platform and chart registries without TLS.
@@ -74,7 +66,6 @@ func ConfigObjects(s Settings) []*unstructured.Unstructured {
 			"data": map[string]any{
 				"SHELF_DOMAIN":            s.Domain,
 				"SHELF_HOST_SUFFIX":       s.HostSuffix,
-				"SHELF_TUNNEL_TARGET":     s.TunnelTarget,
 				"SHELF_CHART_URL":         s.Chart.URL,
 				"SHELF_CHART_TAG":         s.Chart.Tag,
 				"SHELF_INSECURE_REGISTRY": strconv.FormatBool(s.InsecureRegistry),
@@ -100,38 +91,30 @@ func ParseSettings(data map[string]string) Settings {
 	return Settings{
 		Domain:           data["SHELF_DOMAIN"],
 		HostSuffix:       data["SHELF_HOST_SUFFIX"],
-		TunnelTarget:     data["SHELF_TUNNEL_TARGET"],
 		Chart:            Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
 		InsecureRegistry: insecure,
 	}
 }
 
-// RegistryLogin returns the login stored in the cluster, or nil when there is none. It is what
-// `shelf init cluster` wrote, and it is what the cluster itself pulls deploy artifacts with, so
-// anything the cluster can read, the operator can read too — without a Docker config of their
-// own, which a machine running shelf as a service does not have.
-func RegistryLogin(ctx context.Context, cfg *rest.Config) (*RegistryAuth, error) {
-	c, err := newClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	obj, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: RegistrySecretName})
-	if err != nil || obj == nil {
-		return nil, err
-	}
+// RegistrySecretName is the Secret in SystemNamespace with an app's registry login. The platform
+// copies it into the app namespace, where the deploy artifact and the images are pulled with it.
+func RegistrySecretName(app string) string { return "registry-" + app }
+
+// registryLogin reads the login back out of a registry Secret, or nil when it holds none.
+func registryLogin(obj *unstructured.Unstructured) (*RegistryAuth, error) {
 	encoded, found, err := unstructured.NestedString(obj.Object, "data", ".dockerconfigjson")
 	if err != nil || !found {
 		return nil, err
 	}
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("Secret %s/%s: %w", SystemNamespace, RegistrySecretName, err)
+		return nil, fmt.Errorf("Secret %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 	var config struct {
 		Auths map[string]struct{ Username, Password string } `json:"auths"`
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
-		return nil, fmt.Errorf("Secret %s/%s: %w", SystemNamespace, RegistrySecretName, err)
+		return nil, fmt.Errorf("Secret %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 	}
 	entry, ok := config.Auths[RegistryHost]
 	if !ok || entry.Username == "" || entry.Password == "" {
@@ -140,9 +123,10 @@ func RegistryLogin(ctx context.Context, cfg *rest.Config) (*RegistryAuth, error)
 	return &RegistryAuth{Username: entry.Username, Token: entry.Password}, nil
 }
 
-// RegistrySecret returns the registry credential. Without auth it holds no login, which still
-// lets apps with public images run.
-func RegistrySecret(auth *RegistryAuth) (*unstructured.Unstructured, error) {
+// RegistrySecret returns an app's registry login. Without auth it holds no login, which still
+// lets an app with public images and a public deploy artifact run; it exists either way, because
+// the platform copies it into the app namespace and the pulls refer to it.
+func RegistrySecret(app string, auth *RegistryAuth) (*unstructured.Unstructured, error) {
 	auths := map[string]any{}
 	if auth != nil {
 		auths[RegistryHost] = map[string]string{
@@ -159,9 +143,9 @@ func RegistrySecret(auth *RegistryAuth) (*unstructured.Unstructured, error) {
 		"apiVersion": "v1",
 		"kind":       "Secret",
 		"metadata": map[string]any{
-			"name":      RegistrySecretName,
+			"name":      RegistrySecretName(app),
 			"namespace": SystemNamespace,
-			"labels":    map[string]any{WatchLabel: "Enabled"},
+			"labels":    map[string]any{AppLabel: app, WatchLabel: "Enabled"},
 		},
 		"type": "kubernetes.io/dockerconfigjson",
 		"data": map[string]any{

@@ -23,13 +23,6 @@ const (
 	DefaultChartRepository    = "oci://ghcr.io/tweinmann/shelf/charts/shelf-app"
 )
 
-// Environment variables with the registry login for shelf init cluster. The token is never
-// taken from a flag, so it does not show up in process listings or shell history.
-const (
-	envRegistryUser  = "GHCR_USERNAME"
-	envRegistryToken = "GHCR_TOKEN"
-)
-
 // errAborted is returned when the user does not confirm.
 var errAborted = errors.New("aborted; nothing was changed")
 
@@ -79,7 +72,7 @@ func newInitCmd(o Options) *cobra.Command {
 		Use:   "init",
 		Short: "Set up the platform",
 	}
-	cmd.AddCommand(newInitClusterCmd(o), newInitExposeCmd(o))
+	cmd.AddCommand(newInitClusterCmd(o))
 	return cmd
 }
 
@@ -98,18 +91,6 @@ func (o Options) releaseArtifact(ref, repository, tag, flag string) (cluster.Art
 	return a, nil
 }
 
-// registryAuth reads the login `shelf init cluster` stores in the cluster.
-func (o Options) registryAuth() (*cluster.RegistryAuth, error) {
-	user, token := o.getenv(envRegistryUser), o.getenv(envRegistryToken)
-	switch {
-	case token == "":
-		return nil, nil
-	case user == "":
-		return nil, fmt.Errorf("%s is set, so %s is needed too", envRegistryToken, envRegistryUser)
-	}
-	return &cluster.RegistryAuth{Username: user, Token: token}, nil
-}
-
 func newInitClusterCmd(o Options) *cobra.Command {
 	var (
 		platform   string
@@ -126,8 +107,8 @@ func newInitClusterCmd(o Options) *cobra.Command {
 		Long: `Install the Flux Operator and a FluxInstance into the cluster of the current kubecontext.
 Flux then installs the platform (Traefik and the app machinery) from the platform artifact.
 
-The registry login for private images and deploy artifacts comes from ` + envRegistryUser + ` and
-` + envRegistryToken + ` (a classic PAT with read:packages). Without them, a stored login is kept.
+The domain is where the apps answer unless they have a domain of their own. Registry logins and
+Cloudflare access belong to each app; ` + "`shelf app add`" + ` and ` + "`shelf app credentials`" + ` set them.
 
 The command shows the target cluster and asks for confirmation, because it installs
 cluster-wide objects. It is idempotent; running it again updates what changed.`,
@@ -148,15 +129,10 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			if err := ops.CheckHostSuffix(hostSuffix); err != nil {
 				return fmt.Errorf("--host-suffix %w", err)
 			}
-			auth, err := o.registryAuth()
-			if err != nil {
-				return err
-			}
 			shelf, err := target.load(o)
 			if err != nil {
 				return err
 			}
-			shelf.Env.Registry = auth
 
 			opts := ops.InitOptions{
 				Platform:   p,
@@ -174,11 +150,6 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			fmt.Fprintf(out, "  platform  %s\n", plan.Platform)
 			fmt.Fprintf(out, "  chart     %s\n", plan.Chart)
 			fmt.Fprintf(out, "  hosts     %s\n", plan.Hosts)
-			if plan.Registry != "" {
-				fmt.Fprintf(out, "  registry  %s\n", plan.Registry)
-			} else {
-				fmt.Fprintf(out, "  registry  login unchanged (%s not set)\n", envRegistryToken)
-			}
 			if !target.yes {
 				ok, err := confirm(cmd.InOrStdin(), out)
 				if err != nil {
@@ -196,12 +167,13 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 		"platform artifact, oci://<registry>/<repository>:<tag> (default: "+DefaultPlatformRepository+":<shelf version>)")
 	f.StringVar(&chart, "chart", "",
 		"shelf-app chart, oci://<registry>/<repository>:<version> (default: "+DefaultChartRepository+":<shelf version>)")
-	f.StringVar(&domain, "domain", "", "apps are reachable at <app><host-suffix>.<domain> (required)")
+	f.StringVar(&domain, "domain", "",
+		"apps without a domain of their own are reachable at <app><host-suffix>.<domain> (required)")
 	f.StringVar(&hostSuffix, "host-suffix", "",
 		"suffix in the app's host name, e.g. -dev, to separate clusters that share a DNS zone")
 	f.BoolVar(&insecure, "insecure-registry", false, "pull platform and chart without TLS (dev registry)")
 	f.BoolVar(&moveHosts, "move-hosts", false,
-		"allow a domain or host suffix that moves the apps of this cluster to different names")
+		"allow a domain or host suffix that moves apps of this cluster to different names")
 	target.register(f)
 	return cmd
 }

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/tweinmann/shelf/internal/cluster"
-	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/schema"
 )
 
@@ -170,67 +169,21 @@ func TestAppRm(t *testing.T) {
 	}
 }
 
-func TestAppAddAndRmPublishTheHostName(t *testing.T) {
+// TestAppAddWithoutCloudflare checks that an app without Cloudflare access runs without being
+// published, even under a public domain: exposure belongs to the app, not to the cluster.
+func TestAppAddWithoutCloudflare(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t).exposed()
+	h := newHarness(t).public()
 	h.app = appWithSecrets("greeter")
-	h.cluster.found = true
-	h.env[ops.EnvCloudflareToken] = "cf-secret-token"
+	h.env[envCloudflareToken] = "cf-secret-token"
 
-	stdout, stderr, code := h.run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main")
-	if code != 0 {
-		t.Fatalf("exit code %d: %s", code, stderr)
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
+	if len(h.api.records)+len(h.api.created) != 0 {
+		t.Errorf("records %v, tunnels %v; a token in the shell is not used without --cloudflare",
+			h.api.records, h.api.created)
 	}
-	want := "greeter-dev.example.com -> t-1.cfargotunnel.com in zone-1"
-	if len(h.api.records) != 1 || h.api.records[0] != want {
-		t.Errorf("records %v, want %q", h.api.records, want)
-	}
-	if !strings.Contains(stdout, "DNS greeter-dev.example.com points at t-1.cfargotunnel.com: created") {
-		t.Errorf("stdout lacks the record:\n%s", stdout)
-	}
-
-	if _, stderr, code = h.run(t, "app", "rm", "greeter", "--yes"); code != 0 {
-		t.Fatalf("exit code %d: %s", code, stderr)
-	}
-	if len(h.api.deletedRecords) != 1 || h.api.deletedRecords[0] != "greeter-dev.example.com" {
-		t.Errorf("deleted %v", h.api.deletedRecords)
-	}
-	if !strings.Contains(stdout, "DNS greeter-dev.example.com") {
-		t.Errorf("stdout lacks the record:\n%s", stdout)
-	}
-}
-
-func TestAppAddWithoutExposure(t *testing.T) {
-	t.Parallel()
-	tests := map[string]struct {
-		exposed bool
-		token   string
-		wantOut string
-	}{
-		"cluster not exposed": {token: "cf-secret-token"},
-		"no token":            {exposed: true, wantOut: "DNS: skipped"},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			h := newHarness(t)
-			if tt.exposed {
-				h.exposed()
-			}
-			h.app = appWithSecrets("greeter")
-			h.env[ops.EnvCloudflareToken] = tt.token
-
-			stdout, stderr, code := h.run(t, "app", "add", "greeter", "oci://ghcr.io/o/greeter:main")
-			if code != 0 {
-				t.Fatalf("exit code %d: %s", code, stderr)
-			}
-			if len(h.api.records) != 0 {
-				t.Errorf("no record may be written: %v", h.api.records)
-			}
-			if tt.wantOut != "" && !strings.Contains(stdout, tt.wantOut) {
-				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
-			}
-		})
+	if added := h.lastAdded(t); added.TunnelID != "" || added.Registry != nil {
+		t.Errorf("options %+v", added)
 	}
 }
 
@@ -239,7 +192,9 @@ func TestAppAddWithoutExposure(t *testing.T) {
 // all.
 func TestAppStatusComponents(t *testing.T) {
 	t.Parallel()
-	states := []cluster.AppState{{Name: "hello", Phase: cluster.PhaseReady}}
+	ready := cluster.AppState{Name: "hello", Phase: cluster.PhaseReady}
+	exposed := ready
+	exposed.Tunnel = "t-1"
 	components := []cluster.Component{
 		{Name: "check", Phase: cluster.PhaseWorking},
 		{Name: "db", Phase: cluster.PhaseReady, Ports: []cluster.Port{{Name: "main", Number: 5432}}},
@@ -249,6 +204,7 @@ func TestAppStatusComponents(t *testing.T) {
 	tests := map[string]struct {
 		exposed bool
 		local   bool
+		own     bool
 		want    []string
 	}{
 		"exposed": {exposed: true, want: []string{
@@ -257,25 +213,31 @@ func TestAppStatusComponents(t *testing.T) {
 			"    web    Ready    https://hello-dev.example.com/",
 		}},
 		"a public domain without a tunnel": {want: []string{
-			"    web    Ready    hello.example.com/ (not exposed)",
+			"    web    Ready    hello-dev.example.com/ (not exposed)",
 		}},
-		"a reserved domain": {local: true, want: []string{
-			"    web    Ready    hello.dev.local/ (inside the cluster only)",
+		"a reserved domain": {local: true, exposed: true, want: []string{
+			"    web    Ready    hello-dev.dev.local/ (inside the cluster only)",
+		}},
+		"a domain of its own": {local: true, own: true, exposed: true, want: []string{
+			"  exposed   through tunnel t-1",
+			"    web    Ready    https://hello-dev.shop.ch/",
 		}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			h := newHarness(t)
-			switch {
-			case tt.exposed:
-				h.exposed()
-			case tt.local:
-				h.cluster.settings = cluster.Settings{Domain: "dev.local", TunnelTarget: "t-1.cfargotunnel.com"}
-			default:
-				h.cluster.settings = cluster.Settings{Domain: "example.com"}
+			h := newHarness(t).public()
+			if tt.local {
+				h.cluster.settings.Domain = "dev.local"
 			}
-			h.cluster.states, h.cluster.components = states, components
+			state := ready
+			if tt.exposed {
+				state = exposed
+			}
+			if tt.own {
+				state.Domain = "shop.ch"
+			}
+			h.cluster.states, h.cluster.components = []cluster.AppState{state}, components
 
 			stdout, stderr, code := h.run(t, "app", "status", "hello")
 			if code != 0 {
@@ -286,63 +248,8 @@ func TestAppStatusComponents(t *testing.T) {
 					t.Errorf("stdout lacks %q:\n%s", want, stdout)
 				}
 			}
-			if tt.local && strings.Contains(stdout, "https://hello.dev.local") {
+			if tt.local && strings.Contains(stdout, "https://hello-dev.dev.local") {
 				t.Errorf("a link to a name that cannot exist:\n%s", stdout)
-			}
-		})
-	}
-}
-
-// TestAppAddUsesTheClusterLogin covers where the credential for reading a deploy artifact comes
-// from. The cluster already holds one, so a machine that registers an app needs no Docker config
-// of its own — which is the whole point on a mini, where there is none.
-func TestAppAddUsesTheClusterLogin(t *testing.T) {
-	t.Parallel()
-	login := &cluster.RegistryAuth{Username: "tobi", Token: "secret-token"}
-	tests := map[string]struct {
-		artifact string
-		login    *cluster.RegistryAuth
-		wantUser string
-	}{
-		"the registry the login is for": {
-			artifact: "oci://ghcr.io/tweinmann/hello:main", login: login, wantUser: "tobi",
-		},
-		"another registry gets nothing": {
-			artifact: helloArtifact, login: login,
-		},
-		"no login in the cluster": {
-			artifact: "oci://ghcr.io/tweinmann/hello:main",
-		},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			h := newHarness(t)
-			h.app = appWithSecrets("hello")
-			h.cluster.login = tt.login
-
-			stdout, stderr, code := h.run(t, "app", "add", "hello", tt.artifact, "--insecure-registry")
-			if code != 0 {
-				t.Fatalf("exit code %d: %s", code, stderr)
-			}
-			if strings.Contains(stdout+stderr, "secret-token") {
-				t.Fatal("the token appears in the output")
-			}
-			if tt.wantUser == "" {
-				if h.pull != nil {
-					t.Errorf("a credential was offered to %s", tt.artifact)
-				}
-				return
-			}
-			if h.pull == nil {
-				t.Fatal("the cluster's login was not used")
-			}
-			cfg, err := h.pull.Authorization()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if cfg.Username != tt.wantUser || cfg.Password != login.Token {
-				t.Errorf("offered %s, want %s with its token", cfg.Username, tt.wantUser)
 			}
 		})
 	}

@@ -1,37 +1,79 @@
 package ops
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
 	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/deploy"
+	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/progress"
 	"github.com/tweinmann/shelf/internal/secrets"
 )
 
-// pullAuth is the login for reading a deploy artifact, in the order of what the caller knows
-// best. An explicit one wins. Otherwise the cluster's own login is used, because whoever is
-// allowed to register an app there can already read what that cluster pulls, and it spares the
-// machine running shelf a Docker config it may not have. It is only offered to the registry it
-// was stored for; a nil result leaves the Docker config to answer, as the command line expects.
-func (o *Ops) pullAuth(ctx context.Context, artifact cluster.Artifact) (authn.Authenticator, error) {
+// pullAuth is the login for reading a deploy artifact from here. An explicit one wins. Otherwise
+// the app's own login is used, because it is what the cluster pulls the artifact with, and it
+// spares the machine running shelf a Docker config it may not have. It is only offered to the
+// registry it is for; a nil result leaves the Docker config to answer.
+func (o *Ops) pullAuth(artifact cluster.Artifact, login *cluster.RegistryAuth) authn.Authenticator {
 	if o.Env.Pull != nil {
-		return o.Env.Pull, nil
+		return o.Env.Pull
 	}
-	if artifact.Registry() != cluster.RegistryHost {
-		return nil, nil
+	if login == nil || artifact.Registry() != cluster.RegistryHost {
+		return nil
 	}
-	login, err := o.Cluster.RegistryLogin(ctx, o.config())
-	if err != nil || login == nil {
-		return nil, err
+	return authn.FromConfig(authn.AuthConfig{Username: login.Username, Password: login.Token})
+}
+
+// Access is how an app reaches its registry and the internet. Every field is optional: what is
+// not given stays as the app has it.
+type Access struct {
+	// Domain gives the app a domain of its own instead of the cluster's.
+	Domain string
+	// Registry is the app's login for ghcr.io, for its deploy artifact and its images.
+	Registry *cluster.RegistryAuth
+	// RemoveRegistry drops the login; the app then reads its registry without one.
+	RemoveRegistry bool
+	// Cloudflare exposes the app through a tunnel of its own in that account. The token needs
+	// Account:Cloudflare Tunnel:Edit, and Zone:DNS:Edit for the app's zone. An empty account
+	// means the only one the token sees.
+	Cloudflare *hostcfg.Cloudflare
+	// RemoveCloudflare takes the app off the internet: its record and its tunnel are deleted.
+	RemoveCloudflare bool
+}
+
+// Check rejects access that contradicts itself or cannot work. The messages carry no field
+// name, so a caller can put its own in front.
+func (a Access) Check() error {
+	if a.Domain != "" {
+		if err := CheckDomain(a.Domain); err != nil {
+			return fmt.Errorf("the domain %w", err)
+		}
 	}
-	return authn.FromConfig(authn.AuthConfig{Username: login.Username, Password: login.Token}), nil
+	if a.Registry != nil {
+		if a.RemoveRegistry {
+			return errors.New("a registry login cannot be given and removed at once")
+		}
+		if a.Registry.Username == "" || a.Registry.Token == "" {
+			return errors.New("a registry login needs a user name and a token")
+		}
+	}
+	if a.Cloudflare != nil {
+		if a.RemoveCloudflare {
+			return errors.New("Cloudflare access cannot be given and removed at once")
+		}
+		if strings.TrimSpace(a.Cloudflare.Token) == "" {
+			return errors.New("Cloudflare access needs an API token")
+		}
+	}
+	return nil
 }
 
 // AddOptions configure AddApp.
@@ -40,20 +82,39 @@ type AddOptions struct {
 	Artifact cluster.Artifact
 	// Insecure allows a deploy artifact registry without TLS.
 	Insecure bool
-	Timeout  time.Duration
+	// Access changes how the app reaches its registry and the internet.
+	Access  Access
+	Timeout time.Duration
 }
 
 // AddApp registers an app and waits until it runs: it reads the deploy artifact, works out the
-// app's secret values, writes them to the backup and to the cluster, and publishes the app's
-// host name if the cluster is exposed. Running it again updates the artifact reference, keeps
-// every value that exists and generates the ones that were added to app.yaml since.
+// app's secret values, writes them to the backup and to the cluster, and exposes the app through
+// its own tunnel if it has Cloudflare access. Running it again updates the artifact reference,
+// keeps every value that exists, generates the ones that were added to app.yaml since, and
+// keeps the app's access except where it is changed.
 func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Reporter) error {
 	rep := progress.OrDiscard(report)
-	auth, err := o.pullAuth(ctx, opts.Artifact)
+	if err := opts.Access.Check(); err != nil {
+		return err
+	}
+	current, err := o.Cluster.AppConfig(ctx, o.config(), opts.Name)
 	if err != nil {
 		return err
 	}
-	app, err := o.Fetch(ctx, opts.Artifact.Reference(), auth, opts.Insecure)
+	if current == nil {
+		current = &cluster.AppConfig{}
+	}
+	registry := current.Registry
+	switch {
+	case opts.Access.RemoveRegistry:
+		registry = nil
+		rep.Report(progress.Info("registry login: none"))
+	case opts.Access.Registry != nil:
+		registry = opts.Access.Registry
+		rep.Report(progress.Info("registry login: %s for %s", registry.Username, cluster.RegistryHost))
+	}
+
+	app, err := o.Fetch(ctx, opts.Artifact.Reference(), o.pullAuth(opts.Artifact, registry), opts.Insecure)
 	if err != nil {
 		return err
 	}
@@ -82,21 +143,51 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		rep.Report(progress.Info("secret backup: %s", o.Env.Backup.Path(opts.Name)))
 	}
 
-	publisher, err := o.newDNS(ctx, rep)
+	settings, err := o.Cluster.Settings(ctx, o.config())
+	if err != nil {
+		return err
+	}
+	domain := cmp.Or(opts.Access.Domain, current.Domain)
+	exposure, err := o.planExposure(ctx, opts.Name, settings, current, cmp.Or(domain, settings.Domain),
+		opts.Access, rep)
 	if err != nil {
 		return err
 	}
 	if err := o.Cluster.AddApp(ctx, o.config(), cluster.AppOptions{
-		Name:     opts.Name,
-		Artifact: opts.Artifact,
-		Insecure: opts.Insecure,
-		Secrets:  values,
-		Timeout:  opts.Timeout,
-		Report:   rep,
+		Name:              opts.Name,
+		Artifact:          opts.Artifact,
+		Insecure:          opts.Insecure,
+		Domain:            domain,
+		Registry:          registry,
+		TunnelID:          exposure.tunnelID(),
+		TunnelCredentials: exposure.credentials,
+		Secrets:           values,
+		Timeout:           opts.Timeout,
+		Report:            rep,
 	}); err != nil {
 		return err
 	}
-	return publisher.publish(ctx, opts.Name, rep)
+	return o.finish(ctx, exposure, rep)
+}
+
+// SetAccess changes how an app reaches its registry and the internet, and nothing else: it
+// deploys the artifact the app is registered with, the same way AddApp does.
+func (o *Ops) SetAccess(ctx context.Context, name string, access Access, timeout time.Duration,
+	report progress.Reporter) error {
+	current, err := o.Cluster.AppConfig(ctx, o.config(), name)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return &NotFoundError{Name: name}
+	}
+	return o.AddApp(ctx, AddOptions{
+		Name:     name,
+		Artifact: current.Artifact,
+		Insecure: current.Insecure,
+		Access:   access,
+		Timeout:  timeout,
+	}, report)
 }
 
 // Redeploy asks Flux to fetch the app's artifact again and to roll out what it finds. It is
@@ -114,11 +205,20 @@ func (o *Ops) Secrets(ctx context.Context, name string) (map[string]string, erro
 }
 
 // RemoveApp removes an app with its namespace, volumes and secrets, and withdraws its host
-// name. The secret backup on this machine is kept, and the caller is told where it is.
+// name and its tunnel from Cloudflare. The secret backup on this machine is kept, and the caller
+// is told where it is.
 func (o *Ops) RemoveApp(ctx context.Context, name string, timeout time.Duration,
 	report progress.Reporter) error {
 	rep := progress.OrDiscard(report)
-	publisher, err := o.newDNS(ctx, rep)
+	current, err := o.Cluster.AppConfig(ctx, o.config(), name)
+	if err != nil {
+		return err
+	}
+	settings, err := o.Cluster.Settings(ctx, o.config())
+	if err != nil {
+		return err
+	}
+	access, err := o.Env.Access.Cloudflare(name)
 	if err != nil {
 		return err
 	}
@@ -126,7 +226,18 @@ func (o *Ops) RemoveApp(ctx context.Context, name string, timeout time.Duration,
 	if err != nil {
 		return err
 	}
-	if err := publisher.withdraw(ctx, name, rep); err != nil {
+	// cloudflared went with the namespace, so the tunnel has no connections left.
+	if current != nil && current.TunnelID != "" {
+		host := AppHost(name, settings.HostSuffix, cmp.Or(current.Domain, settings.Domain))
+		if err := o.withdrawRecord(ctx, name, host, access, rep); err != nil {
+			return err
+		}
+		if err := o.deleteTunnel(ctx, name, TunnelName(name, settings.HostSuffix), current.TunnelID,
+			access, rep); err != nil {
+			return err
+		}
+	}
+	if err := o.Env.Access.DeleteCloudflare(name); err != nil {
 		return err
 	}
 	if !found {

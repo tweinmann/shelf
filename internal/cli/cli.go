@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/render"
 	"github.com/tweinmann/shelf/internal/schema"
@@ -78,17 +79,18 @@ func (o Options) shelfHome() (string, error) {
 	return filepath.Join(home, ".shelf"), nil
 }
 
-// env collects what this machine supplies to an operation. The registry login is not part of
-// it: only `shelf init cluster` stores one, and only it reports a login that is incomplete.
+// env collects what this machine supplies to an operation: where the secret backups and the
+// Cloudflare access of the apps are kept. The credentials an app is given come from flags that
+// read the environment, and only in the commands that take them.
 func (o Options) env() (ops.Env, error) {
 	home, err := o.shelfHome()
 	if err != nil {
 		return ops.Env{}, err
 	}
+	apps := filepath.Join(home, "apps")
 	return ops.Env{
-		Backup:            secrets.Backup{Dir: filepath.Join(home, "apps")},
-		CloudflareToken:   strings.TrimSpace(o.getenv(ops.EnvCloudflareToken)),
-		CloudflareAccount: strings.TrimSpace(o.getenv(ops.EnvCloudflareAccount)),
+		Backup: secrets.Backup{Dir: apps},
+		Access: hostcfg.AppAccess{Dir: apps},
 	}, nil
 }
 

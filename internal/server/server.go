@@ -39,6 +39,7 @@ type Platform interface {
 	Secrets(ctx context.Context, name string) (map[string]string, error)
 
 	AddApp(ctx context.Context, o ops.AddOptions, rep progress.Reporter) error
+	SetAccess(ctx context.Context, name string, access ops.Access, timeout time.Duration, rep progress.Reporter) error
 	RemoveApp(ctx context.Context, name string, timeout time.Duration, rep progress.Reporter) error
 	Redeploy(ctx context.Context, name string, timeout time.Duration, rep progress.Reporter) error
 }
@@ -136,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /apps/{name}", s.guard(http.HandlerFunc(s.appPage)))
 	mux.Handle("POST /apps/{name}/deploy", s.guard(http.HandlerFunc(s.deployApp)))
 	mux.Handle("POST /apps/{name}/redeploy", s.guard(http.HandlerFunc(s.redeployApp)))
+	mux.Handle("POST /apps/{name}/access", s.guard(http.HandlerFunc(s.setAccess)))
 	mux.Handle("POST /apps/{name}/delete", s.guard(http.HandlerFunc(s.deleteApp)))
 	mux.Handle("POST /apps/{name}/secrets", s.guard(http.HandlerFunc(s.revealSecrets)))
 	mux.Handle("GET /jobs/{id}", s.guard(http.HandlerFunc(s.jobPage)))

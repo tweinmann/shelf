@@ -38,11 +38,17 @@ injected dependencies instead of package variables, and the CLI tests run in par
 Phase 7 complete: `shelf serve` is the admin UI — claim with a setup code, password login, and a
 read-only dashboard that lists the apps and says which step is broken. `cluster.AppStates` and
 the five-stage diagnosis back both the pages and `shelf app status`.
-Phase 8 complete (awaiting approval): apps are added, pointed at another tag, deployed again and
+Phase 8 complete: apps are added, pointed at another tag, deployed again and
 removed from the browser. Each change is a job with a live log that reads like the command
 line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
 level with the UI. The app page also lists the app's components with their addresses, the routed
 ones as links. Results in docs/plan.md.
+Phase 8b in progress: credentials per app. Each app has its own registry login
+(`shelf-system/registry-<app>`), and, with Cloudflare access, its own domain, its own tunnel in its
+own account and cloudflared in its namespace; `shelf init expose` and the shared login and tunnel
+are gone. `shelf app add --domain/--registry-login/--cloudflare`, `shelf app credentials`, and an
+"Access" section in the UI. Level 1 green; level 2 and 3 not run yet, because migrating the dev
+cluster takes `greeter-dev.tobile.ch` off the shared tunnel.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
@@ -95,7 +101,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
-| `just smoke-expose <app>` | devcontainer | Phase 5 acceptance: `shelf init expose`, DNS record and HTTPS; asks for the Cloudflare API token |
+| `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets its own tunnel in its own account, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token; needs a cluster with a host suffix |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -115,14 +121,20 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - `internal/host` (brew, pmset, colima, launchctl) cannot run in the devcontainer. Test it
   through the fake command runner. The launchd service is a level-3 concern too.
 - Secret values never appear in rendered manifests, logs or golden files (golden files may
-  hold obviously fake values such as `not-a-real-token`). The GHCR token is read from
-  `GHCR_TOKEN` only, never from a flag. The same holds for the files under `~/.shelf`: a token
-  never goes into the launchd plist, into a log line or into a rendered page.
+  hold obviously fake values such as `not-a-real-token`). Tokens are read from `GHCR_TOKEN` and
+  `CF_API_TOKEN` only, never from a flag, and only when `--registry-login` or `--cloudflare` asks
+  for them. The same holds for the files under `~/.shelf`: a token never goes into the launchd
+  plist, into a log line or into a rendered page, and a form never sends one back.
+- An app's Cloudflare token lives in `~/.shelf/apps/<app>/cloudflare.yaml` and never in the
+  cluster. Its registry login lives in `shelf-system/registry-<app>` and is copied into that
+  app's namespace only.
+- Tunnels of the dev cluster are named `shelf-dev-<app>`; never delete a Cloudflare tunnel or
+  record by anything but its exact name, and never one without the `-dev` suffix.
 - `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
   this session.
-- `shelf init cluster` with a different `--domain` or `--host-suffix` moves every app to another
-  host name and strands its DNS records. It refuses to do that while apps exist unless
-  `--move-hosts` is passed. The smoke tests install `dev.local` and refuse to run against a
+- `shelf init cluster` with a different `--host-suffix` moves every app to another host name, a
+  different `--domain` every app without a domain of its own, and strands their DNS records. It
+  refuses to do that while such apps exist unless `--move-hosts` is passed. The smoke tests install `dev.local` and refuse to run against a
   cluster that serves anything else — run `just cluster-reset` first, or restore the domain
   afterwards.
 
@@ -132,9 +144,13 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - A component has either `image:` or `build: ./dir`; package names are the workflow's business,
   never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<app>`, a built image
   `ghcr.io/<owner>/<app>/<component>`
-- Reading a deploy artifact uses the login the cluster stores in `shelf-system/registry`, and only
-  for the registry it was stored for; `ops.Env.Pull` overrides it, the Docker keychain is the last
-  resort. A machine running shelf as a service has no Docker config
+- Reading a deploy artifact uses the app's own login from `shelf-system/registry-<app>`, and only
+  for the registry it was stored for (`ghcr.io`); `ops.Env.Pull` overrides it, the Docker keychain
+  is the last resort. A machine running shelf as a service has no Docker config
+- Per app in `shelf-system`, all labelled `shelf.dev/app`: the provider `<app>` (inputs `name`,
+  `url`, `tag`, `insecure`, `domain`, `tunnel`), `app-<app>` (secret values), `registry-<app>`,
+  `tunnel-<app>`. An app's tunnel is `shelf<host-suffix>-<app>`, its host
+  `<app><host-suffix>.<own domain or the cluster's>`
 - Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
   the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
   OCI annotations `dev.shelf.*`

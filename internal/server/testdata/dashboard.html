@@ -22,9 +22,9 @@
 <section class="card">
 <dl class="facts">
 <dt>Cluster</dt><dd>k3d-shelf-dev <span class="muted">https://127.0.0.1:6445</span></dd>
-<dt>Apps answer at</dt><dd>&lt;app&gt;-dev.example.com</dd>
+<dt>Apps answer at</dt><dd>&lt;app&gt;-dev.example.com <span class="muted">unless they have a domain of their own</span></dd>
 <dt>Internet</dt>
-<dd>reachable through the Cloudflare tunnel</dd>
+<dd>each app through its own Cloudflare tunnel, once it has Cloudflare access</dd>
 </dl>
 </section>
 
@@ -58,7 +58,7 @@
 </div>
 <p class="reason">the deploy artifact: MANIFEST_UNKNOWN: manifest unknown</p>
 <dl class="facts">
-<dt>Address</dt><dd><a href="https://shop-dev.example.com/">shop-dev.example.com</a></dd>
+<dt>Address</dt><dd><a href="https://shop-dev.shop.ch/">shop-dev.shop.ch</a></dd>
 
 <dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span>
 <span class="muted">deployed 3 hours ago</span></dd>

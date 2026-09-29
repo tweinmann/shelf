@@ -169,14 +169,18 @@ type appView struct {
 	Running     *Job
 }
 
-// newAppView is the form that registers an app.
+// newAppView is the form that registers an app. It never carries a token: a form that failed
+// shows everything else that was typed, and asks for the tokens again.
 type newAppView struct {
 	base
-	Status   ops.Status
-	Name     string
-	Artifact string
-	Insecure bool
-	Error    string
+	Status            ops.Status
+	Name              string
+	Artifact          string
+	Insecure          bool
+	Domain            string
+	RegistryUser      string
+	CloudflareAccount string
+	Error             string
 }
 
 // jobView is the page that watches one change.

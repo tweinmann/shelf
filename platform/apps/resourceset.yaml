@@ -1,7 +1,11 @@
 # Every app is a ResourceSetInputProvider in shelf-system, labelled shelf.dev/app, created by
-# `shelf app add` with the inputs name, url, tag and insecure. For each one this ResourceSet
-# generates the app namespace and everything Flux needs to deploy the app from its deploy
-# artifact. Deleting the provider deletes all of it, including the namespace.
+# `shelf app add` with the inputs name, url, tag, insecure, domain and tunnel. For each one this
+# ResourceSet generates the app namespace and everything Flux needs to deploy the app from its
+# deploy artifact, and, for an app with a tunnel, the cloudflared that carries it to the
+# internet. Deleting the provider deletes all of it, including the namespace.
+#
+# Nothing here is shared between apps: each one pulls with its own registry login and is exposed
+# through its own tunnel, in whatever Cloudflare account it was given.
 #
 # ${SHELF_...} is substituted by Flux from the ConfigMap flux-system/shelf-config, which
 # `shelf init cluster` writes. << inputs.* >> is filled in by the Flux Operator per app.
@@ -40,14 +44,15 @@ spec:
           fluxcd.controlplane.io/copyFrom: shelf-system/app-<< inputs.name >>
       type: Opaque
 
-    # The platform-wide registry credential, for images and the deploy artifact.
+    # The app's registry login, for its images and its deploy artifact. It holds no login when
+    # the app has none, and the registry is then read anonymously.
     - apiVersion: v1
       kind: Secret
       metadata:
         name: shelf-registry
         namespace: << inputs.name >>
         annotations:
-          fluxcd.controlplane.io/copyFrom: shelf-system/registry
+          fluxcd.controlplane.io/copyFrom: shelf-system/registry-<< inputs.name >>
       type: kubernetes.io/dockerconfigjson
 
     # The deploy Kustomization acts as this account, which may only manage ConfigMaps in the
@@ -146,7 +151,8 @@ spec:
             valuesKey: app.yaml
         values:
           platform:
-            domain: ${SHELF_DOMAIN}
+            # The app's own domain, or the cluster's.
+            domain: "<< if inputs.domain >><< inputs.domain >><< else >>${SHELF_DOMAIN}<< end >>"
             # Quoted: an empty setting would otherwise become null, and the chart would render
             # the host name with a "<nil>" in it.
             hostSuffix: "${SHELF_HOST_SUFFIX:=}"
@@ -158,3 +164,90 @@ spec:
           remediation:
             retries: 3
             remediateLastFailure: true
+
+  # An app with a tunnel reaches the internet through cloudflared in its own namespace. The DNS
+  # record is not made here: shelf writes it when the app is added, with the app's Cloudflare
+  # token, which never enters the cluster. One rule is enough, because Traefik routes by host name.
+  resourcesTemplate: |
+    <<- if inputs.tunnel >>
+    ---
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: shelf-tunnel
+      namespace: << inputs.name >>
+      annotations:
+        fluxcd.controlplane.io/copyFrom: shelf-system/tunnel-<< inputs.name >>
+    type: Opaque
+    ---
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cloudflared
+      namespace: << inputs.name >>
+    data:
+      config.yaml: |
+        tunnel: << inputs.tunnel >>
+        credentials-file: /etc/cloudflared/credentials/credentials.json
+        metrics: 0.0.0.0:2000
+        no-autoupdate: true
+        ingress:
+          - service: http://traefik.traefik.svc.cluster.local:80
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: cloudflared
+      namespace: << inputs.name >>
+      annotations:
+        # Restarts cloudflared when the tunnel credentials or the rule change.
+        fluxcd.controlplane.io/checksumFrom: Secret/<< inputs.name >>/shelf-tunnel,ConfigMap/<< inputs.name >>/cloudflared
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: cloudflared
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cloudflared
+        spec:
+          enableServiceLinks: false
+          automountServiceAccountToken: false
+          containers:
+            - name: cloudflared
+              image: cloudflare/cloudflared:2026.9.1
+              args: [tunnel, --config, /etc/cloudflared/config/config.yaml, run]
+              ports:
+                - name: metrics
+                  containerPort: 2000
+              readinessProbe:
+                httpGet:
+                  path: /ready
+                  port: metrics
+                periodSeconds: 10
+              livenessProbe:
+                httpGet:
+                  path: /ready
+                  port: metrics
+                periodSeconds: 10
+                failureThreshold: 6
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/cloudflared/config
+                - name: credentials
+                  mountPath: /etc/cloudflared/credentials
+          volumes:
+            - name: config
+              configMap:
+                name: cloudflared
+            - name: credentials
+              secret:
+                secretName: shelf-tunnel
+    <<- end >>

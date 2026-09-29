@@ -168,6 +168,11 @@ button.link {
 .check { display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; }
 .check input { width: auto; }
 
+/* The credentials of an app: optional, so they are grouped apart from what every app needs. */
+fieldset { margin: 1.2rem 0 0; padding: 0 0.9rem 0.9rem; border: 1px solid var(--line); border-radius: 0.4rem; }
+legend { padding: 0 0.3rem; font-size: 0.9rem; font-weight: 600; }
+fieldset p { margin: 0.4rem 0 0; font-size: 0.85rem; color: var(--muted); }
+
 button.secondary, .button {
   color: var(--fg);
   background: none;

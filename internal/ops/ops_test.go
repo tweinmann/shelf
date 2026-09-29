@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/ops"
 )
 
@@ -78,9 +77,11 @@ func TestHosts(t *testing.T) {
 	if got := ops.Hosts("example.com", ""); got != "<app>.example.com" {
 		t.Errorf("hosts %q", got)
 	}
-	settings := cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
-	if got := ops.AppHost(settings, "greeter"); got != "greeter-dev.example.com" {
+	if got := ops.AppHost("greeter", "-dev", "example.com"); got != "greeter-dev.example.com" {
 		t.Errorf("host %q", got)
+	}
+	if got := ops.TunnelName("greeter", "-dev"); got != "shelf-dev-greeter" {
+		t.Errorf("tunnel %q", got)
 	}
 }
 

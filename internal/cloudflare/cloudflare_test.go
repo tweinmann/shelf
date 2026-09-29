@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -70,6 +71,8 @@ func (f *fakeAPI) server() *httptest.Server {
 			tunnel := Tunnel{ID: "tunnel-id", Name: f.created["name"].(string)}
 			f.tunnels = append(f.tunnels, tunnel)
 			f.reply(w, true, tunnel)
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/connections"):
+			f.reply(w, true, nil)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/cfd_tunnel/"):
 			f.tunnels = nil
 			f.reply(w, true, nil)
@@ -278,6 +281,13 @@ func TestDeleteTunnel(t *testing.T) {
 	c := newTestClient(t, api)
 	if err := c.DeleteTunnel(context.Background(), "acc-1", "t-1"); err != nil {
 		t.Fatal(err)
+	}
+	want := []string{
+		"DELETE /accounts/acc-1/cfd_tunnel/t-1/connections",
+		"DELETE /accounts/acc-1/cfd_tunnel/t-1",
+	}
+	if !slices.Equal(api.requests, want) {
+		t.Errorf("requests %v, want %v; the connections go first", api.requests, want)
 	}
 	got, err := c.FindTunnel(context.Background(), "acc-1", "shelf")
 	if err != nil || got != nil {

@@ -46,7 +46,7 @@ This is what the admin UI shows on its pages, in text.`,
 				return err
 			}
 			printApp(out, app)
-			printComponents(out, app.Components, shelf.Status(cmd.Context()).Public)
+			printComponents(out, app.Components, app.Public)
 			printChain(out, diagnosis)
 			return nil
 		},
@@ -83,6 +83,15 @@ func printApp(out io.Writer, app ops.App) {
 		fmt.Fprintf(out, "  address   %s\n", address)
 	}
 	fmt.Fprintf(out, "  artifact  %s\n", app.Artifact)
+	if app.RegistryUser != "" {
+		fmt.Fprintf(out, "  registry  %s@%s\n", app.RegistryUser, cluster.RegistryHost)
+	}
+	switch {
+	case app.CloudflareAccount != "":
+		fmt.Fprintf(out, "  exposed   through Cloudflare account %s\n", app.CloudflareAccount)
+	case app.Tunnel != "":
+		fmt.Fprintf(out, "  exposed   through tunnel %s; this machine does not hold the access\n", app.Tunnel)
+	}
 	if app.Revision != "" {
 		fmt.Fprintf(out, "  running   %s\n", app.Revision)
 	}

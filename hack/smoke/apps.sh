@@ -56,7 +56,7 @@ render() {
 }
 
 for leftover in "namespace/$app" "-n shelf-system secret/app-$app" \
-  "-n shelf-system resourcesetinputprovider/$app"; do
+  "-n shelf-system secret/registry-$app" "-n shelf-system resourcesetinputprovider/$app"; do
   # shellcheck disable=SC2086
   kubectl get $leftover >/dev/null 2>&1 \
     && die "$leftover already exists; remove it first (shelf app rm $app)"
@@ -85,6 +85,12 @@ password="$(sed -n 's/^ *db-password: //p' "$SHELF_HOME/apps/$app/secrets.yaml")
 [[ ${#password} -ge 26 ]] || die "no password in the backup"
 grep -qF "$password" "$work/add1.txt" && die "the secret value appears in the output"
 [[ "$(stat -c %a "$SHELF_HOME/apps/$app/secrets.yaml")" == 600 ]] || die "the backup is not 0600"
+
+step "the app has a registry login of its own, empty, and no tunnel"
+login="$(kubectl -n shelf-system get secret "registry-$app" -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d)"
+[[ "$login" == '{"auths":{}}' ]] || die "registry-$app holds $login, not an empty login"
+retry 30 kubectl -n "$app" get secret shelf-registry || die "the login was not copied into namespace $app"
+kubectl -n "$app" get deploy cloudflared >/dev/null 2>&1 && die "an app without a tunnel runs cloudflared"
 
 step "the app runs with the generated secret and is routed by Traefik"
 kubectl -n "$app" rollout status deploy/web --timeout=60s >/dev/null
@@ -144,6 +150,7 @@ shelf app rm "$app" --yes | tee "$work/rm.txt"
 echo "rm: $((SECONDS - start)) s"
 kubectl get namespace "$app" >/dev/null 2>&1 && die "namespace $app is still there"
 kubectl -n shelf-system get secret "app-$app" >/dev/null 2>&1 && die "secret app-$app is still there"
+kubectl -n shelf-system get secret "registry-$app" >/dev/null 2>&1 && die "secret registry-$app is still there"
 kubectl -n shelf-system get resourcesetinputprovider "$app" >/dev/null 2>&1 && die "the provider is still there"
 [[ -z "$(kubectl get pv -o name)" ]] || die "a persistent volume is left"
 [[ -f "$SHELF_HOME/apps/$app/secrets.yaml" ]] || die "the backup was deleted"

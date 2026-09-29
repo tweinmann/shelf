@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -206,11 +207,11 @@ func TestPlatformObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	objs := ConfigObjects(Settings{Domain: "dev.local", Chart: chart, InsecureRegistry: true})
-	withLogin, err := RegistrySecret(&RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
+	withLogin, err := RegistrySecret("hello", &RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	withoutLogin, err := RegistrySecret(nil)
+	withoutLogin, err := RegistrySecret("empty", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +222,9 @@ func TestPlatformObjects(t *testing.T) {
 	objs = append(objs, withLogin, withoutLogin,
 		AppSecret("hello", map[string]string{"db-password": "not-a-real-password"}),
 		AppSecret("empty", nil),
-		AppProvider(AppOptions{Name: "hello", Artifact: app}))
+		TunnelSecret("hello", []byte(`{"TunnelID":"t-1","TunnelSecret":"not-a-real-secret"}`)),
+		AppProvider(AppOptions{Name: "hello", Artifact: app, Domain: "example.com", TunnelID: "t-1"}),
+		AppProvider(AppOptions{Name: "empty", Artifact: app}))
 
 	var out []byte
 	for _, obj := range objs {
@@ -260,11 +263,11 @@ func TestFailOnAuthError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := failOnAuthError(readyCondition)(tt.obj)
+			_, _, err := failOnAuthError(readyCondition, registryHint("hello"))(tt.obj)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error %v, want error %v", err, tt.wantErr)
 			}
-			if err != nil && !strings.Contains(err.Error(), "shelf init cluster") {
+			if err != nil && !strings.Contains(err.Error(), "shelf app credentials hello --registry-login") {
 				t.Errorf("the error does not say what to do: %v", err)
 			}
 		})
@@ -281,7 +284,6 @@ func TestSettingsRoundTrip(t *testing.T) {
 	want := Settings{
 		Domain:           "example.com",
 		HostSuffix:       "-dev",
-		TunnelTarget:     "abc-123.cfargotunnel.com",
 		Chart:            chart,
 		InsecureRegistry: true,
 	}
@@ -300,29 +302,39 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOldHostWarning(t *testing.T) {
+// TestMovingApps pins which apps a change of the cluster settings renames: an app with a domain
+// of its own keeps it when the cluster's domain changes, but not when the suffix does, and only
+// an exposed app leaves a record behind.
+func TestMovingApps(t *testing.T) {
 	dev := Settings{Domain: "example.com", HostSuffix: "-dev"}
-	apps := []string{"greeter", "shop"}
+	apps := []AppState{
+		{Name: "greeter", Tunnel: "t-1"},
+		{Name: "shop"},
+		{Name: "blog", Domain: "blog.example", Tunnel: "t-2"},
+	}
 	tests := []struct {
-		name   string
-		before Settings
-		after  Settings
-		apps   []string
-		want   []string
+		name     string
+		before   Settings
+		after    Settings
+		apps     []AppState
+		want     []string
+		wantText []string
 	}{
 		{
-			name:   "domain changed",
-			before: dev,
-			after:  Settings{Domain: "other.example", HostSuffix: "-dev"},
-			apps:   apps,
-			want:   []string{"greeter-dev.example.com", "shop-dev.example.com", "<app>-dev.other.example"},
+			name:     "domain changed",
+			before:   dev,
+			after:    Settings{Domain: "other.example", HostSuffix: "-dev"},
+			apps:     apps,
+			want:     []string{"greeter", "shop"},
+			wantText: []string{"greeter-dev.example.com (now greeter-dev.other.example)"},
 		},
 		{
-			name:   "suffix removed",
-			before: dev,
-			after:  Settings{Domain: "example.com"},
-			apps:   []string{"greeter"},
-			want:   []string{"greeter-dev.example.com"},
+			name:     "suffix removed",
+			before:   dev,
+			after:    Settings{Domain: "example.com"},
+			apps:     apps,
+			want:     []string{"greeter", "shop", "blog"},
+			wantText: []string{"greeter-dev.example.com", "blog-dev.blog.example (now blog.blog.example)"},
 		},
 		{name: "nothing changed", before: dev, after: dev, apps: apps},
 		{name: "no apps yet", before: dev, after: Settings{Domain: "other.example"}},
@@ -330,17 +342,28 @@ func TestOldHostWarning(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := OldHostWarning(tt.before, tt.after, tt.apps)
-			if len(tt.want) == 0 {
-				if got != "" {
-					t.Fatalf("unexpected warning:\n%s", got)
+			moves := MovingApps(tt.before, tt.after, tt.apps)
+			var got []string
+			for _, m := range moves {
+				got = append(got, m.App)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("moving %v, want %v", got, tt.want)
+			}
+			text := OldHostWarning(moves)
+			if len(tt.wantText) == 0 {
+				if text != "" {
+					t.Fatalf("unexpected warning:\n%s", text)
 				}
 				return
 			}
-			for _, want := range tt.want {
-				if !strings.Contains(got, want) {
-					t.Errorf("warning lacks %q:\n%s", want, got)
+			for _, want := range tt.wantText {
+				if !strings.Contains(text, want) {
+					t.Errorf("warning lacks %q:\n%s", want, text)
 				}
+			}
+			if strings.Contains(text, "shop") {
+				t.Errorf("shop is not exposed and has no record to leave behind:\n%s", text)
 			}
 		})
 	}

@@ -137,28 +137,24 @@ func TestInitClusterSettings(t *testing.T) {
 	base := []string{"init", "cluster", "--yes"}
 
 	tests := []struct {
-		name      string
-		args      []string
-		user      string
-		token     string
-		wantErr   string
-		wantLogin string
-		wantOut   string
+		name    string
+		args    []string
+		wantErr string
+		wantOut string
 	}{
 		{name: "no domain", wantErr: "--domain"},
 		{name: "invalid domain", args: []string{"--domain", "Not A Domain"}, wantErr: "--domain"},
 		{name: "invalid suffix", args: []string{"--domain", "example.com", "--host-suffix", "-a_b"}, wantErr: "--host-suffix"},
 		{name: "invalid chart", args: []string{"--domain", "example.com", "--chart", "oci://x"}, wantErr: "--chart"},
-		{name: "token without user", args: []string{"--domain", "example.com"}, token: "secret-token", wantErr: "GHCR_USERNAME"},
-		{name: "login", args: []string{"--domain", "example.com"}, user: "tobi", token: "secret-token",
-			wantLogin: "tobi", wantOut: "registry  ghcr.io as tobi"},
-		{name: "no login", args: []string{"--domain", "example.com"}, wantOut: "login unchanged"},
+		{name: "valid", args: []string{"--domain", "example.com", "--host-suffix", "-dev"},
+			wantOut: "hosts     <app>-dev.example.com"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
-			h.env[envRegistryUser], h.env[envRegistryToken] = tt.user, tt.token
+			// A registry login belongs to an app now; one left in the shell is not read.
+			h.env[envRegistryUser], h.env[envRegistryToken] = "tobi", "secret-token"
 			stdout, stderr, code := h.run(t, append(append([]string{}, base...), tt.args...)...)
 			if strings.Contains(stdout+stderr, "secret-token") {
 				t.Fatal("the token appears in the output")
@@ -175,54 +171,60 @@ func TestInitClusterSettings(t *testing.T) {
 			if !strings.Contains(stdout, tt.wantOut) {
 				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
 			}
-			auth := h.cluster.installed[0].Registry
-			switch {
-			case tt.wantLogin == "" && auth != nil:
-				t.Errorf("unexpected login %+v", auth.Username)
-			case tt.wantLogin != "" && (auth == nil || auth.Username != tt.wantLogin || auth.Token != tt.token):
-				t.Errorf("login not passed on")
-			}
 		})
 	}
 }
 
 // TestInitClusterRefusesToMoveTheApps covers the mistake this guard exists for: a second
-// `init cluster` with a different domain takes every app off the name it answers under, and the
-// DNS records under the old names stay behind pointing at a tunnel that no longer routes them.
+// `init cluster` with a different domain takes apps off the name they answer under, and the DNS
+// records under the old names stay behind pointing at a tunnel that no longer routes them.
 func TestInitClusterRefusesToMoveTheApps(t *testing.T) {
 	t.Parallel()
-	exposed := cluster.Settings{Domain: "tobile.ch", HostSuffix: "-dev", TunnelTarget: "t-1.cfargotunnel.com"}
+	settings := cluster.Settings{Domain: "tobile.ch", HostSuffix: "-dev"}
+	greeter := cluster.AppState{Name: "greeter", Tunnel: "t-1"}
+	shop := cluster.AppState{Name: "shop"}
+	blog := cluster.AppState{Name: "blog", Domain: "blog.example", Tunnel: "t-2"}
 	tests := []struct {
 		name     string
 		settings cluster.Settings
-		apps     []string
+		apps     []cluster.AppState
 		args     []string
 		wantErr  string
 	}{
 		{
-			name: "a different domain while apps run", settings: exposed, apps: []string{"greeter"},
-			args:    []string{"--domain", "dev.local"},
-			wantErr: "this cluster serves <app>-dev.tobile.ch; changing it to <app>.dev.local moves app greeter",
+			name: "a different domain while apps run", settings: settings, apps: []cluster.AppState{greeter},
+			args: []string{"--domain", "dev.local"},
+			wantErr: "this cluster serves <app>-dev.tobile.ch; changing it to <app>.dev.local moves app greeter, " +
+				"and the records under the old names stay behind",
 		},
 		{
-			name: "a different host suffix while apps run", settings: exposed, apps: []string{"greeter", "shop"},
-			args:    []string{"--domain", "tobile.ch"},
-			wantErr: "moves apps greeter and shop",
+			name: "a different host suffix while apps run", settings: settings,
+			apps: []cluster.AppState{greeter, shop, blog},
+			args: []string{"--domain", "tobile.ch"}, wantErr: "moves 3 apps",
 		},
 		{
-			name: "asked for it", settings: exposed, apps: []string{"greeter"},
+			name: "only apps on the cluster's domain move", settings: settings,
+			apps: []cluster.AppState{shop, blog},
+			args: []string{"--domain", "other.example", "--host-suffix", "-dev"}, wantErr: "moves app shop.",
+		},
+		{
+			name: "an app with a domain of its own stays", settings: settings, apps: []cluster.AppState{blog},
+			args: []string{"--domain", "other.example", "--host-suffix", "-dev"},
+		},
+		{
+			name: "asked for it", settings: settings, apps: []cluster.AppState{greeter},
 			args: []string{"--domain", "dev.local", "--move-hosts"},
 		},
 		{
-			name: "the same names", settings: exposed, apps: []string{"greeter"},
+			name: "the same names", settings: settings, apps: []cluster.AppState{greeter},
 			args: []string{"--domain", "tobile.ch", "--host-suffix", "-dev"},
 		},
 		{
-			name: "no apps to move", settings: exposed,
+			name: "no apps to move", settings: settings,
 			args: []string{"--domain", "dev.local"},
 		},
 		{
-			name: "a cluster without a domain", apps: []string{"greeter"},
+			name: "a cluster without a domain", apps: []cluster.AppState{greeter},
 			args: []string{"--domain", "dev.local"},
 		},
 	}
@@ -231,7 +233,7 @@ func TestInitClusterRefusesToMoveTheApps(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
 			h.cluster.settings = tt.settings
-			h.cluster.apps = tt.apps
+			h.cluster.states = tt.apps
 			args := append([]string{"init", "cluster", "--yes"}, tt.args...)
 			_, stderr, code := h.run(t, args...)
 

@@ -77,6 +77,13 @@ type AppState struct {
 	Name     string   `json:"name"`
 	Artifact Artifact `json:"artifact"`
 	Insecure bool     `json:"insecure,omitempty"`
+	// Domain is the app's own domain, empty when it answers under the cluster's.
+	Domain string `json:"domain,omitempty"`
+	// Tunnel is the app's Cloudflare tunnel, empty when the app is not exposed.
+	Tunnel string `json:"tunnel,omitempty"`
+	// RegistryUser is who the app's registry login belongs to, empty without a login. The
+	// token is never part of the state.
+	RegistryUser string `json:"registryUser,omitempty"`
 	// Revision is the deploy artifact that is applied, e.g. main@sha256:1f4e….
 	Revision string `json:"revision,omitempty"`
 	// Deployed is when the release last changed.
@@ -91,6 +98,7 @@ type AppState struct {
 // appObjects are the objects that carry one app.
 type appObjects struct {
 	provider      *unstructured.Unstructured
+	registry      *unstructured.Unstructured
 	source        *unstructured.Unstructured
 	kustomization *unstructured.Unstructured
 	chart         *unstructured.Unstructured
@@ -144,6 +152,15 @@ func (c *client) appObjects(ctx context.Context) (map[string]*appObjects, error)
 	apps := map[string]*appObjects{}
 	for _, p := range providers {
 		apps[p.GetName()] = &appObjects{provider: p}
+	}
+	secrets, err := c.list(ctx, secretGVK, SystemNamespace, AppLabel)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range secrets {
+		if app, ok := apps[s.GetLabels()[AppLabel]]; ok && s.GetName() == RegistrySecretName(s.GetLabels()[AppLabel]) {
+			app.registry = s
+		}
 	}
 	sources, err := c.list(ctx, ociRepositoryGVK, "", "")
 	if err != nil {
@@ -210,13 +227,29 @@ func (c *client) list(ctx context.Context, gvk schema.GroupVersionKind, namespac
 	return out, nil
 }
 
-func appState(name string, o *appObjects) AppState {
-	state := AppState{Name: name}
-	values, _, _ := unstructured.NestedMap(o.provider.Object, "spec", "defaultValues")
+// providerState is what the provider of an app says about it: how it is registered, but not
+// how it is doing.
+func providerState(provider *unstructured.Unstructured) AppState {
+	state := AppState{Name: provider.GetName()}
+	values, _, _ := unstructured.NestedMap(provider.Object, "spec", "defaultValues")
 	url, _ := values["url"].(string)
 	tag, _ := values["tag"].(string)
 	state.Artifact = Artifact{URL: url, Tag: tag}
 	state.Insecure, _ = values["insecure"].(bool)
+	state.Domain, _ = values["domain"].(string)
+	state.Tunnel, _ = values["tunnel"].(string)
+	return state
+}
+
+func appState(name string, o *appObjects) AppState {
+	state := providerState(o.provider)
+	state.Name = name
+	if o.registry != nil {
+		// A Secret that cannot be read shows as no login; the diagnosis says what fails.
+		if login, err := registryLogin(o.registry); err == nil && login != nil {
+			state.RegistryUser = login.Username
+		}
+	}
 	if o.source != nil {
 		state.Revision, _, _ = unstructured.NestedString(o.source.Object, "status", "artifact", "revision")
 	}
@@ -288,11 +321,13 @@ func fluxStage(name, object string, obj *unstructured.Unstructured, missing, fai
 	default:
 		s.Phase = PhaseFailed
 		s.Hint = failedHint
-		// Only a registry can refuse a login. The same words from the step that applies the
-		// artifact mean the opposite: the cluster refused what the artifact asked for.
-		if strings.HasPrefix(s.Object, "OCIRepository") && authProblem.MatchString(s.Message) {
-			s.Hint = "the cluster's registry login was refused; store a working one with " +
-				"`shelf init cluster`"
+		// Only a registry can refuse a login, and only the deploy artifact is read with the
+		// app's. The same words from the step that applies the artifact mean the opposite: the
+		// cluster refused what the artifact asked for.
+		if app, found := strings.CutPrefix(s.Object, "OCIRepository "); found && authProblem.MatchString(s.Message) {
+			if app, found = strings.CutSuffix(app, "/"+deployName); found {
+				s.Hint = "the registry refused to hand out the deploy artifact; " + registryHint(app)
+			}
 		}
 	}
 	return s

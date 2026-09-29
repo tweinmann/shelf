@@ -4,8 +4,8 @@
 #
 # Usage: hack/smoke/tenant.sh <app> oci://ghcr.io/<owner>/<app>:main
 # GHCR_USERNAME and GHCR_TOKEN (classic PAT, read:packages) are read from the environment, or
-# prompted for. They are stored in the cluster by shelf init cluster, and used by docker login
-# so that shelf app add can read the artifact.
+# prompted for. shelf app add --registry-login stores them as the app's own login, which is also
+# what shelf reads the artifact with.
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
@@ -44,24 +44,22 @@ cleanup() {
 trap cleanup EXIT
 step() { echo "--- $*"; }
 
-step "build shelf, push platform and chart, init cluster with the GHCR login"
+step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
 shelf init cluster --yes --domain dev.local --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
-  --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" | grep -E 'registry|Platform'
-# A Docker config just for this run, so shelf can read the artifact. It never touches the
-# personal ~/.docker/config.json, and it needs no Docker daemon.
+  --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" | grep -E 'Platform'
+# No Docker config at all: shelf has to read the artifact with the app's own login.
 export DOCKER_CONFIG="$work/docker"
 mkdir -p "$DOCKER_CONFIG"
-touch "$DOCKER_CONFIG/config.json"
-chmod 600 "$DOCKER_CONFIG/config.json"
-printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' \
-  "$(printf '%s:%s' "$GHCR_USERNAME" "$GHCR_TOKEN" | base64 -w0)" >"$DOCKER_CONFIG/config.json"
 
-step "shelf app add"
-shelf app add "$app" "$artifact"
+step "shelf app add --registry-login"
+shelf app add "$app" "$artifact" --registry-login | tee "$work/add.txt"
+grep -q "^registry login: $GHCR_USERNAME for ghcr.io$" "$work/add.txt" || die "the login was not stored"
+grep -qF "$GHCR_TOKEN" "$work/add.txt" && die "the token appears in the output"
+kubectl -n shelf-system get secret "registry-$app" >/dev/null || die "the app has no login of its own"
 
 kubectl -n traefik port-forward svc/traefik 18083:80 >/dev/null 2>&1 &
 pf_pid=$!

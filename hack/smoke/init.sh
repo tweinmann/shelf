@@ -77,8 +77,8 @@ grep -q '(FluxInstance flux-system/flux): unchanged$' "$work/second.txt" \
   || die "the second run did not report the FluxInstance as unchanged"
 grep -q '^ConfigMap flux-system/shelf-config: unchanged$' "$work/second.txt" \
   || die "the second run did not report the settings as unchanged"
-grep -q '^Secret shelf-system/registry: kept' "$work/second.txt" \
-  || die "the second run did not keep the registry login"
+kubectl -n shelf-system get secret registry >/dev/null 2>&1 \
+  && die "a registry login shared by all apps exists; logins belong to each app"
 
 step "a new platform artifact under the same tag is applied at once"
 digest="$("$repo/hack/platform-push.sh" 2>&1 | sed -n 's/.*pushed to .*@\(sha256:[0-9a-f]*\).*/\1/p')"

@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -91,7 +93,7 @@ func TestDiagnose(t *testing.T) {
 			wantPhase:   PhaseFailed,
 			wantStage:   "the deploy artifact",
 			wantMessage: "unauthorized: denied",
-			wantHint:    "the cluster's registry login was refused; store a working one with `shelf init cluster`",
+			wantHint:    "the registry refused to hand out the deploy artifact; give the app a login that may read it with `shelf app credentials shop --registry-login`; it is kept in the Secret shelf-system/registry-shop",
 		},
 		{
 			name:      "the controller is still working",
@@ -236,14 +238,30 @@ func TestAppState(t *testing.T) {
 	objects.provider = &unstructured.Unstructured{Object: map[string]any{
 		"spec": map[string]any{"defaultValues": map[string]any{
 			"name": "shop", "url": "oci://ghcr.io/o/shop", "tag": "main", "insecure": true,
+			"domain": "shop.example", "tunnel": "t-1",
 		}},
 	}}
+	registry, err := RegistrySecret("shop", &RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects.registry = registry
 	_ = unstructured.SetNestedMap(objects.source.Object,
 		map[string]any{"revision": "main@sha256:abc"}, "status", "artifact")
 
 	state := appState("shop", objects)
 	if state.Name != "shop" || state.Artifact.String() != "oci://ghcr.io/o/shop:main" || !state.Insecure {
 		t.Errorf("state %+v", state)
+	}
+	if state.Domain != "shop.example" || state.Tunnel != "t-1" || state.RegistryUser != "tobi" {
+		t.Errorf("registration %+v", state)
+	}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "not-a-real-token") {
+		t.Errorf("the token is part of the state: %s", encoded)
 	}
 	if state.Revision != "main@sha256:abc" {
 		t.Errorf("revision %q", state.Revision)

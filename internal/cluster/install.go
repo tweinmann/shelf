@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -19,9 +20,6 @@ import (
 type Options struct {
 	Platform Artifact
 	Settings Settings
-	// Registry replaces the stored registry credential when set. When nil, an existing
-	// credential is kept, and an empty one is created if there is none.
-	Registry *RegistryAuth
 	// Timeout bounds the whole installation, including all waits.
 	Timeout time.Duration
 	// Report receives what happens; nil reports nothing.
@@ -88,10 +86,6 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if settings.TunnelTarget == "" {
-		// `shelf init expose` writes the tunnel target; a later `init cluster` keeps it.
-		settings.TunnelTarget = current.TunnelTarget
-	}
 	if err := c.warnAboutOldHosts(ctx, rep, current, settings); err != nil {
 		return err
 	}
@@ -100,7 +94,8 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 			return err
 		}
 	}
-	if err := c.ensureRegistrySecret(ctx, rep, opts.Registry); err != nil {
+	// Before the platform that expects a login per app is applied.
+	if err := c.migrateSharedCredentials(ctx, rep); err != nil {
 		return err
 	}
 
@@ -123,46 +118,103 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	})
 }
 
-// ensureRegistrySecret writes the registry credential if one is given or none exists yet. It
-// never prints the credential.
-func (c *client) ensureRegistrySecret(ctx context.Context, rep progress.Reporter, auth *RegistryAuth) error {
-	secret, err := RegistrySecret(auth)
+// The objects through which, until Phase 8b, one registry login and one tunnel served every app.
+const (
+	sharedRegistrySecret = "registry"
+	sharedTunnelSecret   = "tunnel"
+	sharedExposeProvider = "expose"
+)
+
+// migrateSharedCredentials takes a cluster from one set of credentials for all apps to one per
+// app. The shared registry login becomes the login of every app that has none of its own, so the
+// apps keep pulling. The shared tunnel cannot move: it belongs to a Cloudflare account whose token
+// shelf never stored, so it is switched off, and the apps have to be exposed again one by one.
+func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Reporter) error {
+	providers, err := c.list(ctx, providerGVK, SystemNamespace, AppLabel)
 	if err != nil {
 		return err
 	}
-	if auth == nil {
-		existing, err := c.get(ctx, refOf(secret))
+	apps := make([]string, 0, len(providers))
+	for _, p := range providers {
+		apps = append(apps, p.GetName())
+		// The platform refers to every input, so an app registered before the inputs existed
+		// gets them, empty: the cluster's domain and no tunnel.
+		values, _, _ := unstructured.NestedMap(p.Object, "spec", "defaultValues")
+		_, hasDomain := values["domain"]
+		_, hasTunnel := values["tunnel"]
+		if hasDomain && hasTunnel {
+			continue
+		}
+		state := providerState(p)
+		if err := c.applyReport(ctx, rep, AppProvider(AppOptions{
+			Name: state.Name, Artifact: state.Artifact, Insecure: state.Insecure,
+		})); err != nil {
+			return err
+		}
+	}
+	shared, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: sharedRegistrySecret})
+	if err != nil {
+		return err
+	}
+	if shared != nil {
+		login, err := registryLogin(shared)
 		if err != nil {
 			return err
 		}
-		if existing != nil {
-			rep.Report(progress.Applied(describe(secret), "kept (no GHCR_TOKEN given)", ""))
-			return nil
+		for _, app := range apps {
+			existing, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: RegistrySecretName(app)})
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				continue
+			}
+			secret, err := RegistrySecret(app, login)
+			if err != nil {
+				return err
+			}
+			action, err := c.apply(ctx, secret)
+			if err != nil {
+				return err
+			}
+			rep.Report(progress.Applied(describe(secret), string(action), "from the login all apps used to share"))
+		}
+		if err := c.deleteReport(ctx, rep, refOf(shared)); err != nil {
+			return err
 		}
 	}
-	action, err := c.apply(ctx, secret)
+
+	provider := ref{gvk: providerGVK, namespace: SystemNamespace, name: sharedExposeProvider}
+	exposed, err := c.get(ctx, provider)
 	if err != nil {
 		return err
 	}
-	login := "without a login"
-	if auth != nil {
-		login = "for " + auth.Username + "@" + RegistryHost
+	if exposed != nil {
+		if err := c.deleteReport(ctx, rep, provider); err != nil {
+			return err
+		}
+		rep.Report(progress.Warning("The tunnel all apps used to share is switched off; every app now has a tunnel of its own.\n" +
+			"Expose each app again with `shelf app credentials <app> --cloudflare`. The old tunnel and the\n" +
+			"DNS records that point at it stay in Cloudflare; delete them there.\n"))
 	}
-	rep.Report(progress.Applied(describe(secret), string(action), login))
-	return nil
+	return c.deleteReport(ctx, rep, ref{gvk: secretGVK, namespace: SystemNamespace, name: sharedTunnelSecret})
 }
 
-// warnAboutOldHosts points out the DNS records an app keeps under its previous name when the
+// warnAboutOldHosts points out the DNS records apps keep under their previous name when the
 // domain or the host suffix changes.
 func (c *client) warnAboutOldHosts(ctx context.Context, rep progress.Reporter, before, after Settings) error {
 	if !hostsChange(before, after) {
 		return nil
 	}
-	apps, err := c.appNames(ctx)
+	providers, err := c.list(ctx, providerGVK, SystemNamespace, AppLabel)
 	if err != nil {
 		return err
 	}
-	if warning := OldHostWarning(before, after, apps); warning != "" {
+	apps := make([]AppState, 0, len(providers))
+	for _, p := range providers {
+		apps = append(apps, providerState(p))
+	}
+	if warning := OldHostWarning(MovingApps(before, after, apps)); warning != "" {
 		rep.Report(progress.Warning(warning))
 	}
 	return nil
@@ -178,18 +230,46 @@ func hostsChange(before, after Settings) bool {
 	return before.Domain != "" && (before.Domain != after.Domain || before.HostSuffix != after.HostSuffix)
 }
 
-// OldHostWarning names the DNS records the apps keep under their previous host names. shelf
-// only knows the current names, so it cannot remove those records by itself.
-func OldHostWarning(before, after Settings, apps []string) string {
-	if !hostsChange(before, after) || len(apps) == 0 {
-		return ""
+// HostMove is an app that answers under a different name after the cluster settings change.
+type HostMove struct {
+	App  string
+	From string
+	To   string
+	// Exposed means the old name has a DNS record, which stays behind.
+	Exposed bool
+}
+
+// MovingApps returns the apps a change of the cluster settings gives a different host name: all
+// of them when the host suffix changes, and those without a domain of their own when the
+// cluster's domain does.
+func MovingApps(before, after Settings, apps []AppState) []HostMove {
+	if !hostsChange(before, after) {
+		return nil
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "The apps move from %s to %s.\n",
-		"<app>"+before.HostSuffix+"."+before.Domain, "<app>"+after.HostSuffix+"."+after.Domain)
-	fmt.Fprintln(&b, "Their records under the old name stay behind; delete them in Cloudflare:")
+	var moves []HostMove
 	for _, app := range apps {
-		fmt.Fprintf(&b, "  %s%s.%s\n", app, before.HostSuffix, before.Domain)
+		from := app.Name + before.HostSuffix + "." + cmp.Or(app.Domain, before.Domain)
+		to := app.Name + after.HostSuffix + "." + cmp.Or(app.Domain, after.Domain)
+		if from != to {
+			moves = append(moves, HostMove{App: app.Name, From: from, To: to, Exposed: app.Tunnel != ""})
+		}
+	}
+	return moves
+}
+
+// OldHostWarning names the DNS records the moved apps keep under their previous host names.
+// shelf only knows the current names, so it cannot remove those records by itself.
+func OldHostWarning(moves []HostMove) string {
+	var b strings.Builder
+	for _, m := range moves {
+		if !m.Exposed {
+			continue
+		}
+		if b.Len() == 0 {
+			fmt.Fprintln(&b, "These apps move to a different name. Their records under the old name stay behind;")
+			fmt.Fprintln(&b, "delete them in Cloudflare:")
+		}
+		fmt.Fprintf(&b, "  %s (now %s)\n", m.From, m.To)
 	}
 	return b.String()
 }
@@ -250,7 +330,8 @@ func (c *client) waitForPlatform(ctx context.Context, p Artifact) (string, error
 	if err != nil {
 		return "", err
 	}
-	obj, err := c.reconcileAndWait(ctx, repo, failOnAuthError(readyCondition))
+	obj, err := c.reconcileAndWait(ctx, repo, failOnAuthError(readyCondition,
+		"the platform artifact is read without a login, so it has to be public"))
 	if err != nil {
 		return "", err
 	}

@@ -61,11 +61,9 @@ func appList(apps []string) string {
 type InitPlan struct {
 	Platform cluster.Artifact
 	Chart    cluster.Artifact
-	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com.
+	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com, unless they
+	// have a domain of their own.
 	Hosts string
-	// Registry is the login that will be stored, such as "ghcr.io as tobi". It is empty when
-	// the login already in the cluster is kept.
-	Registry string
 }
 
 // CheckDomain rejects a domain that cannot carry host names. The message has no leading field
@@ -115,15 +113,11 @@ func PublicDomain(domain string) bool {
 
 // PlanCluster describes what InitCluster would install.
 func (o *Ops) PlanCluster(opts InitOptions) InitPlan {
-	plan := InitPlan{
+	return InitPlan{
 		Platform: opts.Platform,
 		Chart:    opts.Chart,
 		Hosts:    Hosts(opts.Domain, opts.HostSuffix),
 	}
-	if o.Env.Registry != nil {
-		plan.Registry = cluster.RegistryHost + " as " + o.Env.Registry.Username
-	}
-	return plan
 }
 
 // InitCluster installs Flux and the platform and waits until everything is ready.
@@ -133,21 +127,19 @@ func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Re
 	}
 	return o.Cluster.Install(ctx, o.config(), cluster.Options{
 		Platform: opts.Platform,
-		// The tunnel target is written by Expose and kept as it is here.
 		Settings: cluster.Settings{
 			Domain:           opts.Domain,
 			HostSuffix:       opts.HostSuffix,
 			Chart:            opts.Chart,
 			InsecureRegistry: opts.Insecure,
 		},
-		Registry: o.Env.Registry,
-		Timeout:  opts.Timeout,
-		Report:   rep,
+		Timeout: opts.Timeout,
+		Report:  rep,
 	})
 }
 
-// checkHostsStay refuses an installation that would move every app to a different name, unless
-// it was asked for. A cluster that is already serving apps is not the place to find out that a
+// checkHostsStay refuses an installation that would move apps to a different name, unless it
+// was asked for. A new host suffix moves every app, a new domain those without one of their own. A cluster that is already serving apps is not the place to find out that a
 // flag was forgotten: the platform reconciles within the minute, and from then on requests for
 // the old names reach Traefik and get a 404.
 func (o *Ops) checkHostsStay(ctx context.Context, opts InitOptions) error {
@@ -162,17 +154,21 @@ func (o *Ops) checkHostsStay(ctx context.Context, opts InitOptions) error {
 	if !cluster.HostsChange(before, after) {
 		return nil
 	}
-	apps, err := o.Cluster.AppNames(ctx, o.config())
+	states, err := o.Cluster.AppStates(ctx, o.config())
 	if err != nil {
 		return err
 	}
-	if len(apps) == 0 {
+	moves := cluster.MovingApps(before, after, states)
+	if len(moves) == 0 {
 		return nil
 	}
-	return &HostsMoveError{
-		From:           Hosts(before.Domain, before.HostSuffix),
-		To:             Hosts(opts.Domain, opts.HostSuffix),
-		Apps:           apps,
-		StrandsRecords: before.TunnelTarget != "" && PublicDomain(before.Domain),
+	e := &HostsMoveError{
+		From: Hosts(before.Domain, before.HostSuffix),
+		To:   Hosts(opts.Domain, opts.HostSuffix),
 	}
+	for _, m := range moves {
+		e.Apps = append(e.Apps, m.App)
+		e.StrandsRecords = e.StrandsRecords || (m.Exposed && PublicDomain(domainOf(m.From)))
+	}
+	return e
 }

@@ -13,7 +13,6 @@ data:
   SHELF_DOMAIN: dev.local
   SHELF_HOST_SUFFIX: ""
   SHELF_INSECURE_REGISTRY: "true"
-  SHELF_TUNNEL_TARGET: ""
 kind: ConfigMap
 metadata:
   name: shelf-config
@@ -26,7 +25,8 @@ kind: Secret
 metadata:
   labels:
     reconcile.fluxcd.io/watch: Enabled
-  name: registry
+    shelf.dev/app: hello
+  name: registry-hello
   namespace: shelf-system
 type: kubernetes.io/dockerconfigjson
 ---
@@ -37,7 +37,8 @@ kind: Secret
 metadata:
   labels:
     reconcile.fluxcd.io/watch: Enabled
-  name: registry
+    shelf.dev/app: empty
+  name: registry-empty
   namespace: shelf-system
 type: kubernetes.io/dockerconfigjson
 ---
@@ -64,6 +65,18 @@ metadata:
   namespace: shelf-system
 type: Opaque
 ---
+apiVersion: v1
+data:
+  credentials.json: eyJUdW5uZWxJRCI6InQtMSIsIlR1bm5lbFNlY3JldCI6Im5vdC1hLXJlYWwtc2VjcmV0In0=
+kind: Secret
+metadata:
+  labels:
+    reconcile.fluxcd.io/watch: Enabled
+    shelf.dev/app: hello
+  name: tunnel-hello
+  namespace: shelf-system
+type: Opaque
+---
 apiVersion: fluxcd.controlplane.io/v1
 kind: ResourceSetInputProvider
 metadata:
@@ -73,8 +86,27 @@ metadata:
   namespace: shelf-system
 spec:
   defaultValues:
+    domain: example.com
     insecure: false
     name: hello
     tag: main
+    tunnel: t-1
+    url: oci://ghcr.io/tweinmann/hello-deploy
+  type: Static
+---
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  labels:
+    shelf.dev/app: empty
+  name: empty
+  namespace: shelf-system
+spec:
+  defaultValues:
+    domain: ""
+    insecure: false
+    name: empty
+    tag: main
+    tunnel: ""
     url: oci://ghcr.io/tweinmann/hello-deploy
   type: Static

@@ -36,7 +36,7 @@
 
 <section class="card">
 <dl class="facts">
-<dt>Address</dt><dd><a href="https://shop-dev.example.com/">shop-dev.example.com</a></dd>
+<dt>Address</dt><dd><a href="https://shop-dev.shop.ch/">shop-dev.shop.ch</a></dd>
 
 <dt>Artifact</dt><dd>oci://ghcr.io/tweinmann/shop:no-such-tag</dd>
 <dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span></dd>
@@ -54,7 +54,7 @@ pipeline publish a new artifact.</p>
 
 <li>
 <div class="app-head"><span class="name">web</span><span class="pill Ready">Ready</span></div>
-<p class="address"><a href="https://shop-dev.example.com/">https://shop-dev.example.com/</a></p>
+<p class="address"><a href="https://shop-dev.shop.ch/">https://shop-dev.shop.ch/</a></p>
 </li>
 
 </ul>
@@ -83,6 +83,43 @@ you come forward again.</p>
 <button type="submit" class="secondary">Deploy again</button>
 </form>
 <p class="muted">Fetches the same tag once more, for when it was moved or something failed.</p>
+</section>
+
+<section class="card">
+<h2>Access</h2>
+<dl class="facts">
+<dt>Domain</dt><dd>shop.ch</dd>
+<dt>Registry</dt><dd><span class="muted">no login</span></dd>
+<dt>Internet</dt><dd>its own tunnel <span class="muted">this machine does not hold the Cloudflare access</span></dd>
+</dl>
+<form method="post" action="/apps/shop/access">
+<input type="hidden" name="csrf" value="CSRF">
+<fieldset>
+<legend>Domain</legend>
+<label for="domain">A domain of its own</label>
+<input id="domain" name="domain" placeholder="shop.ch">
+</fieldset>
+<fieldset>
+<legend>Registry login</legend>
+<label for="registry-user">GitHub user</label>
+<input id="registry-user" name="registry-user" autocomplete="off">
+<label for="registry-token">Token</label>
+<input id="registry-token" name="registry-token" type="password" autocomplete="new-password">
+
+</fieldset>
+<fieldset>
+<legend>Internet</legend>
+<label for="cloudflare-token">Cloudflare API token</label>
+<input id="cloudflare-token" name="cloudflare-token" type="password" autocomplete="new-password">
+<label for="cloudflare-account">Cloudflare account ID</label>
+<input id="cloudflare-account" name="cloudflare-account" autocomplete="off">
+<label class="check"><input type="checkbox" name="remove-cloudflare"> Take it off the internet</label>
+</fieldset>
+<button type="submit" class="secondary">Change the access</button>
+</form>
+<p class="muted">Empty fields keep what the app has, and no token is shown again. A new domain or a
+new Cloudflare account moves the app's record, and its tunnel with it; the app is deployed again
+from the artifact above.</p>
 </section>
 
 <section class="card">
