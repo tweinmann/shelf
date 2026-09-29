@@ -180,6 +180,16 @@ connections the apps choose:
 | How it is given | **`shelf connection add registry|cloudflare <name>`** reads `GHCR_USERNAME`/`GHCR_TOKEN` or `CF_API_TOKEN`/`CF_ACCOUNT_ID`; `shelf connection list` and `rm` go with it. `shelf app add` and `shelf app credentials` take `--registry <name>`, `--cloudflare <name>` and `--domain`, and `credentials` also `--no-registry` and `--no-cloudflare`; they read no tokens at all. In the admin UI connections are defined **only on the page `/connections`**, the one page with token fields; the add form and the app page offer them as a choice. A token is never rendered, not even back into a form that was refused. |
 | Phase | **A phase of its own, 8b**, before the Mac mini. Phase 8 is accepted as it was. |
 
+Tried and reverted on 2026-09-29: **app.yaml without a name** (the short-lived Phase 8c). shelf
+named an app only at `shelf app add`, so one artifact could run as several apps, and the reusable
+workflow named the packages after the repository (input `package`). It was released as v0.3.0 and
+reverted the same day at the maintainer's request: `name` is required in app.yaml again, it names
+the packages (`ghcr.io/<owner>/<app>`, `…/<app>/<component>`), and `shelf app add` refuses an
+artifact for another app, as before. What stayed is a fix to `release.yml` that the release
+exposed: the release became "latest" at once, the major tag moved a minute later, and a tenant
+build in between ran the old workflow with the new binary. The release is now created with
+`--latest=false` and marked latest right after the major tag moves.
+
 ## Validated assumptions
 
 These close three of the four original spikes:
