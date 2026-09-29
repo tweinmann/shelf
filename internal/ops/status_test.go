@@ -107,18 +107,18 @@ func TestSiblingAddress(t *testing.T) {
 // on any domain, once it has one.
 func TestAppAddress(t *testing.T) {
 	t.Parallel()
-	settings := cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
+	settings := cluster.Settings{HostSuffix: "-dev"}
 	tests := map[string]struct {
 		state    cluster.AppState
 		wantHost string
 		wantURL  string
 	}{
-		"not exposed": {
+		"no domain": {
 			state:    cluster.AppState{Name: "hello"},
-			wantHost: "hello-dev.dev.local",
+			wantHost: "hello.shelf.internal",
 		},
 		"named tunnel on a reserved domain": {
-			state:    cluster.AppState{Name: "hello", Tunnel: "t-1"},
+			state:    cluster.AppState{Name: "hello", Tunnel: "t-1", Domain: "dev.local"},
 			wantHost: "hello-dev.dev.local",
 		},
 		"named tunnel on a public domain": {
@@ -128,7 +128,7 @@ func TestAppAddress(t *testing.T) {
 		},
 		"quick tunnel without an address yet": {
 			state:    cluster.AppState{Name: "hello", Quick: true},
-			wantHost: "hello-dev.dev.local",
+			wantHost: "hello.shelf.internal",
 		},
 		"quick tunnel": {
 			state:    cluster.AppState{Name: "hello", Quick: true, QuickURL: "https://some-words.trycloudflare.com/"},

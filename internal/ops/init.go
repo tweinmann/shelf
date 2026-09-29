@@ -16,13 +16,13 @@ import (
 type InitOptions struct {
 	Platform cluster.Artifact
 	Chart    cluster.Artifact
-	// Domain and HostSuffix decide the host name of every app: <app><suffix>.<domain>.
-	Domain     string
+	// HostSuffix goes into the host name of every app with a domain: <app><suffix>.<domain>.
 	HostSuffix string
 	// Insecure allows a platform and chart registry without TLS.
 	Insecure bool
-	// MoveHosts allows a change that gives every app a different host name. Without it such a
-	// change is refused, because it silently takes every app off the name it answers under.
+	// MoveHosts allows a new host suffix, which gives every app with a domain a different host
+	// name. Without it such a change is refused, because it silently takes those apps off the
+	// name they answer under.
 	MoveHosts bool
 	Timeout   time.Duration
 }
@@ -61,8 +61,7 @@ func appList(apps []string) string {
 type InitPlan struct {
 	Platform cluster.Artifact
 	Chart    cluster.Artifact
-	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com, unless they
-	// have a domain of their own.
+	// Hosts is the pattern the apps with a domain answer under, such as <app>-dev.<domain>.
 	Hosts string
 }
 
@@ -85,8 +84,9 @@ func CheckHostSuffix(suffix string) error {
 	return nil
 }
 
-// Hosts is the pattern the apps of a cluster answer under.
-func Hosts(domain, suffix string) string { return "<app>" + suffix + "." + domain }
+// Hosts is the pattern the apps of a cluster with a domain answer under; an app without one
+// answers at <app>.shelf.internal.
+func Hosts(suffix string) string { return "<app>" + suffix + ".<domain>" }
 
 // reservedSuffixes are the names that cannot exist on the internet: RFC 6762 keeps .local for
 // multicast DNS, RFC 6761 and RFC 8375 reserve the rest for local use. A name under them can
@@ -116,19 +116,29 @@ func (o *Ops) PlanCluster(opts InitOptions) InitPlan {
 	return InitPlan{
 		Platform: opts.Platform,
 		Chart:    opts.Chart,
-		Hosts:    Hosts(opts.Domain, opts.HostSuffix),
+		Hosts:    Hosts(opts.HostSuffix),
 	}
 }
 
-// InitCluster installs Flux and the platform and waits until everything is ready.
+// InitCluster installs Flux and the platform and waits until everything is ready. A cluster
+// from when clusters had a domain gives it to the apps that answered under it, as a domain of
+// their own, if it is a public one: they keep their names and their DNS records.
 func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Reporter) error {
-	if err := o.checkHostsStay(ctx, opts); err != nil {
+	before, err := o.Cluster.Settings(ctx, o.config())
+	if err != nil {
+		return err
+	}
+	pin := ""
+	if PublicDomain(before.LegacyDomain) {
+		pin = before.LegacyDomain
+	}
+	if err := o.checkHostsStay(ctx, opts, before, pin); err != nil {
 		return err
 	}
 	return o.Cluster.Install(ctx, o.config(), cluster.Options{
-		Platform: opts.Platform,
+		Platform:  opts.Platform,
+		PinDomain: pin,
 		Settings: cluster.Settings{
-			Domain:           opts.Domain,
 			HostSuffix:       opts.HostSuffix,
 			Chart:            opts.Chart,
 			InsecureRegistry: opts.Insecure,
@@ -139,18 +149,15 @@ func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Re
 }
 
 // checkHostsStay refuses an installation that would move apps to a different name, unless it
-// was asked for. A new host suffix moves every app, a new domain those without one of their own. A cluster that is already serving apps is not the place to find out that a
-// flag was forgotten: the platform reconciles within the minute, and from then on requests for
-// the old names reach Traefik and get a 404.
-func (o *Ops) checkHostsStay(ctx context.Context, opts InitOptions) error {
+// was asked for. A new host suffix moves every app with a domain, counting the apps that are
+// about to get the cluster's former one. A cluster that is already serving apps is not the place
+// to find out that a flag was forgotten: the platform reconciles within the minute, and from then
+// on requests for the old names reach Traefik and get a 404.
+func (o *Ops) checkHostsStay(ctx context.Context, opts InitOptions, before cluster.Settings, pin string) error {
 	if opts.MoveHosts {
 		return nil
 	}
-	before, err := o.Cluster.Settings(ctx, o.config())
-	if err != nil {
-		return err
-	}
-	after := cluster.Settings{Domain: opts.Domain, HostSuffix: opts.HostSuffix}
+	after := cluster.Settings{HostSuffix: opts.HostSuffix}
 	if !cluster.HostsChange(before, after) {
 		return nil
 	}
@@ -158,13 +165,13 @@ func (o *Ops) checkHostsStay(ctx context.Context, opts InitOptions) error {
 	if err != nil {
 		return err
 	}
-	moves := cluster.MovingApps(before, after, states)
+	moves := cluster.MovingApps(before, after, cluster.PinDomain(states, pin))
 	if len(moves) == 0 {
 		return nil
 	}
 	e := &HostsMoveError{
-		From: Hosts(before.Domain, before.HostSuffix),
-		To:   Hosts(opts.Domain, opts.HostSuffix),
+		From: Hosts(before.HostSuffix),
+		To:   Hosts(opts.HostSuffix),
 	}
 	for _, m := range moves {
 		e.Apps = append(e.Apps, m.App)

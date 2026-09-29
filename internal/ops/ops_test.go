@@ -75,13 +75,18 @@ func TestCheckDomainAndSuffix(t *testing.T) {
 
 func TestHosts(t *testing.T) {
 	t.Parallel()
-	if got := ops.Hosts("example.com", "-dev"); got != "<app>-dev.example.com" {
+	if got := ops.Hosts("-dev"); got != "<app>-dev.<domain>" {
 		t.Errorf("hosts %q", got)
 	}
-	if got := ops.Hosts("example.com", ""); got != "<app>.example.com" {
+	if got := ops.Hosts(""); got != "<app>.<domain>" {
 		t.Errorf("hosts %q", got)
 	}
 	if got := ops.AppHost("greeter", "-dev", "example.com"); got != "greeter-dev.example.com" {
+		t.Errorf("host %q", got)
+	}
+	// Without a domain the app answers inside the cluster, without the suffix, which only
+	// separates public names.
+	if got := ops.AppHost("greeter", "-dev", ""); got != "greeter.shelf.internal" {
 		t.Errorf("host %q", got)
 	}
 	if got := ops.TunnelName("greeter", "-dev"); got != "shelf-dev-greeter" {
@@ -112,18 +117,18 @@ func TestPublicDomain(t *testing.T) {
 }
 
 // TestHostsMoveError checks that the refusal only promises stranded records where records can
-// exist: a development cluster under dev.local has none, whatever else changes.
+// exist: apps under dev.local have none, whatever else changes.
 func TestHostsMoveError(t *testing.T) {
 	t.Parallel()
 	public := &ops.HostsMoveError{
-		From: "<app>-dev.tobile.ch", To: "<app>.dev.local",
+		From: "<app>-dev.<domain>", To: "<app>.<domain>",
 		Apps: []string{"greeter"}, StrandsRecords: true,
 	}
 	if !strings.Contains(public.Error(), "records under the old names stay behind") {
 		t.Errorf("a public name leaves a record behind: %v", public)
 	}
 	local := &ops.HostsMoveError{
-		From: "<app>.dev.local", To: "<app>-dev.tobile.ch", Apps: []string{"greeter", "shop"},
+		From: "<app>.<domain>", To: "<app>-dev.<domain>", Apps: []string{"greeter", "shop"},
 	}
 	if strings.Contains(local.Error(), "records") {
 		t.Errorf("dev.local can have no records: %v", local)

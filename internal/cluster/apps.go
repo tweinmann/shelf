@@ -49,7 +49,8 @@ type AppOptions struct {
 	Artifact Artifact
 	// Insecure allows a deploy artifact registry without TLS.
 	Insecure bool
-	// Domain is the app's own domain; empty means the domain of the cluster.
+	// Domain is the app's own domain; empty means it answers at <app>.shelf.internal, inside the
+	// cluster only.
 	Domain string
 	// Registry is the registry connection the app pulls with; empty means without a login.
 	Registry string
@@ -191,7 +192,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 type AppConfig struct {
 	Artifact Artifact
 	Insecure bool
-	// Domain is the app's own domain, empty when it uses the cluster's.
+	// Domain is the app's own domain, empty when it has none.
 	Domain string
 	// Registry is the app's registry connection, empty when it pulls without a login.
 	Registry string

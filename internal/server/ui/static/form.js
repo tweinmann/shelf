@@ -222,7 +222,7 @@
       const reply = await zones(list("/api/connections/cloudflare/" + encodeURIComponent(source.value) + "/zones"));
       if (!reply) return;
       if (reply.error) return manual(reply.error);
-      const options = [option("", input.dataset.emptyLabel || "the cluster's domain")];
+      const options = [option("", input.dataset.emptyLabel || "no domain")];
       reply.items.forEach((z) => options.push(option(z, z)));
       options.push(option(OTHER, "other domain…"));
       const current = input.value.trim();

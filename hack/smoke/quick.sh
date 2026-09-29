@@ -5,9 +5,9 @@
 # `shelf app status` shows, and --private takes the app off the internet again.
 #
 # Usage: hack/smoke/quick.sh [app]   (default hello-quick; deploys examples/hello under that name)
-# Installs or updates the platform first (idempotent), keeping the cluster's domain and host
-# suffix: a quick tunnel does not depend on either, so this runs on any dev cluster. Needs network
-# access for images and for trycloudflare.com; no Cloudflare account or token.
+# Installs or updates the platform first (idempotent), keeping the cluster's host suffix. The app
+# has no domain, so cloudflared sends it requests as <app>.shelf.internal. Needs network access
+# for images and for trycloudflare.com; no Cloudflare account or token.
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
@@ -17,11 +17,7 @@ work="$(mktemp -d)"
 app="${1:-hello-quick}"
 artifact="oci://$SHELF_REGISTRY_HOST/smoke/hello-deploy"
 export SHELF_HOME="$work/home"
-setting() { kubectl -n flux-system get configmap shelf-config -o jsonpath="{.data.$1}" 2>/dev/null || true; }
-domain="$(setting SHELF_DOMAIN)"
-domain="${domain:-$SHELF_DEV_DOMAIN}"
-suffix="$(setting SHELF_HOST_SUFFIX)"
-host="$app$suffix.$domain"
+host="$app.shelf.internal"
 
 shelf() { "$work/shelf" "$@"; }
 
@@ -58,7 +54,7 @@ step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --domain "$domain" --host-suffix "$suffix" --insecure-registry \
+shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" >/dev/null
 

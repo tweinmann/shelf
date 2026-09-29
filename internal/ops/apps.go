@@ -34,7 +34,8 @@ func (o *Ops) pullAuth(artifact cluster.Artifact, login *cluster.RegistryAuth) a
 // Access is how an app reaches its registry and the internet: a domain and the connections it
 // uses, by name. Every field is optional: what is not given stays as the app has it.
 type Access struct {
-	// Domain gives the app a domain of its own instead of the cluster's.
+	// Domain gives the app a domain of its own. An app needs one to be exposed through a
+	// Cloudflare connection; without one it answers at <app>.shelf.internal.
 	Domain string
 	// Registry is the registry connection the app pulls its deploy artifact and its images with.
 	Registry string
@@ -139,6 +140,10 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		cloudflare, quick = opts.Access.Cloudflare, false
 		rep.Report(progress.Info("Cloudflare connection: %s", cloudflare))
 	}
+	domain := cmp.Or(opts.Access.Domain, current.Domain)
+	if cloudflare != "" && domain == "" {
+		return noDomain(opts.Name, cloudflare)
+	}
 	if opts.Access.Cloudflare != "" && opts.Access.Cloudflare != current.Cloudflare {
 		conn, err := o.Env.Connections.Cloudflare(opts.Access.Cloudflare)
 		if err != nil {
@@ -188,9 +193,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	if err != nil {
 		return err
 	}
-	domain := cmp.Or(opts.Access.Domain, current.Domain)
-	exposure, err := o.planExposure(ctx, opts.Name, settings, current, cmp.Or(domain, settings.Domain),
-		cloudflare, rep)
+	exposure, err := o.planExposure(ctx, opts.Name, settings, current, domain, cloudflare, rep)
 	if err != nil {
 		return err
 	}
@@ -273,7 +276,7 @@ func (o *Ops) RemoveApp(ctx context.Context, name string, timeout time.Duration,
 	}
 	// cloudflared went with the namespace, so the tunnel has no connections left.
 	if current != nil && current.TunnelID != "" {
-		host := AppHost(name, settings.HostSuffix, cmp.Or(current.Domain, settings.Domain))
+		host := AppHost(name, settings.HostSuffix, current.Domain)
 		if err := o.withdrawRecord(ctx, name, host, access, rep); err != nil {
 			return err
 		}

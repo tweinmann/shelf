@@ -223,7 +223,7 @@ func TestConnectionRules(t *testing.T) {
 	h := cloudflareHarness(t)
 	h.defineRegistry(t, "ghcr", "tobi", "ghcr-secret-token")
 	h.defineRegistry(t, "spare", "tobi", "ghcr-secret-token")
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--registry", "ghcr", "--cloudflare", "tobile")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--registry", "ghcr", "--cloudflare", "tobile", "--domain", "example.com")
 
 	stdout := h.mustRun(t, "connection", "list")
 	for _, want := range []string{"ghcr", "tobi@ghcr.io", "used by greeter", "spare", "unused", "account acc-1"} {
@@ -265,7 +265,7 @@ func TestAppAddWithCloudflare(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
 
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 	if !slices.Equal(h.api.created, []string{"acc-1/shelf-dev-greeter"}) {
 		t.Errorf("created %v; the tunnel is the app's own, in the connection's account", h.api.created)
 	}
@@ -274,8 +274,8 @@ func TestAppAddWithCloudflare(t *testing.T) {
 		!strings.Contains(string(added.TunnelCredentials), "tunnel-1") {
 		t.Errorf("the cluster got connection %q, tunnel %q with %s", added.Cloudflare, added.TunnelID, added.TunnelCredentials)
 	}
-	if added.Domain != "" {
-		t.Errorf("domain %q; without --domain the app keeps the cluster's", added.Domain)
+	if added.Domain != "example.com" {
+		t.Errorf("domain %q", added.Domain)
 	}
 	want := []string{"greeter-dev.example.com -> tunnel-1.cfargotunnel.com in zone-example.com"}
 	if !slices.Equal(h.api.records, want) {
@@ -291,7 +291,8 @@ func TestAppAddWithCloudflare(t *testing.T) {
 		}
 	}
 
-	// The next deploy keeps the connection, and the tunnel whose credentials the cluster holds.
+	// The next deploy keeps the connection, the domain, and the tunnel whose credentials the
+	// cluster holds.
 	stdout = h.mustRun(t, "app", "add", "greeter", greeterArtifact)
 	if len(h.api.created) != 1 || len(h.api.deleted) != 0 {
 		t.Errorf("created %v, deleted %v; the tunnel is reused", h.api.created, h.api.deleted)
@@ -310,8 +311,6 @@ func TestAppAddWithCloudflare(t *testing.T) {
 func TestAppAddPrivateByDefault(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.cluster.settings = cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
-
 	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
 	if added := h.lastAdded(t); added.Quick || added.TunnelID != "" || added.Cloudflare != "" {
 		t.Errorf("quick %t, tunnel %q, connection %q; a new app stays inside the cluster",
@@ -343,14 +342,25 @@ func TestAppAddPrivateByDefault(t *testing.T) {
 func TestAppAddWithADomainOfItsOwn(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.cluster.settings = cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
 
-	_, stderr, code := h.run(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
-	if code == 0 || !strings.Contains(stderr, "dev.local, which is not a public domain") {
-		t.Fatalf("code %d, stderr %q", code, stderr)
-	}
-	if len(h.api.created) != 0 || len(h.cluster.added) != 0 {
-		t.Fatal("nothing may be created for a name that cannot exist")
+	for domain, wantErr := range map[string]string{
+		"":          "greeter needs a domain of its own to be exposed through the Cloudflare connection tobile",
+		"dev.local": "dev.local, which is not a public domain",
+	} {
+		args := []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile"}
+		if domain != "" {
+			args = append(args, "--domain", domain)
+		}
+		_, stderr, code := h.run(t, args...)
+		if code == 0 || !strings.Contains(stderr, wantErr) {
+			t.Fatalf("domain %q: code %d, stderr %q", domain, code, stderr)
+		}
+		if len(h.api.created) != 0 || len(h.cluster.added) != 0 {
+			t.Fatal("nothing may be created for a name that cannot exist")
+		}
+		if _, err := os.Stat(h.backup.Path("greeter")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("nothing may be written before the domain is known")
+		}
 	}
 
 	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "shop.ch")
@@ -416,7 +426,7 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			t.Parallel()
 			h := cloudflareHarness(t)
 			h.defineCloudflare(t, "club", "cf-other-token", "acc-2")
-			h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+			h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 			h.api.created, h.api.records = nil, nil
 
 			stdout := h.mustRun(t, append([]string{"app", "credentials", "greeter"}, tt.args...)...)
@@ -455,7 +465,7 @@ func TestAppAddReplacesATunnelWithoutCredentials(t *testing.T) {
 	h.api.tunnels = map[string]*cloudflare.Tunnel{
 		"acc-1/shelf-dev-greeter": {ID: "old-tunnel", Name: "shelf-dev-greeter"},
 	}
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 	if !slices.Equal(h.api.deleted, []string{"old-tunnel"}) || len(h.api.created) != 1 {
 		t.Errorf("deleted %v, created %v", h.api.deleted, h.api.created)
 	}
@@ -469,7 +479,7 @@ func TestAppAddReplacesATunnelWithoutCredentials(t *testing.T) {
 func TestConnectionNotOnThisMachine(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 	if _, err := h.conns.DeleteCloudflare("tobile"); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +514,7 @@ func TestConnectionNotOnThisMachine(t *testing.T) {
 func TestAppRmWithdrawsTheExposure(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 
 	stdout := h.mustRun(t, "app", "rm", "greeter", "--yes")
 	if !slices.Equal(h.api.deletedRecords, []string{"greeter-dev.example.com in zone-example.com"}) {
@@ -540,7 +550,7 @@ func TestAccessErrors(t *testing.T) {
 		},
 		{
 			name:    "unknown Cloudflare connection",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "nope"},
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "nope", "--domain", "example.com"},
 			wantErr: "this machine holds no Cloudflare connection nope",
 		},
 		{

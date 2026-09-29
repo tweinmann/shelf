@@ -2,7 +2,6 @@ package ops
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 
@@ -27,8 +26,14 @@ type CloudflareAPI interface {
 
 func liveCloudflare(token string) CloudflareAPI { return cloudflare.New(token) }
 
-// AppHost is where an app answers: <app><host suffix>.<domain>.
-func AppHost(app, suffix, domain string) string { return app + suffix + "." + domain }
+// AppHost is where an app answers: <app><host suffix>.<domain>, or <app>.shelf.internal inside
+// the cluster when it has no domain of its own.
+func AppHost(app, suffix, domain string) string {
+	if domain == "" {
+		return app + "." + cluster.InternalDomain
+	}
+	return app + suffix + "." + domain
+}
 
 // TunnelName is the Cloudflare tunnel of an app. The host suffix is part of it, so the apps of
 // two clusters that share an account do not take each other's tunnel.
@@ -88,7 +93,7 @@ func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Se
 		app:        name,
 		tunnelName: TunnelName(name, settings.HostSuffix),
 		oldTunnel:  current.TunnelID,
-		oldHost:    AppHost(name, settings.HostSuffix, cmp.Or(current.Domain, settings.Domain)),
+		oldHost:    AppHost(name, settings.HostSuffix, current.Domain),
 		oldAccess:  old,
 		host:       AppHost(name, settings.HostSuffix, domain),
 	}
@@ -111,6 +116,9 @@ func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Se
 		return nil, missingCloudflare(connection)
 	}
 
+	if domain == "" {
+		return nil, noDomain(name, connection)
+	}
 	if !PublicDomain(domain) {
 		return nil, fmt.Errorf("%s cannot be exposed under %s, which is not a public domain; give it a public domain of its own",
 			name, domain)
@@ -227,4 +235,11 @@ func domainOf(host string) string {
 		}
 	}
 	return host
+}
+
+// noDomain is why an app cannot go through a Cloudflare connection without a domain of its own:
+// its record has to live in a zone of that connection's account.
+func noDomain(app, connection string) error {
+	return fmt.Errorf("%s needs a domain of its own to be exposed through the Cloudflare connection %s: "+
+		"one of the zones of that account (--domain)", app, connection)
 }

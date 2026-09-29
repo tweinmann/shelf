@@ -79,7 +79,7 @@ you come forward again.</p>
 <section class="card">
 <h2>Access</h2>
 <dl class="facts">
-<dt>Domain</dt><dd>{{with .App.Domain}}{{.}}{{else}}{{.Status.Settings.Domain}} <span class="muted">the cluster's</span>{{end}}</dd>
+<dt>Domain</dt><dd>{{with .App.Domain}}{{.}}{{else}}<span class="muted">none, it answers at {{.App.Name}}.shelf.internal inside the cluster</span>{{end}}</dd>
 <dt>Registry</dt><dd>{{with .App.Registry}}{{.}}{{else}}<span class="muted">no connection, pulls without a login</span>{{end}}</dd>
 <dt>Internet</dt><dd>{{if .App.CloudflareMissing}}{{.App.Cloudflare}} <span class="muted">this machine does not hold this connection</span>
 {{- else if .App.Cloudflare}}{{.App.Cloudflare}} <span class="muted">its own tunnel, account {{.App.CloudflareAccount}}</span>
@@ -100,7 +100,7 @@ you come forward again.</p>
 {{range .Connections.Cloudflare}}<option value="{{.Name}}"{{if eq .Name $.App.Cloudflare}} selected{{end}}>{{.Name}}{{if .Missing}} (not on this machine){{else}} (account {{.Account}}){{end}}</option>
 {{end}}</select>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="{{.App.Domain}}" placeholder="{{.Status.Settings.Domain}}" data-cloudflare-from="cloudflare" data-empty-label="{{if .App.Domain}}unchanged: {{.App.Domain}}{{else}}the cluster's{{with .Status.Settings.Domain}}: {{.}}{{end}}{{end}}">
+<input id="domain" name="domain" value="{{.App.Domain}}" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="{{with .App.Domain}}unchanged: {{.}}{{else}}none{{end}}">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections

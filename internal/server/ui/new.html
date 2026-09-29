@@ -38,9 +38,10 @@ trying things out.</p>
 <fieldset>
 <legend>Domain</legend>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="{{.Domain}}" placeholder="{{.Status.Settings.Domain}}" data-cloudflare-from="cloudflare" data-empty-label="the cluster's{{with .Status.Settings.Domain}}: {{.}}{{end}}">
-<p>{{if .Status.Hosts}}Empty, it answers at {{.Status.Hosts}}, with its name in place of &lt;app&gt;.{{end}}
-To reach it from the internet, the domain has to be a zone of the Cloudflare connection's account.</p>
+<input id="domain" name="domain" value="{{.Domain}}" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="none">
+<p>With a domain, the app answers at &lt;app&gt;{{.Status.Settings.HostSuffix}}.&lt;domain&gt;; without one,
+at &lt;app&gt;.shelf.internal inside the cluster. A Cloudflare connection needs a domain: a zone of
+its account.</p>
 </fieldset>
 <button type="submit">Add the app</button>
 </form>

@@ -156,11 +156,12 @@ spec:
         values:
           name: << inputs.name >>
           platform:
-            # The app's own domain, or the cluster's.
-            domain: "<< if inputs.domain >><< inputs.domain >><< else >>${SHELF_DOMAIN}<< end >>"
+            # The app's own domain; without one, it answers at <app>.shelf.internal, inside the
+            # cluster only, and without the host suffix, which only separates public names.
+            domain: "<< if inputs.domain >><< inputs.domain >><< else >>shelf.internal<< end >>"
             # Quoted: an empty setting would otherwise become null, and the chart would render
             # the host name with a "<nil>" in it.
-            hostSuffix: "${SHELF_HOST_SUFFIX:=}"
+            hostSuffix: "<< if inputs.domain >>${SHELF_HOST_SUFFIX:=}<< end >>"
             imagePullSecret: shelf-registry
         install:
           remediation:
@@ -244,7 +245,7 @@ spec:
                 - --url
                 - http://traefik.traefik.svc.cluster.local:80
                 - --http-host-header
-                - "<< inputs.name >>${SHELF_HOST_SUFFIX:=}.<< if inputs.domain >><< inputs.domain >><< else >>${SHELF_DOMAIN}<< end >>"
+                - "<< inputs.name >><< if inputs.domain >>${SHELF_HOST_SUFFIX:=}.<< inputs.domain >><< else >>.shelf.internal<< end >>"
               <<- end >>
               ports:
                 - name: metrics

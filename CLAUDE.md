@@ -58,10 +58,12 @@ text as the fallback; `shelf connection packages|zones` and `shelf app tags` lis
 green; `form.js` untested against real connections.
 Phase 8d in progress (2026-09-29): an app without a Cloudflare connection stays inside the
 cluster by default and can ask for a quick tunnel with `--quick` (random `*.trycloudflare.com`
-name, changes when cloudflared restarts);
-cloudflared rewrites the Host header to the app's own host, and shelf reads the name from
-`/quicktunnel` through the pod proxy. LAN access (proxy + mDNS) was considered and
-rejected. Level 1 green; tried by hand in the dev cluster; `just smoke-quick` not run yet.
+name, changes when cloudflared restarts); cloudflared rewrites the Host header to the app's own
+host, and shelf reads the name from `/quicktunnel` through the pod proxy. The cluster has no
+domain any more: an app has one of its own or answers at `<app>.shelf.internal`; `init cluster`
+keeps a former public cluster domain on the apps that used it. LAN access (proxy + mDNS) was
+considered and rejected. Level 1 green; tried by hand in the dev cluster; `just smoke-quick` not
+run yet.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
@@ -107,7 +109,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
 | `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
 | `just serve` | devcontainer | run the admin UI against the dev cluster on port 8080 (forwarded to the Mac's browser); prints the setup code on the first start |
-| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart, domain `dev.local` |
+| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart (pass `--host-suffix -dev` if the cluster has one) |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
@@ -116,7 +118,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
 | `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token; needs a cluster with a host suffix |
-| `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's domain; opens a public trycloudflare.com tunnel for a few minutes |
+| `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -149,11 +151,10 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   this session.
 - A quick tunnel puts an app on the internet without any account. Only `smoke-quick` passes
   `--quick`; never give an app you did not create a quick tunnel.
-- `shelf init cluster` with a different `--host-suffix` moves every app to another host name, a
-  different `--domain` every app without a domain of its own, and strands their DNS records. It
-  refuses to do that while such apps exist unless `--move-hosts` is passed. The smoke tests install `dev.local` and refuse to run against a
-  cluster that serves anything else — run `just cluster-reset` first, or restore the domain
-  afterwards.
+- `shelf init cluster` with a different `--host-suffix` moves every app with a domain to another
+  host name and strands its DNS record. It refuses to do that while such apps exist unless
+  `--move-hosts` is passed. The smoke tests install the platform with the cluster's current host
+  suffix (`cluster_host_suffix` in `hack/lib.sh`), so they never move an app.
 
 ## Conventions
 
@@ -173,7 +174,9 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   `tunnel-<app>` (named tunnels only). Registry connections are
   `connection-registry-<name>` (label `shelf.dev/connection=registry`), and `registry-anonymous`
   is what an app without one gets. An app's tunnel is `shelf<host-suffix>-<app>`, its host
-  `<app><host-suffix>.<own domain or the cluster's>`
+  `<app><host-suffix>.<domain>`; a cluster has no domain, and an app without one answers at
+  `<app>.shelf.internal` (`cluster.InternalDomain`), inside the cluster only. A Cloudflare
+  connection needs a domain of the app's own
 - Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
   the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
   OCI annotations `dev.shelf.*`

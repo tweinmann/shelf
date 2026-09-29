@@ -1,7 +1,6 @@
 package ops
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -12,11 +11,12 @@ import (
 // App is an app as a caller wants to show it: its state in the cluster, plus where it answers.
 type App struct {
 	cluster.AppState
-	// Host is the name the app answers under, empty when neither the app nor the cluster has a
-	// domain. For an app with a quick tunnel that has its address, it is the tunnel's random name.
+	// Host is the name the app answers under: <app><suffix>.<domain>, or <app>.shelf.internal
+	// without a domain. For an app with a quick tunnel that has its address, it is the tunnel's
+	// random name.
 	Host string `json:"host,omitempty"`
-	// Public is false when the app's domain cannot exist on the internet, as dev.local cannot.
-	// The app then answers inside the cluster only, whatever else is set up.
+	// Public is false when the app has no domain, or one that cannot exist on the internet, as
+	// dev.local cannot. The app then answers inside the cluster only, unless it has a quick tunnel.
 	Public bool `json:"public"`
 	// URL is where a browser reaches the app, empty until the app is exposed.
 	URL string `json:"url,omitempty"`
@@ -59,12 +59,6 @@ type Status struct {
 	// not run against it.
 	Installed bool             `json:"installed"`
 	Settings  cluster.Settings `json:"-"`
-	// Hosts is the pattern the apps answer under, such as <app>-dev.example.com, unless they
-	// have a domain of their own.
-	Hosts string `json:"hosts,omitempty"`
-	// Public is false when the cluster's domain cannot exist on the internet, as dev.local
-	// cannot. An app without a domain of its own then answers inside the cluster only.
-	Public bool `json:"public"`
 }
 
 // Status reads how the cluster is doing.
@@ -80,9 +74,7 @@ func (o *Ops) Status(ctx context.Context) Status {
 	}
 	s.Reachable = true
 	s.Settings = settings
-	s.Installed = settings.Domain != ""
-	s.Hosts = Hosts(settings.Domain, settings.HostSuffix)
-	s.Public = PublicDomain(settings.Domain)
+	s.Installed = settings.Installed()
 	return s
 }
 
@@ -144,12 +136,8 @@ func (e *NotFoundError) Error() string { return "app " + e.Name + " does not exi
 
 func app(state cluster.AppState, settings cluster.Settings) App {
 	a := App{AppState: state}
-	domain := cmp.Or(state.Domain, settings.Domain)
-	if domain == "" {
-		return a
-	}
-	a.Host = AppHost(state.Name, settings.HostSuffix, domain)
-	a.Public = PublicDomain(domain)
+	a.Host = AppHost(state.Name, settings.HostSuffix, state.Domain)
+	a.Public = PublicDomain(state.Domain)
 	switch {
 	// A quick tunnel does not need the domain to exist: the app answers under the random name
 	// cloudflared was given, as long as it has one.

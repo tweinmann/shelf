@@ -187,12 +187,11 @@ func (f *fakePlatform) Diagnose(_ context.Context, name string) (cluster.Diagnos
 
 // runningPlatform is a healthy cluster with one working and one broken app.
 func runningPlatform() *fakePlatform {
-	settings := cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
+	settings := cluster.Settings{HostSuffix: "-dev"}
 	return &fakePlatform{
 		status: ops.Status{
 			Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 			Reachable: true, Installed: true, Settings: settings,
-			Hosts: "<app>-dev.example.com", Public: true,
 		},
 		apps: []ops.App{
 			{
@@ -202,6 +201,7 @@ func runningPlatform() *fakePlatform {
 					Revision: "main@" + digest,
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
+					Domain:   "example.com",
 					Tunnel:   "t-1", Registry: "ghcr", Cloudflare: "tobile",
 				},
 				Host:              "greeter-dev.example.com",
@@ -324,8 +324,7 @@ func quickPlatform() *fakePlatform {
 				Phase:    cluster.PhaseWorking,
 				Quick:    true,
 			},
-			Host:   "draft-dev.example.com",
-			Public: true,
+			Host: "draft.shelf.internal",
 		},
 	)
 	p.diagnoses["notes"] = p.diagnoses["greeter"]
@@ -511,14 +510,12 @@ func TestPages(t *testing.T) {
 
 	// A development cluster answers under a reserved name such as dev.local. No record can ever
 	// point there, so the page says that instead of offering a link that cannot work.
-	t.Run("reserved domain", func(t *testing.T) {
+	t.Run("no domain", func(t *testing.T) {
 		t.Parallel()
 		local := &fakePlatform{
 			status: ops.Status{
 				Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 				Reachable: true, Installed: true,
-				Settings: cluster.Settings{Domain: "dev.local"},
-				Hosts:    "<app>.dev.local",
 			},
 			apps: []ops.App{{
 				AppState: cluster.AppState{
@@ -528,23 +525,29 @@ func TestPages(t *testing.T) {
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
 				},
-				Host: "greeter.dev.local",
+				Host: "greeter.shelf.internal",
 				Components: []ops.Component{{
 					Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
 						Ports: []cluster.Port{{Name: "main", Number: 80}}, Path: "/"},
-					Address: "greeter.dev.local/",
+					Address: "greeter.shelf.internal/",
 				}},
 			}},
+			diagnoses: runningPlatform().diagnoses,
 		}
 		h, cookie := claimed(t, local)
 		rec := get(h, "/", cookie)
-		if strings.Contains(rec.Body.String(), `href="https://greeter.dev.local`) {
+		if strings.Contains(rec.Body.String(), `href="https://greeter.shelf.internal`) {
 			t.Error("the page offers a link to a name that cannot exist")
 		}
-		if page := get(h, "/apps/greeter", cookie); strings.Contains(page.Body.String(), `href="https://greeter.dev.local`) {
+		page := get(h, "/apps/greeter", cookie)
+		if page.Code != http.StatusOK {
+			t.Fatalf("status %d", page.Code)
+		}
+		if strings.Contains(page.Body.String(), `href="https://greeter.shelf.internal`) {
 			t.Error("a component offers a link to a name that cannot exist")
 		}
-		golden(t, "dashboard-reserved-domain", rec)
+		golden(t, "dashboard-no-domain", rec)
+		golden(t, "app-no-domain", page)
 	})
 
 	t.Run("platform not installed", func(t *testing.T) {

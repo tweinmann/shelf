@@ -27,7 +27,7 @@ func newAppCmd(o Options) *cobra.Command {
 const accessHelp = `--registry names the registry connection the app pulls its deploy artifact and its images
 with; without one, it reads the registry anonymously. --cloudflare names the Cloudflare
 connection it is exposed through: it gets a tunnel of its own in that connection's account, and
-its domain has to be a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.
+needs --domain, a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.
 
 Without a Cloudflare connection, an app answers inside the cluster only. --quick exposes it
 through a quick tunnel instead: Cloudflare gives it a random https://<words>.trycloudflare.com
@@ -48,7 +48,8 @@ type accessFlags struct {
 // register adds the flags; removable adds the ones that take a connection away again.
 func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 	fs.StringVar(&f.domain, "domain", "",
-		"a domain of the app's own: it answers at <name><host-suffix>.<domain> (default: the cluster's)")
+		"a domain of the app's own: it answers at <name><host-suffix>.<domain>, and without one at "+
+			"<name>.shelf.internal inside the cluster; needed with --cloudflare")
 	fs.StringVar(&f.registry, "registry", "", "the registry connection the app pulls with")
 	fs.StringVar(&f.cloudflare, "cloudflare", "", "the Cloudflare connection the app is exposed through")
 	fs.BoolVar(&f.quick, "quick", false,

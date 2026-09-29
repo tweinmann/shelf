@@ -9,7 +9,6 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
-require_dev_domain
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d)"
@@ -73,7 +72,7 @@ step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --domain dev.local --insecure-registry \
+shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" >/dev/null
 
@@ -105,8 +104,8 @@ url="$(kubectl -n "$app" exec deploy/check -- printenv DATABASE_URL)"
 [[ "$url" == "postgres://app:$password@db:5432/hello" ]] || die "unexpected DATABASE_URL"
 kubectl -n traefik port-forward svc/traefik 18082:80 >/dev/null 2>&1 &
 pf_pid=$!
-routed() { curl -sS -H "Host: $app.dev.local" http://127.0.0.1:18082/ | grep -q '^Hostname: web-'; }
-retry 30 routed || die "$app.dev.local does not reach web"
+routed() { curl -sS -H "Host: $app.shelf.internal" http://127.0.0.1:18082/ | grep -q '^Hostname: web-'; }
+retry 30 routed || die "$app.shelf.internal does not reach web"
 
 step "the same artifact as a second app, with a host and a secret of its own"
 shelf app add "$copy" "$artifact:main" --insecure-registry >"$work/copy.txt"
@@ -117,9 +116,9 @@ copy_ready() { kubectl -n "$copy" rollout status deploy/check --timeout=5s; }
 retry 180 copy_ready || die "$copy did not come up"
 url="$(kubectl -n "$copy" exec deploy/check -- printenv DATABASE_URL)"
 [[ "$url" == "postgres://app:$copy_password@db:5432/hello" ]] || die "unexpected DATABASE_URL in $copy"
-copy_routed() { curl -sS -H "Host: $copy.dev.local" http://127.0.0.1:18082/ | grep -q '^Hostname: web-'; }
-retry 30 copy_routed || die "$copy.dev.local does not reach web"
-routed || die "$app.dev.local stopped answering"
+copy_routed() { curl -sS -H "Host: $copy.shelf.internal" http://127.0.0.1:18082/ | grep -q '^Hostname: web-'; }
+retry 30 copy_routed || die "$copy.shelf.internal does not reach web"
+routed || die "$app.shelf.internal stopped answering"
 shelf app rm "$copy" --yes >/dev/null
 kubectl get namespace "$copy" >/dev/null 2>&1 && die "namespace $copy is still there"
 kubectl -n "$app" get deploy web >/dev/null || die "removing $copy took $app with it"

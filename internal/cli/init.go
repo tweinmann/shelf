@@ -95,7 +95,6 @@ func newInitClusterCmd(o Options) *cobra.Command {
 	var (
 		platform   string
 		chart      string
-		domain     string
 		hostSuffix string
 		insecure   bool
 		moveHosts  bool
@@ -107,8 +106,10 @@ func newInitClusterCmd(o Options) *cobra.Command {
 		Long: `Install the Flux Operator and a FluxInstance into the cluster of the current kubecontext.
 Flux then installs the platform (Traefik and the app machinery) from the platform artifact.
 
-The domain is where the apps answer unless they have a domain of their own. Registry logins and
-Cloudflare tokens are connections (` + "`shelf connection`" + `), which each app chooses for itself.
+A cluster has no domain: an app gets one of its own when it is added, and answers at
+<app><host-suffix>.<domain>; without one, it answers at <app>.shelf.internal inside the cluster.
+Registry logins and Cloudflare tokens are connections (` + "`shelf connection`" + `), which each app
+chooses for itself.
 
 The command shows the target cluster and asks for confirmation, because it installs
 cluster-wide objects. It is idempotent; running it again updates what changed.`,
@@ -123,9 +124,6 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			if err != nil {
 				return err
 			}
-			if err := ops.CheckDomain(domain); err != nil {
-				return fmt.Errorf("--domain %w", err)
-			}
 			if err := ops.CheckHostSuffix(hostSuffix); err != nil {
 				return fmt.Errorf("--host-suffix %w", err)
 			}
@@ -137,7 +135,6 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			opts := ops.InitOptions{
 				Platform:   p,
 				Chart:      c,
-				Domain:     domain,
 				HostSuffix: hostSuffix,
 				Insecure:   insecure,
 				MoveHosts:  moveHosts,
@@ -149,7 +146,7 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			printTarget(out, shelf.Target)
 			fmt.Fprintf(out, "  platform  %s\n", plan.Platform)
 			fmt.Fprintf(out, "  chart     %s\n", plan.Chart)
-			fmt.Fprintf(out, "  hosts     %s\n", plan.Hosts)
+			fmt.Fprintf(out, "  hosts     %s, or <app>.%s without a domain\n", plan.Hosts, cluster.InternalDomain)
 			if !target.yes {
 				ok, err := confirm(cmd.InOrStdin(), out)
 				if err != nil {
@@ -167,13 +164,11 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 		"platform artifact, oci://<registry>/<repository>:<tag> (default: "+DefaultPlatformRepository+":<shelf version>)")
 	f.StringVar(&chart, "chart", "",
 		"shelf-app chart, oci://<registry>/<repository>:<version> (default: "+DefaultChartRepository+":<shelf version>)")
-	f.StringVar(&domain, "domain", "",
-		"apps without a domain of their own are reachable at <app><host-suffix>.<domain> (required)")
 	f.StringVar(&hostSuffix, "host-suffix", "",
 		"suffix in the app's host name, e.g. -dev, to separate clusters that share a DNS zone")
 	f.BoolVar(&insecure, "insecure-registry", false, "pull platform and chart without TLS (dev registry)")
 	f.BoolVar(&moveHosts, "move-hosts", false,
-		"allow a domain or host suffix that moves apps of this cluster to different names")
+		"allow a host suffix that moves the apps with a domain to different names")
 	target.register(f)
 	return cmd
 }

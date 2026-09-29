@@ -206,7 +206,7 @@ func TestPlatformObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs := ConfigObjects(Settings{Domain: "dev.local", Chart: chart, InsecureRegistry: true})
+	objs := ConfigObjects(Settings{Chart: chart, InsecureRegistry: true})
 	withLogin, err := RegistryConnectionSecret("ghcr", RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,6 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Settings{
-		Domain:           "example.com",
 		HostSuffix:       "-dev",
 		Chart:            chart,
 		InsecureRegistry: true,
@@ -299,20 +298,33 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if got := ParseSettings(data); got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
-	if got := ParseSettings(nil); got != (Settings{}) {
+	if got := ParseSettings(nil); got != (Settings{}) || got.Installed() {
 		t.Errorf("a cluster without settings must read as zero, got %+v", got)
+	}
+	// The domain a cluster had before is read, for the apps that answered under it, and never
+	// written again.
+	data["SHELF_DOMAIN"] = "tobile.ch"
+	if got := ParseSettings(data); got.LegacyDomain != "tobile.ch" {
+		t.Errorf("legacy domain %q", got.LegacyDomain)
+	}
+	for _, obj := range ConfigObjects(ParseSettings(data)) {
+		if d, _, _ := unstructured.NestedStringMap(obj.Object, "data"); d["SHELF_DOMAIN"] != "" {
+			t.Error("the cluster's domain is written again")
+		}
 	}
 }
 
-// TestMovingApps pins which apps a change of the cluster settings renames: an app with a domain
-// of its own keeps it when the cluster's domain changes, but not when the suffix does, and only
-// an exposed app leaves a record behind.
+// TestMovingApps pins which apps a change of the cluster settings renames: only a new host
+// suffix renames anything, and only the apps with a domain — <app>.shelf.internal has no
+// suffix. Only an exposed app leaves a record behind.
 func TestMovingApps(t *testing.T) {
-	dev := Settings{Domain: "example.com", HostSuffix: "-dev"}
+	chart := Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"}
+	dev := Settings{HostSuffix: "-dev", Chart: chart}
 	apps := []AppState{
-		{Name: "greeter", Tunnel: "t-1"},
-		{Name: "shop"},
+		{Name: "greeter", Domain: "example.com", Tunnel: "t-1"},
+		{Name: "shop", Domain: "example.com"},
 		{Name: "blog", Domain: "blog.example", Tunnel: "t-2"},
+		{Name: "notes"},
 	}
 	tests := []struct {
 		name     string
@@ -323,23 +335,23 @@ func TestMovingApps(t *testing.T) {
 		wantText []string
 	}{
 		{
-			name:     "domain changed",
-			before:   dev,
-			after:    Settings{Domain: "other.example", HostSuffix: "-dev"},
-			apps:     apps,
-			want:     []string{"greeter", "shop"},
-			wantText: []string{"greeter-dev.example.com (now greeter-dev.other.example)"},
-		},
-		{
 			name:     "suffix removed",
 			before:   dev,
-			after:    Settings{Domain: "example.com"},
+			after:    Settings{Chart: chart},
 			apps:     apps,
 			want:     []string{"greeter", "shop", "blog"},
-			wantText: []string{"greeter-dev.example.com", "blog-dev.blog.example (now blog.blog.example)"},
+			wantText: []string{"greeter-dev.example.com (now greeter.example.com)", "blog-dev.blog.example (now blog.blog.example)"},
+		},
+		{
+			name:     "the cluster's former domain pinned",
+			before:   dev,
+			after:    Settings{HostSuffix: "-test", Chart: chart},
+			apps:     PinDomain([]AppState{{Name: "notes", Tunnel: "t-3"}}, "tobile.ch"),
+			want:     []string{"notes"},
+			wantText: []string{"notes-dev.tobile.ch (now notes-test.tobile.ch)"},
 		},
 		{name: "nothing changed", before: dev, after: dev, apps: apps},
-		{name: "no apps yet", before: dev, after: Settings{Domain: "other.example"}},
+		{name: "no apps yet", before: dev, after: Settings{Chart: chart}},
 		{name: "first run", before: Settings{}, after: dev, apps: apps},
 	}
 	for _, tt := range tests {

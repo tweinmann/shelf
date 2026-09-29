@@ -77,7 +77,7 @@ type AppState struct {
 	Name     string   `json:"name"`
 	Artifact Artifact `json:"artifact"`
 	Insecure bool     `json:"insecure,omitempty"`
-	// Domain is the app's own domain, empty when it answers under the cluster's.
+	// Domain is the app's own domain, empty when it answers at <app>.shelf.internal.
 	Domain string `json:"domain,omitempty"`
 	// Tunnel is the app's Cloudflare tunnel, empty when the app has none of its own.
 	Tunnel string `json:"tunnel,omitempty"`

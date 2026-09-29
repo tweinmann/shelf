@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -20,6 +19,9 @@ import (
 type Options struct {
 	Platform Artifact
 	Settings Settings
+	// PinDomain is given as a domain of their own to the apps that have none, because they
+	// answered under it as the cluster's domain. Empty gives them <app>.shelf.internal.
+	PinDomain string
 	// Timeout bounds the whole installation, including all waits.
 	Timeout time.Duration
 	// Report receives what happens; nil reports nothing.
@@ -86,7 +88,7 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if err := c.warnAboutOldHosts(ctx, rep, current, settings); err != nil {
+	if err := c.warnAboutOldHosts(ctx, rep, current, settings, opts.PinDomain); err != nil {
 		return err
 	}
 	for _, obj := range ConfigObjects(settings) {
@@ -95,7 +97,7 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 		}
 	}
 	// Before the platform that expects a login per app is applied.
-	if err := c.migrateSharedCredentials(ctx, rep); err != nil {
+	if err := c.migrateSharedCredentials(ctx, rep, opts.PinDomain); err != nil {
 		return err
 	}
 
@@ -134,8 +136,9 @@ const SharedRegistryConnection = "ghcr"
 // and every app that was registered before gets it, so the apps keep pulling. The shared tunnel
 // cannot move: it belongs to a Cloudflare account whose token shelf never stored, so it is
 // switched off, and the apps have to be exposed again one by one. It also writes the Secret that
-// apps without a registry connection pull with.
-func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Reporter) error {
+// apps without a registry connection pull with, and gives the apps without a domain the one the
+// cluster used to have.
+func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Reporter, pin string) error {
 	anonymous, err := AnonymousRegistrySecret()
 	if err != nil {
 		return err
@@ -174,8 +177,9 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 	}
 	for _, p := range providers {
 		// The platform refers to every input, so an app registered before the inputs existed
-		// gets them: the shared login as its connection, the cluster's domain and no tunnel —
-		// not even a quick one, so that an upgrade never puts an app on the internet.
+		// gets them: the shared login as its connection, and no tunnel — not even a quick one,
+		// so that an upgrade never puts an app on the internet. An app that answered under the
+		// cluster's domain keeps that name as a domain of its own.
 		values, _, _ := unstructured.NestedMap(p.Object, "spec", "defaultValues")
 		missing := false
 		for _, key := range []string{"domain", "tunnel", "quick", "registry", "cloudflare"} {
@@ -183,10 +187,15 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 				missing = true
 			}
 		}
-		if !missing {
+		state := providerState(p)
+		pinned := pin != "" && state.Domain == ""
+		if !missing && !pinned {
 			continue
 		}
-		state := providerState(p)
+		if pinned {
+			state.Domain = pin
+			rep.Report(progress.Info("app %s keeps %s, the cluster's domain until now, as a domain of its own", state.Name, pin))
+		}
 		registry := state.Registry
 		if _, ok := values["registry"]; !ok {
 			registry = inherited
@@ -222,9 +231,9 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 	return c.deleteReport(ctx, rep, ref{gvk: secretGVK, namespace: SystemNamespace, name: sharedTunnelSecret})
 }
 
-// warnAboutOldHosts points out the DNS records apps keep under their previous name when the
-// domain or the host suffix changes.
-func (c *client) warnAboutOldHosts(ctx context.Context, rep progress.Reporter, before, after Settings) error {
+// warnAboutOldHosts points out the DNS records apps keep under their previous name when the host
+// suffix changes. The apps without a domain are counted with the one they are about to be given.
+func (c *client) warnAboutOldHosts(ctx context.Context, rep progress.Reporter, before, after Settings, pin string) error {
 	if !hostsChange(before, after) {
 		return nil
 	}
@@ -236,20 +245,32 @@ func (c *client) warnAboutOldHosts(ctx context.Context, rep progress.Reporter, b
 	for _, p := range providers {
 		apps = append(apps, providerState(p))
 	}
-	if warning := OldHostWarning(MovingApps(before, after, apps)); warning != "" {
+	if warning := OldHostWarning(MovingApps(before, after, PinDomain(apps, pin))); warning != "" {
 		rep.Report(progress.Warning(warning))
 	}
 	return nil
 }
 
-// HostsChange reports whether apps answer under a different name after the change. It is only
-// true when the cluster had a domain before: the first installation gives the apps their names,
-// it does not move them.
+// PinDomain returns the apps with the given domain filled in where they have none, which is how
+// they are registered once the cluster's former domain is pinned onto them.
+func PinDomain(apps []AppState, pin string) []AppState {
+	out := slices.Clone(apps)
+	for i := range out {
+		if out[i].Domain == "" {
+			out[i].Domain = pin
+		}
+	}
+	return out
+}
+
+// HostsChange reports whether apps answer under a different name after the change: the host
+// suffix is the only setting that is part of a name. It is only true for a cluster that was
+// installed before: the first installation gives the apps their names, it does not move them.
 func HostsChange(before, after Settings) bool { return hostsChange(before, after) }
 
 // hostsChange reports whether apps answer under a different name after the change.
 func hostsChange(before, after Settings) bool {
-	return before.Domain != "" && (before.Domain != after.Domain || before.HostSuffix != after.HostSuffix)
+	return before.Installed() && before.HostSuffix != after.HostSuffix
 }
 
 // HostMove is an app that answers under a different name after the cluster settings change.
@@ -261,17 +282,20 @@ type HostMove struct {
 	Exposed bool
 }
 
-// MovingApps returns the apps a change of the cluster settings gives a different host name: all
-// of them when the host suffix changes, and those without a domain of their own when the
-// cluster's domain does.
+// MovingApps returns the apps a change of the host suffix gives a different host name: those
+// with a domain of their own. An app without one answers at <app>.shelf.internal, which has no
+// suffix and never moves.
 func MovingApps(before, after Settings, apps []AppState) []HostMove {
 	if !hostsChange(before, after) {
 		return nil
 	}
 	var moves []HostMove
 	for _, app := range apps {
-		from := app.Name + before.HostSuffix + "." + cmp.Or(app.Domain, before.Domain)
-		to := app.Name + after.HostSuffix + "." + cmp.Or(app.Domain, after.Domain)
+		if app.Domain == "" {
+			continue
+		}
+		from := app.Name + before.HostSuffix + "." + app.Domain
+		to := app.Name + after.HostSuffix + "." + app.Domain
 		if from != to {
 			moves = append(moves, HostMove{App: app.Name, From: from, To: to, Exposed: app.Tunnel != ""})
 		}

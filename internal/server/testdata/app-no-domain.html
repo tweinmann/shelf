@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>notes · shelf</title>
+<title>greeter · shelf</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -22,10 +22,10 @@
 </header>
 <main>
 
-<nav class="crumbs"><a href="/">Apps</a> / notes</nav>
+<nav class="crumbs"><a href="/">Apps</a> / greeter</nav>
 
 <div class="app-head">
-<h1>notes</h1>
+<h1>greeter</h1>
 <span class="pill Ready">Ready</span>
 </div>
 
@@ -33,12 +33,11 @@
 
 <section class="card">
 <dl class="facts">
-<dt>Address</dt><dd><a href="https://some-random-words.trycloudflare.com/">some-random-words.trycloudflare.com</a>
-<span class="muted">temporary, changes when the tunnel restarts</span></dd>
-
-<dt>Artifact</dt><dd>oci://ghcr.io/tweinmann/notes:main</dd>
+<dt>Address</dt><dd>greeter.shelf.internal
+<span class="muted">inside the cluster only</span></dd>
+<dt>Artifact</dt><dd>oci://ghcr.io/tweinmann/greeter:main</dd>
 <dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span></dd>
-<dt>Deployed</dt><dd>5 minutes ago</dd>
+<dt>Deployed</dt><dd>17 minutes ago</dd>
 </dl>
 <p class="muted">The app itself is described in the <code>app.yaml</code> of its repository. shelf deploys
 what the artifact above carries; to change ports, volumes or secrets, change that file and let your
@@ -52,7 +51,7 @@ pipeline publish a new artifact.</p>
 
 <li>
 <div class="app-head"><span class="name">web</span><span class="pill Ready">Ready</span></div>
-<p class="address"><a href="https://some-random-words.trycloudflare.com/">https://some-random-words.trycloudflare.com/</a></p>
+<p class="address">greeter.shelf.internal/ <span class="muted">inside the cluster only</span></p>
 </li>
 
 </ul>
@@ -66,17 +65,17 @@ reaches them.</p>
 
 <section class="card">
 <h2>Deploy</h2>
-<form method="post" action="/apps/notes/deploy" class="inline">
+<form method="post" action="/apps/greeter/deploy" class="inline">
 <input type="hidden" name="csrf" value="CSRF">
 
 <label for="artifact">Artifact and tag</label>
-<input id="artifact" name="artifact" value="oci://ghcr.io/tweinmann/notes:main" required>
+<input id="artifact" name="artifact" value="oci://ghcr.io/tweinmann/greeter:main" required>
 <button type="submit">Deploy this</button>
 </form>
 <p class="muted">Point it at another tag to move the app there — a commit tag such as
 <code>sha-905acce</code> is how you go back to a version that worked, and the branch tag is how
 you come forward again.</p>
-<form method="post" action="/apps/notes/redeploy" class="inline">
+<form method="post" action="/apps/greeter/redeploy" class="inline">
 <input type="hidden" name="csrf" value="CSRF">
 <button type="submit" class="secondary">Deploy again</button>
 </form>
@@ -86,24 +85,20 @@ you come forward again.</p>
 <section class="card">
 <h2>Access</h2>
 <dl class="facts">
-<dt>Domain</dt><dd><span class="muted">none, it answers at notes.shelf.internal inside the cluster</span></dd>
+<dt>Domain</dt><dd><span class="muted">none, it answers at greeter.shelf.internal inside the cluster</span></dd>
 <dt>Registry</dt><dd><span class="muted">no connection, pulls without a login</span></dd>
-<dt>Internet</dt><dd>a quick tunnel <span class="muted">its address changes whenever the tunnel restarts</span></dd>
+<dt>Internet</dt><dd><span class="muted">not exposed</span></dd>
 </dl>
-<form method="post" action="/apps/notes/access">
+<form method="post" action="/apps/greeter/access">
 <input type="hidden" name="csrf" value="CSRF">
 <label for="registry">Registry connection</label>
 <select id="registry" name="registry">
 <option value="">none: pull without a login</option>
-<option value="ghcr">ghcr (tobi)</option>
-<option value="spare">spare (tobi)</option>
 </select>
 <label for="cloudflare">Cloudflare connection</label>
 <select id="cloudflare" name="cloudflare">
 <option value="">none: take it off the internet</option>
-<option value="@quick" selected>none: a quick tunnel at a temporary trycloudflare.com address</option>
-<option value="club">club (not on this machine)</option>
-<option value="tobile">tobile (account acc-1)</option>
+<option value="@quick">none: a quick tunnel at a temporary trycloudflare.com address</option>
 </select>
 <label for="domain">A domain of its own</label>
 <input id="domain" name="domain" value="" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="none">
@@ -163,13 +158,13 @@ connection, a quick tunnel can give the app a random address that changes whenev
 </ol>
 
 <section class="card problem">
-<h2>Remove notes</h2>
+<h2>Remove greeter</h2>
 <p>This deletes the app, its namespace and its volumes. The data in them is gone; the secret
 backup on this machine is kept. Type the name to confirm.</p>
-<form method="post" action="/apps/notes/delete" class="inline">
+<form method="post" action="/apps/greeter/delete" class="inline">
 <input type="hidden" name="csrf" value="CSRF">
 <label for="confirm">Name of the app</label>
-<input id="confirm" name="confirm" placeholder="notes" autocomplete="off" required>
+<input id="confirm" name="confirm" placeholder="greeter" autocomplete="off" required>
 <button type="submit" class="danger">Remove it</button>
 </form>
 </section>

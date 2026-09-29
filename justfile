@@ -72,7 +72,7 @@ chart-push:
 
 # Install Flux and the platform into the dev cluster from the dev registry
 init-cluster *flags:
-    go run ./cmd/shelf init cluster --domain dev.local --insecure-registry \
+    go run ./cmd/shelf init cluster --insecure-registry \
       --platform oci://shelf-registry:5000/shelf/platform:dev \
       --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
 

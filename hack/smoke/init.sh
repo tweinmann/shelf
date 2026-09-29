@@ -7,7 +7,6 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
-require_dev_domain
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d)"
@@ -49,7 +48,7 @@ trap cleanup EXIT
 step "build shelf"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 init_cluster() {
-  "$work/shelf" init cluster --yes --insecure-registry --domain dev.local \
+  "$work/shelf" init cluster --yes --insecure-registry --host-suffix "$(cluster_host_suffix)" \
     --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
     --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev"
 }

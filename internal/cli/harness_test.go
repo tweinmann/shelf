@@ -213,9 +213,11 @@ func newHarness(t *testing.T) *harness {
 	}
 }
 
-// public makes the cluster one whose domain exists on the internet, so its apps can be exposed.
+// public makes the cluster one that was installed, with the host suffix -dev; its apps can be
+// exposed under a domain of their own.
 func (h *harness) public() *harness {
-	h.cluster.settings = cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
+	h.cluster.settings = cluster.Settings{HostSuffix: "-dev",
+		Chart: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"}}
 	return h
 }
 

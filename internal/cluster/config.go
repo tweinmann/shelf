@@ -26,10 +26,15 @@ const (
 	WatchLabel = "reconcile.fluxcd.io/watch"
 )
 
-// Settings are the per-cluster values the platform needs.
+// InternalDomain is where an app without a domain of its own answers, inside the cluster only:
+// <app>.shelf.internal. The name is reserved for private use, so it never gets a link, and it
+// carries no host suffix, because it never leaves the cluster.
+const InternalDomain = "shelf.internal"
+
+// Settings are the per-cluster values the platform needs. A cluster has no domain: a domain
+// belongs to an app, which answers at <app><HostSuffix>.<domain> with one and at
+// <app>.shelf.internal without.
 type Settings struct {
-	// Domain: apps are reachable at <app><HostSuffix>.<domain>.
-	Domain string
 	// HostSuffix separates clusters that share a zone, e.g. "-dev". Cloudflare's free
 	// certificate covers one level of subdomain, so the suffix goes into the app label rather
 	// than into another level.
@@ -38,7 +43,13 @@ type Settings struct {
 	Chart Artifact
 	// InsecureRegistry allows platform and chart registries without TLS.
 	InsecureRegistry bool
+	// LegacyDomain is the domain a cluster had before clusters had none, read back and never
+	// written. `shelf init cluster` gives it to the apps that answered under it.
+	LegacyDomain string
 }
+
+// Installed reports whether `shelf init cluster` has run against the cluster.
+func (s Settings) Installed() bool { return s.Chart.URL != "" }
 
 // RegistryAuth is a registry login. The token must be a classic PAT with read:packages.
 type RegistryAuth struct {
@@ -64,7 +75,6 @@ func ConfigObjects(s Settings) []*unstructured.Unstructured {
 			"kind":       "ConfigMap",
 			"metadata":   map[string]any{"name": ConfigName, "namespace": FluxNamespace},
 			"data": map[string]any{
-				"SHELF_DOMAIN":            s.Domain,
 				"SHELF_HOST_SUFFIX":       s.HostSuffix,
 				"SHELF_CHART_URL":         s.Chart.URL,
 				"SHELF_CHART_TAG":         s.Chart.Tag,
@@ -89,12 +99,15 @@ func (c *client) settings(ctx context.Context) (Settings, error) {
 func ParseSettings(data map[string]string) Settings {
 	insecure, _ := strconv.ParseBool(data["SHELF_INSECURE_REGISTRY"])
 	return Settings{
-		Domain:           data["SHELF_DOMAIN"],
 		HostSuffix:       data["SHELF_HOST_SUFFIX"],
 		Chart:            Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
 		InsecureRegistry: insecure,
+		LegacyDomain:     data[legacyDomainKey],
 	}
 }
+
+// legacyDomainKey held the cluster's domain until clusters had none.
+const legacyDomainKey = "SHELF_DOMAIN"
 
 // registryLogin reads the login back out of a registry Secret, or nil when it holds none.
 func registryLogin(obj *unstructured.Unstructured) (*RegistryAuth, error) {

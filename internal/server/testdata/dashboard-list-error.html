@@ -26,10 +26,10 @@
 <section class="card">
 <dl class="facts">
 <dt>Cluster</dt><dd>k3d-shelf-dev <span class="muted">https://127.0.0.1:6445</span></dd>
-<dt>Apps answer at</dt><dd>&lt;app&gt;-dev.example.com <span class="muted">unless they have a domain of their own</span></dd>
+<dt>Host suffix</dt><dd>-dev <span class="muted">in the name of every app with a domain: &lt;app&gt;-dev.&lt;domain&gt;</span></dd>
 <dt>Internet</dt>
-<dd>each app through its own Cloudflare tunnel, once it has a Cloudflare connection,
-or through a quick tunnel at a temporary address</dd>
+<dd>each app through its own Cloudflare tunnel, with a Cloudflare connection and a domain of its
+own, or through a quick tunnel at a temporary address; otherwise inside the cluster only</dd>
 </dl>
 </section>
 

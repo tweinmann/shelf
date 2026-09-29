@@ -14,13 +14,10 @@
 <section class="card">
 <dl class="facts">
 <dt>Cluster</dt><dd>{{.Status.Context}} <span class="muted">{{.Status.Server}}</span></dd>
-<dt>Apps answer at</dt><dd>{{.Status.Hosts}} <span class="muted">unless they have a domain of their own</span></dd>
+{{with .Status.Settings.HostSuffix}}<dt>Host suffix</dt><dd>{{.}} <span class="muted">in the name of every app with a domain: &lt;app&gt;{{.}}.&lt;domain&gt;</span></dd>{{end}}
 <dt>Internet</dt>
-<dd>{{if .Status.Public}}each app through its own Cloudflare tunnel, once it has a Cloudflare connection,
-or through a quick tunnel at a temporary address
-{{- else}}{{.Status.Settings.Domain}} is a reserved name, so no address can point here; an app
-reaches the internet with a domain of its own and a Cloudflare connection, or through a quick
-tunnel at a temporary address{{end}}</dd>
+<dd>each app through its own Cloudflare tunnel, with a Cloudflare connection and a domain of its
+own, or through a quick tunnel at a temporary address; otherwise inside the cluster only</dd>
 </dl>
 </section>
 {{end}}
