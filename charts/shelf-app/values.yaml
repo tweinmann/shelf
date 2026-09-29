@@ -1,9 +1,6 @@
 # The app part of the values is a resolved app.yaml, as printed by `shelf render -o app`
-# (apiVersion, components, secrets). Do not write it by hand: the chart relies on its
+# (apiVersion, name, components, secrets). Do not write it by hand: the chart relies on its
 # normalized shape and on every literal $ being escaped as $$.
-#
-# `name` is not part of app.yaml: shelf names an app when it is added, and the HelmRelease
-# passes that name next to the resolved app.yaml. It is also the release namespace.
 #
 # Secret values are never part of the values. Every name under `secrets` must be a key in the
 # Secret `shelf-secrets` in the app namespace.

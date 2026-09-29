@@ -3,6 +3,7 @@
 # Reference app: a public web frontend, a Postgres database with a generated password, and a
 # worker that proves the connection string reaches the database.
 apiVersion: shelf.dev/v1alpha1
+name: hello
 
 components:
   web:

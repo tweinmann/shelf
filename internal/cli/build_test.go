@@ -25,6 +25,7 @@ func writeApp(t *testing.T, content string, dirs ...string) string {
 }
 
 const builtApp = `apiVersion: shelf.dev/v1alpha1
+name: shop
 components:
   web: { build: ./web, port: 8080 }
   api: { build: services/api }
@@ -40,6 +41,9 @@ func TestBuildPlan(t *testing.T) {
 	var plan buildPlan
 	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
 		t.Fatalf("%v: %s", err, stdout)
+	}
+	if plan.App != "shop" {
+		t.Errorf("app %q, want shop", plan.App)
 	}
 	dir := filepath.Dir(file)
 	want := []buildItem{
@@ -57,10 +61,10 @@ func TestBuildPlan(t *testing.T) {
 }
 
 func TestBuildPlanWithoutBuilds(t *testing.T) {
-	file := writeApp(t, "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  db: { image: postgres:16 }\n")
+	file := writeApp(t, "apiVersion: shelf.dev/v1alpha1\nname: shop\ncomponents:\n  db: { image: postgres:16 }\n")
 	stdout, _, code := run(t, "build-plan", file)
 	var plan buildPlan
-	if code != 0 || json.Unmarshal([]byte(stdout), &plan) != nil || len(plan.Builds) != 0 {
+	if code != 0 || json.Unmarshal([]byte(stdout), &plan) != nil || plan.App != "shop" || len(plan.Builds) != 0 {
 		t.Errorf("exit code %d, stdout %q", code, stdout)
 	}
 }

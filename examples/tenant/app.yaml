@@ -3,6 +3,7 @@
 # A tenant app: one web component built from ./web by the shelf workflow. Change MESSAGE and
 # push to see the platform roll out the new version by itself.
 apiVersion: shelf.dev/v1alpha1
+name: greeter
 
 components:
   web:

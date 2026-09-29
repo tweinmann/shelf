@@ -9,6 +9,7 @@ import (
 // helloValues is what the deploy artifact of examples/hello leaves in the cluster: a routed
 // component, one that only listens inside, and one with no port at all.
 const helloValues = `apiVersion: shelf.dev/v1alpha1
+name: hello
 components:
   web:
     image: traefik/whoami:v1.11.0@sha256:1f4e
@@ -30,7 +31,7 @@ func valuesMap(doc string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
-		"metadata":   map[string]any{"name": "shelf-values", "namespace": "hello"},
+		"metadata":   map[string]any{"name": "hello-values", "namespace": "hello"},
 		"data":       map[string]any{"app.yaml": doc},
 	}}
 }

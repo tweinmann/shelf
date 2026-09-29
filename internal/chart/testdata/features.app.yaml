@@ -2,6 +2,7 @@
 # delay, secret references in command, args and env, literal $, a secret referenced only in
 # escaped form, several instances with volumes, and a StatefulSet without ports.
 apiVersion: shelf.dev/v1alpha1
+name: features
 
 components:
   api:

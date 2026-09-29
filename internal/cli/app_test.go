@@ -15,7 +15,7 @@ const helloArtifact = "oci://shelf-registry:5000/hello-deploy:main"
 func TestAppAdd(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	h.app = appWithSecrets("db-password")
+	h.app = appWithSecrets("hello", "db-password")
 
 	stdout, stderr, code := h.run(t, "app", "add", "hello", helloArtifact, "--insecure-registry")
 	if code != 0 {
@@ -52,7 +52,7 @@ func TestAppAdd(t *testing.T) {
 	}
 
 	// A second add with a new secret keeps the old value and generates the new one.
-	h.app = appWithSecrets("db-password", "api-key")
+	h.app = appWithSecrets("hello", "db-password", "api-key")
 	stdout, stderr, code = h.run(t, "app", "add", "hello", helloArtifact)
 	if code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr)
@@ -79,7 +79,7 @@ func TestAppAdd(t *testing.T) {
 func TestAppAddWithoutSecrets(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	h.app = appWithSecrets()
+	h.app = appWithSecrets("web")
 
 	_, stderr, code := h.run(t, "app", "add", "web", "oci://ghcr.io/o/web-deploy:main")
 	if code != 0 {
@@ -93,30 +93,6 @@ func TestAppAddWithoutSecrets(t *testing.T) {
 	}
 }
 
-// app.yaml carries no name, so one artifact can be added as several apps, each with secret
-// values and a backup of its own.
-func TestAppAddOneArtifactTwice(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t)
-	h.app = appWithSecrets("db-password")
-
-	h.mustRun(t, "app", "add", "hello", helloArtifact)
-	h.mustRun(t, "app", "add", "hello-copy", helloArtifact)
-	if len(h.cluster.added) != 2 || h.cluster.added[0].Name != "hello" || h.cluster.added[1].Name != "hello-copy" {
-		t.Fatalf("added %+v", h.cluster.added)
-	}
-	first, second := h.cluster.added[0].Secrets["db-password"], h.cluster.added[1].Secrets["db-password"]
-	if first == "" || first == second {
-		t.Errorf("the two apps share a secret value: %q and %q", first, second)
-	}
-	for app, want := range map[string]string{"hello": first, "hello-copy": second} {
-		saved, err := h.backup.Load(app)
-		if err != nil || saved["db-password"] != want {
-			t.Errorf("backup of %s: %v, %v", app, saved, err)
-		}
-	}
-}
-
 func TestAppAddErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -126,9 +102,9 @@ func TestAppAddErrors(t *testing.T) {
 		fetchErr error
 		wantErr  string
 	}{
-		{"invalid name", []string{"Hello", helloArtifact}, appWithSecrets(), nil, "DNS label"},
-		{"invalid reference", []string{"hello", "shelf-registry:5000/hello-deploy:main"}, appWithSecrets(), nil, "oci://"},
-		{"reserved name", []string{"shelf-system", helloArtifact}, appWithSecrets(), nil, "reserved for the platform"},
+		{"invalid name", []string{"Hello", helloArtifact}, appWithSecrets("hello"), nil, "DNS label"},
+		{"invalid reference", []string{"hello", "shelf-registry:5000/hello-deploy:main"}, appWithSecrets("hello"), nil, "oci://"},
+		{"other app", []string{"hello", helloArtifact}, appWithSecrets("other"), nil, `deploys app "other"`},
 		{"fetch fails", []string{"hello", helloArtifact}, nil, errors.New("manifest unknown"), "manifest unknown"},
 	}
 	for _, tt := range tests {
@@ -199,7 +175,7 @@ func TestAppRm(t *testing.T) {
 func TestAppAddWithoutCloudflare(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t).public()
-	h.app = appWithSecrets()
+	h.app = appWithSecrets("greeter")
 	h.defineCloudflare(t, "tobile", "cf-secret-token", "")
 
 	h.mustRun(t, "app", "add", "greeter", greeterArtifact)

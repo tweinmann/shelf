@@ -1,6 +1,5 @@
 # Builds everything app.yaml declares with `build`, renders it and pushes the deploy artifact
-# ghcr.io/tweinmann/greeter. The packages are named after the repository unless `package` says
-# otherwise; this repository keeps the name its packages had before app.yaml lost its `name`.
+# ghcr.io/tweinmann/greeter-deploy. Nothing in here is specific to this app.
 name: deploy
 
 on:
@@ -15,5 +14,3 @@ permissions:
 jobs:
   shelf:
     uses: tweinmann/shelf/.github/workflows/build.yml@v0
-    with:
-      package: greeter
