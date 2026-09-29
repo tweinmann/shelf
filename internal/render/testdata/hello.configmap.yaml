@@ -1,9 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: hello-values
-  labels:
-    shelf.dev/app: hello
+  name: shelf-values
 data:
   app.yaml: |
     apiVersion: shelf.dev/v1alpha1

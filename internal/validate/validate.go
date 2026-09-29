@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	appNameRE       = regexp.MustCompile(schema.AppNamePattern)
+	packageNameRE   = regexp.MustCompile(schema.AppNamePattern)
 	componentNameRE = regexp.MustCompile(schema.ComponentNamePattern)
 	volumeNameRE    = regexp.MustCompile(schema.VolumeNamePattern)
 	secretNameRE    = regexp.MustCompile(schema.SecretNamePattern)
@@ -30,11 +30,6 @@ var reservedComponentNames = []string{"secrets", "app", "shelf"}
 // headlessSuffix names the extra headless Service of a StatefulSet component, so no component
 // name may end with it.
 const headlessSuffix = "-headless"
-
-// reservedAppNames are namespaces the platform or Kubernetes already uses.
-var reservedAppNames = []string{"default", "flux-system", "traefik", "cloudflared"}
-
-var reservedAppPrefixes = []string{"kube-", "shelf-"}
 
 type checker struct {
 	doc      *schema.Document
@@ -67,7 +62,7 @@ func Validate(doc *schema.Document) Findings {
 	if app.APIVersion != schema.APIVersion {
 		c.errorf([]string{"apiVersion"}, "must be %s, got %q", schema.APIVersion, app.APIVersion)
 	}
-	c.checkAppName(app.Name)
+	c.checkPackageName(app.Name)
 
 	if len(app.Components) == 0 {
 		c.errorf([]string{"components"}, "at least one component is required")
@@ -82,19 +77,18 @@ func Validate(doc *schema.Document) Findings {
 	return c.findings
 }
 
-func (c *checker) checkAppName(n string) {
+// checkPackageName checks the name the workflow publishes the packages under. It is not the
+// app's name in shelf: that is given at `shelf app add` and checked by ops.CheckAppName.
+func (c *checker) checkPackageName(n string) {
 	p := []string{"name"}
 	switch {
 	case n == "":
 		c.errorf(p, "is required")
 	case len(n) > schema.MaxAppNameLength:
 		c.errorf(p, "must be at most %d characters", schema.MaxAppNameLength)
-	case !appNameRE.MatchString(n):
+	case !packageNameRE.MatchString(n):
 		c.errorf(p, "%q must consist of lowercase letters, digits and '-', and start and end "+
 			"with a letter or digit", n)
-	case slices.Contains(reservedAppNames, n) ||
-		slices.ContainsFunc(reservedAppPrefixes, func(pre string) bool { return strings.HasPrefix(n, pre) }):
-		c.errorf(p, "%q is reserved for the platform", n)
 	}
 }
 

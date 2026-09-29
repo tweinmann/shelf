@@ -193,8 +193,9 @@ jobs:
 ```
 
 The workflow builds every `build` directory for `linux/arm64`, pushes the images, pins them to
-their digests, and publishes the deploy artifact. Everything of an app lives under its name in
-the registry: the artifact is `ghcr.io/<owner>/<app>`, an image is `ghcr.io/<owner>/<app>/<component>`.
+their digests, and publishes the deploy artifact. Everything lives under the package name, which
+is `name` in `app.yaml`: the artifact is `ghcr.io/<owner>/<name>`, an image is
+`ghcr.io/<owner>/<name>/<component>`.
 Image names never appear in `app.yaml`. Ready-made images such as `postgres:16` stay as `image:`.
 [examples/tenant](examples/tenant) is a complete example repository.
 
@@ -211,8 +212,12 @@ Once per app, add it. shelf generates the app's secrets and keeps a backup in
 
 ```sh
 docker login ghcr.io          # shelf reads the artifact with your Docker credentials
-shelf app add <app> oci://ghcr.io/<owner>/<app>:main
+shelf app add <app> oci://ghcr.io/<owner>/<name>:main
 ```
+
+`<app>` is yours to choose and need not match the package: it becomes the app's namespace and
+its host `<app>.<domain>`. The same artifact can be added under several names, for instance
+`shop` and `shop-staging`; each gets a namespace, secrets and a host of its own.
 
 From then on, every push to `main` reaches the cluster by itself, usually within two minutes.
 `shelf app rm <app>` removes the app with all its data.
@@ -224,7 +229,7 @@ A complete example with a web frontend, an API and a Postgres database:
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/tweinmann/shelf/main/schema/app.schema.json
 apiVersion: shelf.dev/v1alpha1
-name: shop                       # becomes the namespace and shop.<your-domain>
+name: shop                       # the package name: ghcr.io/<owner>/shop
 
 components:
   web:
@@ -339,9 +344,9 @@ drift.
 | `shelf validate <app.yaml>...` | Checks one or more files without network access. Errors and warnings show file, line and field. Exits with 1 on errors. |
 | `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <component>=<reference>` supplies the image of a component with a `build` directory. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
-| `shelf build-plan <app.yaml>` | Prints the app name and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
+| `shelf build-plan <app.yaml>` | Prints the package name (`name` in `app.yaml`) and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
 | `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. `--host-suffix -dev` separates clusters that share a DNS zone: apps are then reachable at `<app>-dev.<domain>`. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
-| `shelf app add <app> <oci://…:tag>` | Deploys an app from its deploy artifact and keeps it updated. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. On an exposed cluster it publishes the app's host name as a DNS record (`CF_API_TOKEN`). Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
+| `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. On an exposed cluster it publishes the app's host name as a DNS record (`CF_API_TOKEN`). Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
 | `shelf app redeploy <app>` | Fetches the app's artifact again under the tag it is registered with and rolls out what it finds. For a tag that moved, or a deploy worth another try. |
 | `shelf app secrets <app>` | Lists the names of the generated secrets; `--reveal` prints the values. |
 | `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also names its components and where each of them answers. Same chain as the admin UI shows. |

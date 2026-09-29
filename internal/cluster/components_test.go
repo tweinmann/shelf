@@ -31,7 +31,7 @@ func valuesMap(doc string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
-		"metadata":   map[string]any{"name": "hello-values", "namespace": "hello"},
+		"metadata":   map[string]any{"name": "shelf-values", "namespace": "hello"},
 		"data":       map[string]any{"app.yaml": doc},
 	}}
 }

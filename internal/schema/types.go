@@ -24,7 +24,8 @@ const (
 
 // Name patterns, shared by validation and the JSON Schema.
 const (
-	// AppNamePattern is a DNS-1123 label: the app name becomes the namespace name.
+	// AppNamePattern is a DNS-1123 label: the app name becomes the namespace name. The package
+	// name in app.yaml follows the same rule, so that it can serve as the app name as well.
 	AppNamePattern = `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// ComponentNamePattern is a DNS-1035 label: the component name becomes a Service name.
 	ComponentNamePattern = `^[a-z]([-a-z0-9]*[a-z0-9])?$`
@@ -41,7 +42,7 @@ const (
 // App is the root of an app.yaml file.
 type App struct {
 	APIVersion string                `yaml:"apiVersion" jsonschema_description:"Always shelf.dev/v1alpha1."`
-	Name       string                `yaml:"name" jsonschema_description:"App name. Becomes the namespace and the host name <name>.<domain>."`
+	Name       string                `yaml:"name" jsonschema_description:"Package name: the workflow publishes the deploy artifact as ghcr.io/<owner>/<name> and built images below it. Not the app's name in shelf, which is given at shelf app add."`
 	Components map[string]*Component `yaml:"components" jsonschema_description:"The containers that make up the app, by name."`
 	Secrets    map[string]*Secret    `yaml:"secrets,omitempty" jsonschema_description:"Secrets referenced as ${secrets.<name>}, by name."`
 }

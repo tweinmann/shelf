@@ -50,6 +50,8 @@ with `--registry`/`--cloudflare`. An exposed app has its own tunnel in the conne
 cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Level 1
 green; level 2 and 3 not run yet, because migrating the dev cluster takes `greeter-dev.tobile.ch`
 off the shared tunnel.
+Also in 8b (2026-09-29): `name` in app.yaml names the packages only; the app's name is chosen at
+`shelf app add`, so one artifact can run as several apps. Level 1 green; release v0.5.0 open.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
@@ -144,8 +146,11 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
 - A component has either `image:` or `build: ./dir`; package names are the workflow's business,
-  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<app>`, a built image
-  `ghcr.io/<owner>/<app>/<component>`
+  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<name>`, a built image
+  `ghcr.io/<owner>/<name>/<component>`
+- `name` in app.yaml is the package name only. An app is named at `shelf app add <app>`
+  (`ops.CheckAppName`), so one artifact can run as several apps; the artifact's ConfigMap is
+  `shelf-values`, and the HelmRelease passes the app's name as `values`
 - Reading a deploy artifact uses the login of the app's registry connection, and only for the
   registry it is for (`ghcr.io`); `ops.Env.Pull` overrides it, the Docker keychain is the last
   resort. A machine running shelf as a service has no Docker config

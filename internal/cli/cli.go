@@ -240,7 +240,7 @@ images first. Registry credentials come from the Docker config (docker login).`,
 // writeSummary lists the objects the app will get, by name.
 func writeSummary(w io.Writer, app *schema.App) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "\nApp %s (namespace %s):\n", app.Name, app.Name)
+	fmt.Fprintf(tw, "\nPackage %s:\n", app.Name)
 	for _, compName := range slices.Sorted(maps.Keys(app.Components)) {
 		comp := app.Components[compName]
 		kind := "Deployment"

@@ -44,8 +44,8 @@ users:
 type fakeCluster struct {
 	settings    cluster.Settings
 	settingsErr error
-	// stored are the secret values of the app in the cluster.
-	stored map[string]string
+	// stored are the secret values of the apps in the cluster, by app.
+	stored map[string]map[string]string
 	// configs are the apps as they are registered, by name. AddApp writes them, as the real
 	// cluster does, so that a second command sees what the first one stored.
 	configs map[string]*cluster.AppConfig
@@ -73,7 +73,10 @@ func (f *fakeCluster) Install(_ context.Context, cfg *rest.Config, o cluster.Opt
 
 func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOptions) error {
 	f.added = append(f.added, o)
-	f.stored = o.Secrets
+	if f.stored == nil {
+		f.stored = map[string]map[string]string{}
+	}
+	f.stored[o.Name] = o.Secrets
 	if f.configs == nil {
 		f.configs = map[string]*cluster.AppConfig{}
 	}
@@ -108,8 +111,8 @@ func (f *fakeCluster) Redeploy(_ context.Context, _ *rest.Config, app string, _ 
 	return nil
 }
 
-func (f *fakeCluster) AppSecrets(_ context.Context, _ *rest.Config, _ string) (map[string]string, error) {
-	return f.stored, nil
+func (f *fakeCluster) AppSecrets(_ context.Context, _ *rest.Config, app string) (map[string]string, error) {
+	return f.stored[app], nil
 }
 
 func (f *fakeCluster) AppNames(context.Context, *rest.Config) ([]string, error) { return f.apps, nil }
@@ -254,7 +257,7 @@ func (h *harness) runWithInput(t *testing.T, stdin string, args ...string) (stdo
 	return out.String(), errOut.String(), code
 }
 
-// appWithSecrets is the app a deploy artifact would carry.
+// appWithSecrets is the app a deploy artifact would carry; name is its package name.
 func appWithSecrets(name string, secretNames ...string) *schema.App {
 	app := &schema.App{APIVersion: schema.APIVersion, Name: name, Secrets: map[string]*schema.Secret{}}
 	for _, s := range secretNames {

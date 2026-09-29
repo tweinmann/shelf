@@ -121,11 +121,14 @@ func Decode(r io.Reader) (*schema.App, error) {
 }
 
 type manifest struct {
-	Kind string            `yaml:"kind"`
-	Data map[string]string `yaml:"data"`
+	Kind     string                `yaml:"kind"`
+	Metadata struct{ Name string } `yaml:"metadata"`
+	Data     map[string]string     `yaml:"data"`
 }
 
-// appValues returns the app.yaml values of all ConfigMaps in a multi-document YAML file.
+// appValues returns the app.yaml values of all ConfigMaps in a multi-document YAML file. The
+// ConfigMap must be render.ConfigMapName, which the HelmRelease of every app reads: before
+// v0.5.0 it was named after app.yaml's name, which is the package name now, not the app's.
 func appValues(data []byte) ([]string, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out []string
@@ -138,9 +141,15 @@ func appValues(data []byte) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if v, ok := m.Data[render.ConfigMapKey]; ok && m.Kind == "ConfigMap" {
-			out = append(out, v)
+		v, ok := m.Data[render.ConfigMapKey]
+		if !ok || m.Kind != "ConfigMap" {
+			continue
 		}
+		if m.Metadata.Name != render.ConfigMapName {
+			return nil, fmt.Errorf("the artifact was rendered by a shelf older than v0.5.0 (ConfigMap %s, not %s); push it again",
+				m.Metadata.Name, render.ConfigMapName)
+		}
+		out = append(out, v)
 	}
 }
 

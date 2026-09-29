@@ -347,8 +347,8 @@ secrets:
 	if err := yaml.Unmarshal(cm, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Metadata.Name != "shop-values" || parsed.Metadata.Namespace != "" ||
-		parsed.Metadata.Labels["shelf.dev/app"] != "shop" {
+	// Neither namespace nor app: the artifact does not know which app it becomes.
+	if parsed.Metadata.Name != "shelf-values" || parsed.Metadata.Namespace != "" || len(parsed.Metadata.Labels) != 0 {
 		t.Errorf("metadata = %+v", parsed.Metadata)
 	}
 	// The embedded app.yaml must parse back as an app and keep the reference.

@@ -17,11 +17,12 @@ import (
 
 var componentNameRE = regexp.MustCompile(schema.ComponentNamePattern)
 
-// buildPlan is what a CI needs before it can render an app.yaml: the app name, which the
-// package names are derived from, and the components it has to build.
+// buildPlan is what a CI needs before it can render an app.yaml: the package name, app.yaml's
+// `name`, and the components it has to build. The app's name in shelf is not part of it: that
+// is chosen at `shelf app add`.
 type buildPlan struct {
-	App    string      `json:"app"`
-	Builds []buildItem `json:"builds"`
+	Package string      `json:"package"`
+	Builds  []buildItem `json:"builds"`
 }
 
 // buildItem is one component that has to be built before rendering.
@@ -34,12 +35,15 @@ type buildItem struct {
 func newBuildPlanCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "build-plan <app.yaml>",
-		Short: "Print the app name and the components that have to be built, as JSON",
-		Long: `Print {app, builds} as JSON: the app name, and every component with a build directory.
-The build contexts are relative to the app.yaml, and printed relative to the working directory.
+		Short: "Print the package name and the components that have to be built, as JSON",
+		Long: `Print {package, builds} as JSON: the package name (app.yaml's name), and every component
+with a build directory. The build contexts are relative to the app.yaml, and printed relative to
+the working directory.
 
-A CI workflow names the packages after the app, builds each component, pushes the image and
-passes the result to ` + "`shelf render --image <component>=<reference>`" + `.`,
+A CI workflow publishes the deploy artifact as ghcr.io/<owner>/<package> and the images below
+it: it builds each component, pushes the image and passes the result to
+` + "`shelf render --image <component>=<reference>`" + `. The app's name in shelf is chosen at
+` + "`shelf app add`" + `, so one package can be deployed as several apps.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file := args[0]
@@ -47,7 +51,7 @@ passes the result to ` + "`shelf render --image <component>=<reference>`" + `.`,
 			if err != nil {
 				return err
 			}
-			plan := buildPlan{App: doc.App.Name, Builds: []buildItem{}}
+			plan := buildPlan{Package: doc.App.Name, Builds: []buildItem{}}
 			for _, compName := range slices.Sorted(maps.Keys(doc.App.Components)) {
 				comp := doc.App.Components[compName]
 				if comp == nil || !comp.IsBuilt() {

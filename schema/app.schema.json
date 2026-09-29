@@ -233,7 +233,7 @@
       "type": "string",
       "maxLength": 40,
       "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-      "description": "App name. Becomes the namespace and the host name \u003cname\u003e.\u003cdomain\u003e."
+      "description": "Package name: the workflow publishes the deploy artifact as ghcr.io/\u003cowner\u003e/\u003cname\u003e and built images below it. Not the app's name in shelf, which is given at shelf app add."
     },
     "components": {
       "additionalProperties": {

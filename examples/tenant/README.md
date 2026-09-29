@@ -10,4 +10,10 @@ Add the app to a shelf cluster once:
 shelf app add greeter oci://ghcr.io/tweinmann/greeter:main
 ```
 
-From then on, the platform rolls out every push by itself, usually within two minutes.
+From then on, the platform rolls out every push by itself, usually within two minutes. The
+`name` in `app.yaml` only names the packages; the app's name is chosen when it is added, so the
+same artifact can run more than once:
+
+```sh
+shelf app add greeter-staging oci://ghcr.io/tweinmann/greeter:main
+```

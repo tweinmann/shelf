@@ -2,6 +2,10 @@
 # (apiVersion, name, components, secrets). Do not write it by hand: the chart relies on its
 # normalized shape and on every literal $ being escaped as $$.
 #
+# `name` is the app's name, which is also the release namespace. The resolved app.yaml carries a
+# `name` too, but that one names the packages; the HelmRelease passes the name shelf gave the
+# app as `values`, which win over the app.yaml from `valuesFrom`.
+#
 # Secret values are never part of the values. Every name under `secrets` must be a key in the
 # Secret `shelf-secrets` in the app namespace.
 apiVersion: shelf.dev/v1alpha1

@@ -93,6 +93,30 @@ func TestAppAddWithoutSecrets(t *testing.T) {
 	}
 }
 
+// app.yaml's name only names the packages, so one artifact can be added as several apps, each
+// with secret values and a backup of its own, and under a name other than its package's.
+func TestAppAddOneArtifactTwice(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.app = appWithSecrets("greeter", "db-password")
+
+	h.mustRun(t, "app", "add", "hello", helloArtifact)
+	h.mustRun(t, "app", "add", "hello-copy", helloArtifact)
+	if len(h.cluster.added) != 2 || h.cluster.added[0].Name != "hello" || h.cluster.added[1].Name != "hello-copy" {
+		t.Fatalf("added %+v", h.cluster.added)
+	}
+	first, second := h.cluster.added[0].Secrets["db-password"], h.cluster.added[1].Secrets["db-password"]
+	if first == "" || first == second {
+		t.Errorf("the two apps share a secret value: %q and %q", first, second)
+	}
+	for app, want := range map[string]string{"hello": first, "hello-copy": second} {
+		saved, err := h.backup.Load(app)
+		if err != nil || saved["db-password"] != want {
+			t.Errorf("backup of %s: %v, %v", app, saved, err)
+		}
+	}
+}
+
 func TestAppAddErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -104,7 +128,7 @@ func TestAppAddErrors(t *testing.T) {
 	}{
 		{"invalid name", []string{"Hello", helloArtifact}, appWithSecrets("hello"), nil, "DNS label"},
 		{"invalid reference", []string{"hello", "shelf-registry:5000/hello-deploy:main"}, appWithSecrets("hello"), nil, "oci://"},
-		{"other app", []string{"hello", helloArtifact}, appWithSecrets("other"), nil, `deploys app "other"`},
+		{"reserved name", []string{"shelf-system", helloArtifact}, appWithSecrets("hello"), nil, "reserved for the platform"},
 		{"fetch fails", []string{"hello", helloArtifact}, nil, errors.New("manifest unknown"), "manifest unknown"},
 	}
 	for _, tt := range tests {

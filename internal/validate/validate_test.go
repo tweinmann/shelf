@@ -122,6 +122,8 @@ components:
 components:
   web: { image: nginx, instances: 3 }
 `,
+		// The name only names the packages, so a platform namespace is no reason to refuse it.
+		"package named like a platform namespace": "apiVersion: shelf.dev/v1alpha1\nname: traefik\ncomponents:\n  web: { image: nginx }\n",
 		"longest names": "apiVersion: shelf.dev/v1alpha1\nname: " + strings.Repeat("a", 40) + `
 components:
   ` + strings.Repeat("c", 40) + `:
@@ -153,9 +155,6 @@ func TestErrors(t *testing.T) {
 		{"uppercase name", "apiVersion: shelf.dev/v1alpha1\nname: Shop\ncomponents:\n  web: { image: nginx }\n", "name", "lowercase"},
 		{"name ends with dash", "apiVersion: shelf.dev/v1alpha1\nname: shop-\ncomponents:\n  web: { image: nginx }\n", "name", "lowercase"},
 		{"name too long", "apiVersion: shelf.dev/v1alpha1\nname: " + strings.Repeat("a", 41) + "\ncomponents:\n  web: { image: nginx }\n", "name", "at most 40"},
-		{"reserved name", "apiVersion: shelf.dev/v1alpha1\nname: flux-system\ncomponents:\n  web: { image: nginx }\n", "name", "reserved"},
-		{"reserved name prefix kube", "apiVersion: shelf.dev/v1alpha1\nname: kube-public\ncomponents:\n  web: { image: nginx }\n", "name", "reserved"},
-		{"reserved name prefix shelf", "apiVersion: shelf.dev/v1alpha1\nname: shelf-system\ncomponents:\n  web: { image: nginx }\n", "name", "reserved"},
 
 		// components
 		{"no components", head, "components", "at least one component"},

@@ -22,7 +22,7 @@ test:
     # -race, because the CLI tests run in parallel and the server will run operations concurrently.
     go test -race ./...
     helm lint --strict charts/shelf-app --namespace hello \
-      -f internal/cli/testdata/render-hello.app.yaml --set platform.domain=dev.local
+      -f internal/cli/testdata/render-hello.app.yaml --set name=hello --set platform.domain=dev.local
     # Custom resources (Flux, Flux Operator, Traefik) are checked against the CRDs-catalog.
     schemas=(-schema-location default -schema-location \
       'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{"{{"}}.Group{{"}}"}}/{{"{{"}}.ResourceKind{{"}}"}}_{{"{{"}}.ResourceAPIVersion{{"}}"}}.json')

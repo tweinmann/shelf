@@ -60,7 +60,7 @@ step "helm install"
 start=$SECONDS
 helm_deploy() {
   helm upgrade --install "$release" "$repo/charts/shelf-app" -n "$ns" -f "$1" \
-    --set platform.domain=dev.local --wait --timeout 3m >/dev/null
+    --set name="$ns" --set platform.domain=dev.local --wait --timeout 3m >/dev/null
 }
 helm_deploy "$work/values.yaml"
 echo "installed and ready in $((SECONDS - start)) s"

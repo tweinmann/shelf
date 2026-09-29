@@ -42,8 +42,8 @@ func TestBuildPlan(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
 		t.Fatalf("%v: %s", err, stdout)
 	}
-	if plan.App != "shop" {
-		t.Errorf("app %q, want shop", plan.App)
+	if plan.Package != "shop" {
+		t.Errorf("package %q, want shop", plan.Package)
 	}
 	dir := filepath.Dir(file)
 	want := []buildItem{
@@ -64,7 +64,7 @@ func TestBuildPlanWithoutBuilds(t *testing.T) {
 	file := writeApp(t, "apiVersion: shelf.dev/v1alpha1\nname: shop\ncomponents:\n  db: { image: postgres:16 }\n")
 	stdout, _, code := run(t, "build-plan", file)
 	var plan buildPlan
-	if code != 0 || json.Unmarshal([]byte(stdout), &plan) != nil || plan.App != "shop" || len(plan.Builds) != 0 {
+	if code != 0 || json.Unmarshal([]byte(stdout), &plan) != nil || plan.Package != "shop" || len(plan.Builds) != 0 {
 		t.Errorf("exit code %d, stdout %q", code, stdout)
 	}
 }

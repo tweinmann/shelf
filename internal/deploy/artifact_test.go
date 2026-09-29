@@ -77,6 +77,9 @@ func TestDecode(t *testing.T) {
 		{name: "invalid app", files: map[string]string{
 			"configmap.yaml": strings.Replace(hello, "    name: hello\n", "    name: Hello\n", 1),
 		}, wantErr: "invalid"},
+		{name: "rendered by an older shelf", files: map[string]string{
+			"configmap.yaml": strings.Replace(hello, "  name: shelf-values\n", "  name: hello-values\n", 1),
+		}, wantErr: "older than v0.5.0 (ConfigMap hello-values"},
 		{name: "broken yaml", files: map[string]string{"x.yaml": "kind: [\n"}, wantErr: "x.yaml"},
 	}
 	for _, tt := range tests {

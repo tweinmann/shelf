@@ -1,5 +1,5 @@
 
-App hello (namespace hello):
+Package hello:
   check  Deployment × 1   postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   db     StatefulSet × 1  postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
          Service db       main=5432

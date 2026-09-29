@@ -3,7 +3,7 @@
 {{- fail (printf "apiVersion must be shelf.dev/v1alpha1, got %q" .Values.apiVersion) }}
 {{- end }}
 {{- if not .Values.name }}
-{{- fail "name is required; the values must be a resolved app.yaml (shelf render -o app)" }}
+{{- fail "name is required; the HelmRelease passes the name shelf gave the app" }}
 {{- end }}
 {{- if ne .Values.name .Release.Namespace }}
 {{- fail (printf "app %q must be installed into namespace %q, not %q" .Values.name .Values.name .Release.Namespace) }}

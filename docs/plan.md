@@ -190,6 +190,18 @@ exposed: the release became "latest" at once, the major tag moved a minute later
 build in between ran the old workflow with the new binary. The release is now created with
 `--latest=false` and marked latest right after the major tag moves.
 
+Decided on 2026-09-29, after the revert, when the maintainer asked to decouple app.yaml's name
+from the app's name in shelf:
+
+| Question | Decision |
+|---|---|
+| What `name` in app.yaml means | **The package name, and nothing else.** It stays required and keeps its rules (DNS label, at most 40 characters); the workflow publishes `ghcr.io/<owner>/<name>` and `…/<name>/<component>` as before, so a tenant repository changes nothing. It no longer has to avoid platform namespaces: a package may be called `traefik`. |
+| The app's name | **Chosen at `shelf app add <app>`**, checked by `ops.CheckAppName`, which now also refuses the platform's namespaces (`default`, `flux-system`, `traefik`, `cloudflared`, `kube-*`, `shelf-*`). `shelf app add` no longer refuses an artifact whose package has another name, so one artifact can run as several apps — the goal of the reverted Phase 8c, without taking the name out of app.yaml. |
+| The ConfigMap in the artifact | **`shelf-values` in every app**, without labels; the deploy Kustomization labels it with the app. The HelmRelease reads it through `valuesFrom` and passes `name: << inputs.name >>` as `values`, which win over the package name in the resolved app.yaml. |
+| Artifacts from before | **Refused with a hint**: an artifact whose ConfigMap is still `<name>-values` was rendered by a shelf older than v0.5.0 and must be pushed again. No transition code; a running app stays on its last revision until its tenant pushes. |
+| `shelf build-plan` | **Prints `{package, builds}`** instead of `{app, builds}`, and the workflow reads `.package`. The fix to `release.yml` switches workflow and binary together. |
+| Phase | No phase of its own: a change to Phase 8b's conventions, released as v0.5.0. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -556,8 +568,8 @@ Cluster:                                                      ▼
    ResourceSetInputProvider (per app, from CLI)    OCIRepository ──► Kustomization
                     │                                                     │
                     ▼                                                     ▼
-              ResourceSet ──────────────► HelmRelease           ConfigMap <app>-values
-                                               │  valuesFrom ◄──────────┘
+              ResourceSet ──────────────► HelmRelease           ConfigMap shelf-values
+                   (values: name = the app)    │  valuesFrom ◄──────────┘
                                                ▼
                                   chart shelf-app (OCI, version pinned by the platform)
                                                │
@@ -575,9 +587,11 @@ stays stable.
 For every build, the tenant workflow pushes:
 
 1. Images for `linux/arm64` to GHCR
-2. An OCI artifact `ghcr.io/<owner>/<app>`; images built in the same repository are pushed as
-   `ghcr.io/<owner>/<app>/<component>`, so everything of an app sits under its name
-   - Content: a ConfigMap manifest holding the resolved `app.yaml` under the key `app.yaml`
+2. An OCI artifact `ghcr.io/<owner>/<package>`; images built in the same repository are pushed as
+   `ghcr.io/<owner>/<package>/<component>`. The package is `name` in app.yaml; it names the
+   artifact, not an app, which is named at `shelf app add` — one artifact can become several apps
+   - Content: the ConfigMap `shelf-values` (no namespace, no labels) holding the resolved
+     `app.yaml` under the key `app.yaml`
      - images pinned by digest
      - `${<component>.host}` / `${<component>.port}` / `${<component>.ports.<name>}` substituted
      - `${secrets.*}` left unresolved (resolved by the chart)
@@ -587,13 +601,14 @@ For every build, the tenant workflow pushes:
 3. A call to the Flux webhook receiver (from Phase 4; before that, `OCIRepository` polling every
    1m is sufficient)
 
-Unknown `apiVersion` → the artifact is rejected.
+Unknown `apiVersion` → the artifact is rejected, and so is an artifact whose ConfigMap is not
+`shelf-values` (rendered before v0.5.0).
 
 ## Schema `shelf.dev/v1alpha1`
 
 ```yaml
 apiVersion: shelf.dev/v1alpha1
-name: shop
+name: shop                  # the package name, not the app's name in shelf
 
 components:
   web:
@@ -649,8 +664,10 @@ References in `env`, `command` and `args`: `${<component>.host}` (the Service na
 `${<component>.port}` (only for a component with exactly one port),
 `${<component>.ports.<name>}`, `${secrets.<name>}`. Anything else in `${…}` is an error.
 
-Name rules: app names are DNS-1123 labels, component names DNS-1035 labels, both at most 40
-characters so suffixes (`-values`, StatefulSet pod names, revision hashes) still fit into 63.
+Name rules: package and app names are DNS-1123 labels, component names DNS-1035 labels, all at
+most 40 characters so suffixes (tunnel names, StatefulSet pod names, revision hashes) still fit
+into 63. The app name, given at `shelf app add` and checked by `ops.CheckAppName`, must not be a
+platform namespace (`default`, `flux-system`, `traefik`, `cloudflared`, `kube-*`, `shelf-*`).
 Secret names allow no `_`, so `SHELF_SECRET_<NAME>` cannot collide. Env names are C
 identifiers, and the prefix `SHELF_SECRET_` is reserved.
 
