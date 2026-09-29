@@ -98,7 +98,7 @@ const greeterArtifact = "oci://ghcr.io/o/greeter:main"
 func cloudflareHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t).public()
-	h.app = appWithSecrets("greeter")
+	h.app = appWithSecrets()
 	h.cluster.found = true
 	h.defineCloudflare(t, "tobile", "cf-secret-token", "")
 	return h
@@ -539,7 +539,7 @@ func TestAccessErrors(t *testing.T) {
 func TestAppRegistryConnection(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	h.app = appWithSecrets("hello")
+	h.app = appWithSecrets()
 	const private = "oci://ghcr.io/tweinmann/hello:main"
 	h.defineRegistry(t, "ghcr", "tobi", "ghcr-secret-token")
 

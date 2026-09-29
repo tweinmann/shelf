@@ -147,11 +147,14 @@ spec:
         chartRef:
           kind: OCIRepository
           name: shelf-app
+        # The resolved app.yaml from the deploy artifact. It names no app: the name is shelf's,
+        # so one artifact can be deployed as several apps.
         valuesFrom:
           - kind: ConfigMap
-            name: << inputs.name >>-values
+            name: shelf-values
             valuesKey: app.yaml
         values:
+          name: << inputs.name >>
           platform:
             # The app's own domain, or the cluster's.
             domain: "<< if inputs.domain >><< inputs.domain >><< else >>${SHELF_DOMAIN}<< end >>"

@@ -19,6 +19,11 @@ type Document struct {
 	root *yaml.Node
 }
 
+// ErrAppName reports an app.yaml that still names its app. The name moved out of app.yaml in
+// v0.3.0: shelf names an app when it is added, so one app.yaml can be deployed more than once.
+var ErrAppName = errors.New("name is no longer part of app.yaml: shelf names an app when it is " +
+	"added (shelf app add <name> <artifact>), so one app.yaml can be deployed more than once")
+
 // Parse decodes an app.yaml file strictly: unknown fields, duplicate keys, wrong types and
 // multiple documents are errors. Semantic checks live in package validate.
 func Parse(file string, data []byte) (*Document, error) {
@@ -28,6 +33,11 @@ func Parse(file string, data []byte) (*Document, error) {
 	}
 	if root.Kind == 0 {
 		return nil, fmt.Errorf("%s: file is empty", file)
+	}
+	if top := root.Content[0]; top.Kind == yaml.MappingNode {
+		if kv := mappingValue(top, "name"); kv != nil {
+			return nil, fmt.Errorf("%s: line %d: %w", file, kv.key.Line, ErrAppName)
+		}
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(data))

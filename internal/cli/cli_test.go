@@ -51,8 +51,8 @@ func writeFile(t *testing.T, content string) string {
 }
 
 func TestValidate(t *testing.T) {
-	invalid := writeFile(t, "apiVersion: shelf.dev/v1alpha1\nname: a\ncomponents:\n  web: { image: nginx, route: / }\n")
-	warning := writeFile(t, "apiVersion: shelf.dev/v1alpha1\nname: a\ncomponents:\n  web: { image: nginx }\nsecrets:\n  pw: { generate: true }\n")
+	invalid := writeFile(t, "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web: { image: nginx, route: / }\n")
+	warning := writeFile(t, "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web: { image: nginx }\nsecrets:\n  pw: { generate: true }\n")
 	broken := writeFile(t, "name: [\n")
 
 	tests := []struct {
@@ -64,9 +64,9 @@ func TestValidate(t *testing.T) {
 	}{
 		{"valid", []string{"validate", hello}, 0, hello + ": valid\n", ""},
 		{"warning only", []string{"validate", warning}, 0, warning + ": valid (1 warning)\n",
-			warning + ":6: warning: secrets.pw: secret \"pw\" is not referenced by any component\n"},
+			warning + ":5: warning: secrets.pw: secret \"pw\" is not referenced by any component\n"},
 		{"invalid", []string{"validate", invalid}, 1, invalid + ": invalid (1 error, 0 warnings)\n",
-			invalid + ":4: error: components.web.route: route needs a port; add port or ports to the component\n"},
+			invalid + ":3: error: components.web.route: route needs a port; add port or ports to the component\n"},
 		{"several files, one invalid", []string{"validate", hello, invalid}, 1,
 			hello + ": valid\n" + invalid + ": invalid (1 error, 0 warnings)\n", "route needs a port"},
 		{"parse error", []string{"validate", broken}, 1, "", broken + ": yaml:"},
@@ -114,8 +114,8 @@ func TestRenderDefaultsToConfigMap(t *testing.T) {
 }
 
 func TestRenderFailures(t *testing.T) {
-	invalid := writeFile(t, "apiVersion: shelf.dev/v1alpha1\nname: a\ncomponents:\n  web: { image: nginx, route: / }\n")
-	unknownImage := writeFile(t, "apiVersion: shelf.dev/v1alpha1\nname: a\ncomponents:\n  web: { image: nginx }\n")
+	invalid := writeFile(t, "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web: { image: nginx, route: / }\n")
+	unknownImage := writeFile(t, "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web: { image: nginx }\n")
 	tests := []struct {
 		name, wantErrOut string
 		args             []string

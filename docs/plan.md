@@ -180,6 +180,17 @@ connections the apps choose:
 | How it is given | **`shelf connection add registry|cloudflare <name>`** reads `GHCR_USERNAME`/`GHCR_TOKEN` or `CF_API_TOKEN`/`CF_ACCOUNT_ID`; `shelf connection list` and `rm` go with it. `shelf app add` and `shelf app credentials` take `--registry <name>`, `--cloudflare <name>` and `--domain`, and `credentials` also `--no-registry` and `--no-cloudflare`; they read no tokens at all. In the admin UI connections are defined **only on the page `/connections`**, the one page with token fields; the add form and the app page offer them as a choice. A token is never rendered, not even back into a form that was refused. |
 | Phase | **A phase of its own, 8b**, before the Mac mini. Phase 8 is accepted as it was. |
 
+Decided on 2026-09-29, for Phase 8c, when the maintainer asked for app.yaml without the app name
+so that one manifest can be deployed more than once:
+
+| Question | Decision |
+|---|---|
+| Who names an app | **shelf alone, at `shelf app add <name>`.** `app.yaml` and the deploy artifact carry no app name; the same artifact can be added as `blog-a` and `blog-b`, each with its own namespace, secret values, domain and tunnel. The check that refused an artifact "for another app" goes. |
+| Package name in CI | **The repository name, overridable.** The reusable workflow publishes `ghcr.io/<owner>/<repository>` and `…/<repository>/<component>`; an optional input `package` replaces the repository name (for more than one app.yaml in a repository). The boilerplate workflow does not change. The package names the artifact, not an app. |
+| An app.yaml that still has `name:` | **An error with a hint** from `shelf validate`: the name is given at `shelf app add`. v1alpha1, one tenant repository (`shelf-hello`), which is updated in the same phase. No transition period. |
+| Artifacts rendered before this phase | **Refused, no compatibility code.** `shelf app add`/`redeploy` of an artifact whose app.yaml names the app says it was rendered by a shelf older than v0.3.0 and must be pushed again. An app already running from such an artifact stays on its last revision until its tenant pushes, because the HelmRelease looks for `shelf-values`. Reading both ConfigMaps was considered and rejected: transition code a later release would have to remove, for a single tenant. |
+| Phase | **A phase of its own, 8c.** Planned for after 8b; the maintainer had it built the same day, before 8b's level 2 and 3. It needs a release, since tenants follow `@v0`. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -543,8 +554,8 @@ Cluster:                                                      ▼
    ResourceSetInputProvider (per app, from CLI)    OCIRepository ──► Kustomization
                     │                                                     │
                     ▼                                                     ▼
-              ResourceSet ──────────────► HelmRelease           ConfigMap <app>-values
-                                               │  valuesFrom ◄──────────┘
+              ResourceSet ──────────────► HelmRelease           ConfigMap shelf-values
+                         (values: name)        │  valuesFrom ◄──────────┘
                                                ▼
                                   chart shelf-app (OCI, version pinned by the platform)
                                                │
@@ -562,9 +573,12 @@ stays stable.
 For every build, the tenant workflow pushes:
 
 1. Images for `linux/arm64` to GHCR
-2. An OCI artifact `ghcr.io/<owner>/<app>`; images built in the same repository are pushed as
-   `ghcr.io/<owner>/<app>/<component>`, so everything of an app sits under its name
-   - Content: a ConfigMap manifest holding the resolved `app.yaml` under the key `app.yaml`
+2. An OCI artifact `ghcr.io/<owner>/<package>`; images built in the same repository are pushed as
+   `ghcr.io/<owner>/<package>/<component>`. The package is the repository's name unless the
+   workflow input `package` says otherwise (Phase 8c); it names the artifact, not an app
+   - Content: the ConfigMap `shelf-values` holding the resolved `app.yaml` under the key
+     `app.yaml`, with no namespace, no labels and no app name — shelf names the app when it is
+     added, so one artifact can become several apps
      - images pinned by digest
      - `${<component>.host}` / `${<component>.port}` / `${<component>.ports.<name>}` substituted
      - `${secrets.*}` left unresolved (resolved by the chart)
@@ -574,13 +588,13 @@ For every build, the tenant workflow pushes:
 3. A call to the Flux webhook receiver (from Phase 4; before that, `OCIRepository` polling every
    1m is sufficient)
 
-Unknown `apiVersion` → the artifact is rejected.
+Unknown `apiVersion` → the artifact is rejected. An artifact whose `app.yaml` still names the app
+was rendered before v0.3.0 and is rejected too, with the advice to push again.
 
 ## Schema `shelf.dev/v1alpha1`
 
 ```yaml
 apiVersion: shelf.dev/v1alpha1
-name: shop
 
 components:
   web:
@@ -636,8 +650,13 @@ References in `env`, `command` and `args`: `${<component>.host}` (the Service na
 `${<component>.port}` (only for a component with exactly one port),
 `${<component>.ports.<name>}`, `${secrets.<name>}`. Anything else in `${…}` is an error.
 
-Name rules: app names are DNS-1123 labels, component names DNS-1035 labels, both at most 40
-characters so suffixes (`-values`, StatefulSet pod names, revision hashes) still fit into 63.
+No `name`: shelf names an app at `shelf app add <name>` (Phase 8c), and `shelf validate` reports
+a `name` as an error that says so.
+
+Name rules: app names (checked by `ops.CheckAppName`) are DNS-1123 labels, component names
+DNS-1035 labels, both at most 40 characters so suffixes (tunnel names, StatefulSet pod names,
+revision hashes) still fit into 63. App names must not be `default`, `flux-system`, `traefik`,
+`cloudflared` or start with `kube-` or `shelf-`.
 Secret names allow no `_`, so `SHELF_SECRET_<NAME>` cannot collide. Env names are C
 identifiers, and the prefix `SHELF_SECRET_` is reserved.
 
@@ -1624,6 +1643,44 @@ Results so far (2026-09-29):
 - Not run yet: level 2 and 3. The dev cluster still serves `greeter-dev.tobile.ch` through the
   shared tunnel of Phase 5; the migration switches that off, and exposing the app again needs the
   Cloudflare token. That is the maintainer's call, not a side effect of a test.
+
+### Phase 8c – App names belong to shelf
+The decisions are in the table "Decided on 2026-09-29, for Phase 8c". The name leaves `app.yaml`
+and with it the rendered artifact:
+
+- Schema and validation: no `name` field; `shelf validate` reports one as an error that says where
+  the name is given now. `schema/app.schema.json`, `examples/` and golden files follow.
+- Render: the ConfigMap in the artifact is `shelf-values` (the namespace already belongs to the
+  app) and carries no app label; the resolved app.yaml has no name. `shelf build-plan` prints the
+  builds only.
+- Chart and ResourceSet: the HelmRelease passes `name: << inputs.name >>` as `values`, next to
+  `valuesFrom` on `shelf-values`; the chart's namespace check stays.
+- `ops.AddApp` drops the name comparison; the admin UI's add form asks for the name as before.
+  The reserved names (`default`, `flux-system`, `traefik`, `cloudflared`, `kube-*`, `shelf-*`)
+  move from `validate` into `ops.CheckAppName`, which every command and form already calls.
+- Workflow: package from `github.event.repository.name` or the input `package`; the annotation
+  `dev.shelf.app` becomes `dev.shelf.package`; the step summary suggests
+  `shelf app add <package> …` as a starting point.
+- Old artifacts are refused (see the decision table).
+- Release, then `shelf-hello` loses its `name:`. Its packages are called `greeter`, not like the
+  repository, so its workflow sets `package: greeter` to keep them; `examples/tenant` shows that.
+
+Results so far (2026-09-29):
+
+- Level 1 is green (`just test`). The parser refuses `name:` with its line; `deploy.Decode`
+  refuses an artifact that still carries one; a CLI test adds one artifact as `hello` and
+  `hello-copy` and checks that each gets its own secret value and backup (the fake cluster now
+  keeps secrets per app). The chart tests pass the name as the HelmRelease does, next to the
+  rendered values.
+- `just smoke-apps` gained the level-2 acceptance: the same artifact as `hello-copy` next to
+  `hello`, answering under its own host with its own password, and removed without touching
+  `hello`. `smoke-init` and `smoke-chart` pass `--set name=` to Helm.
+- Not run yet: level 2, the release, and `shelf-hello`.
+
+**Acceptance:** one artifact deployed as two apps side by side on the dev cluster, each answering
+under its own host with its own generated secrets; `shelf-hello` without `name:` reaches the app
+through the unchanged boilerplate workflow; an app.yaml with `name:` fails `shelf validate` with
+the hint.
 
 ### Phase 9 – Mac mini: host, Colima, doctor, destroy
 The old Phase 6, without the installer. `shelf init host`: preflight (Apple Silicon, RAM, disk,

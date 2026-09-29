@@ -14,7 +14,7 @@ const DefaultPortName = "main"
 const SecretEnvPrefix = "SHELF_SECRET_"
 
 // Name limits. Component and app names end up in object names with suffixes (StatefulSet pod
-// names, controller-revision-hash labels, "<app>-values"), so they stay well below 63.
+// names, controller-revision-hash labels, "shelf<host-suffix>-<app>"), so they stay well below 63.
 const (
 	MaxAppNameLength       = 40
 	MaxComponentNameLength = 40
@@ -38,10 +38,10 @@ const (
 	BuildPathPattern = `^\.?/?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`
 )
 
-// App is the root of an app.yaml file.
+// App is the root of an app.yaml file. It has no name: shelf names an app when it is added, so
+// one app.yaml can be deployed as several apps.
 type App struct {
 	APIVersion string                `yaml:"apiVersion" jsonschema_description:"Always shelf.dev/v1alpha1."`
-	Name       string                `yaml:"name" jsonschema_description:"App name. Becomes the namespace and the host name <name>.<domain>."`
 	Components map[string]*Component `yaml:"components" jsonschema_description:"The containers that make up the app, by name."`
 	Secrets    map[string]*Secret    `yaml:"secrets,omitempty" jsonschema_description:"Secrets referenced as ${secrets.<name>}, by name."`
 }

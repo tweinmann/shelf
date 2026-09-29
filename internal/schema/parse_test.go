@@ -14,7 +14,7 @@ func TestParse(t *testing.T) {
 	}{
 		{
 			name: "minimal",
-			yaml: "apiVersion: shelf.dev/v1alpha1\nname: a\ncomponents:\n  web:\n    image: nginx\n",
+			yaml: "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web:\n    image: nginx\n",
 			check: func(t *testing.T, app *App) {
 				if app.Components["web"].Image != "nginx" {
 					t.Errorf("image = %q", app.Components["web"].Image)
@@ -69,7 +69,8 @@ func TestParse(t *testing.T) {
 		{name: "duplicate component", yaml: "components:\n  web: {}\n  web: {}\n", wantErr: `mapping key "web" already defined`},
 		{name: "duplicate volume", yaml: "components:\n  db:\n    volumes:\n      data: { path: /a, size: 1Gi }\n      data: { path: /b, size: 1Gi }\n", wantErr: `mapping key "data" already defined`},
 		{name: "port as string", yaml: "components:\n  web:\n    port: http\n", wantErr: "cannot unmarshal"},
-		{name: "two documents", yaml: "name: a\n---\nname: b\n", wantErr: "single YAML document"},
+		{name: "two documents", yaml: "components: {}\n---\ncomponents: {}\n", wantErr: "single YAML document"},
+		{name: "app name", yaml: "apiVersion: shelf.dev/v1alpha1\nname: a\n", wantErr: "app.yaml: line 2: name is no longer part of app.yaml"},
 		{name: "not a mapping", yaml: "- a\n", wantErr: "cannot unmarshal"},
 		{name: "syntax error", yaml: "name: [a\n", wantErr: "app.yaml: yaml:"},
 	}
@@ -92,7 +93,7 @@ func TestParse(t *testing.T) {
 
 func TestDocumentLine(t *testing.T) {
 	src := `apiVersion: shelf.dev/v1alpha1
-name: a
+secrets: {}
 components:
   web:
     image: nginx
@@ -111,7 +112,7 @@ components:
 		want int
 	}{
 		{nil, 1},
-		{[]string{"name"}, 2},
+		{[]string{"secrets"}, 2},
 		{[]string{"components", "web"}, 4},
 		{[]string{"components", "web", "image"}, 5},
 		{[]string{"components", "web", "args", "1"}, 8},
@@ -120,7 +121,7 @@ components:
 		{[]string{"components", "web", "args", "5"}, 6},  // index out of range
 		{[]string{"components", "web", "image", "x"}, 5}, // below a scalar
 		{[]string{"components", "api", "image"}, 3},      // missing component
-		{[]string{"secrets", "db-password"}, 1},          // missing top-level key
+		{[]string{"volumes", "data"}, 1},                 // missing top-level key
 	}
 	for _, tt := range tests {
 		if got := doc.Line(tt.path...); got != tt.want {

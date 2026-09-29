@@ -106,14 +106,13 @@ install_app() {
       --from-literal=db-password="$(head -c 20 /dev/urandom | base32 | tr -d '=' | head -c 26)" >/dev/null
   fi
   helm install "$app" "$repo/charts/shelf-app" -n "$app" -f "$work/$app.values.yaml" \
-    --set platform.domain=dev.local --wait --timeout 3m >/dev/null
+    --set name="$app" --set platform.domain=dev.local --wait --timeout 3m >/dev/null
 }
 
 step "install examples/hello and an app with stripPrefix"
 install_app hello "$repo/examples/hello/app.yaml"
 cat >"$work/strip.app.yaml" <<'EOF'
 apiVersion: shelf.dev/v1alpha1
-name: strip
 components:
   api:
     image: traefik/whoami:v1.11.0

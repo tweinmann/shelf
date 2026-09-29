@@ -47,7 +47,7 @@ func (fakeResolver) Resolve(_ context.Context, image string) (render.ImageInfo, 
 }
 
 // renderValues turns an app.yaml into the chart values file, as `shelf render -o app` does.
-func renderValues(t *testing.T, file string) string {
+func renderValues(t *testing.T, name, file string) string {
 	t.Helper()
 	src, err := os.ReadFile(file)
 	if err != nil {
@@ -68,7 +68,8 @@ func renderValues(t *testing.T, file string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return writeFile(t, "values.yaml", string(out))
+	// The artifact does not name the app; the HelmRelease adds the name shelf gave it.
+	return writeFile(t, "values.yaml", "name: "+name+"\n"+string(out))
 }
 
 func writeFile(t *testing.T, name, content string) string {
@@ -131,13 +132,13 @@ func TestTemplate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := []string{"-f", renderValues(t, tt.app), "-f", writeFile(t, "platform.yaml", tt.platform)}
-			for _, api := range tt.apis {
-				args = append(args, "--api-versions", api)
-			}
 			namespace := tt.name
 			if tt.app == "../../examples/hello/app.yaml" {
 				namespace = "hello"
+			}
+			args := []string{"-f", renderValues(t, namespace, tt.app), "-f", writeFile(t, "platform.yaml", tt.platform)}
+			for _, api := range tt.apis {
+				args = append(args, "--api-versions", api)
 			}
 			out, err := helmTemplate(t, namespace, args...)
 			if err != nil {
@@ -154,7 +155,7 @@ func TestTemplate(t *testing.T) {
 // TestSecretReferences checks which secrets a container receives: only those referenced
 // outside an escaped $$, each once, before all other variables.
 func TestSecretReferences(t *testing.T) {
-	values := renderValues(t, "testdata/features.app.yaml")
+	values := renderValues(t, "features", "testdata/features.app.yaml")
 	platform := writeFile(t, "platform.yaml", "platform:\n  domain: example.com\n")
 	out, err := helmTemplate(t, "features", "-f", values, "-f", platform, "--api-versions", middlewareAPI,
 		"--show-only", "templates/workloads.yaml")
@@ -191,7 +192,7 @@ func TestSecretReferences(t *testing.T) {
 // TestChartVersionLabel checks the chart label with a version as Flux sets it, with the chart
 // digest appended after "+", which label values do not allow.
 func TestChartVersionLabel(t *testing.T) {
-	values := renderValues(t, "../../examples/hello/app.yaml")
+	values := renderValues(t, "hello", "../../examples/hello/app.yaml")
 	platform := writeFile(t, "platform.yaml", "platform:\n  domain: dev.local\n")
 	chart := t.TempDir()
 	cmd := exec.Command("helm", "package", chartDir, "--version", "0.1.0+"+strings.Repeat("a", 64), "--destination", chart)
@@ -226,13 +227,13 @@ func TestTemplateErrors(t *testing.T) {
 		{"no values", "", "hello", domain, "name is required"},
 		{"wrong namespace", hello, "default", domain, `app "hello" must be installed into namespace "hello"`},
 		{"route without domain", hello, "hello", "platform:\n  domain: \"\"\n", "platform.domain is not set"},
-		{"stripPrefix without Traefik CRD", features, "features", domain, "needs the Traefik Middleware CRD"},
+		{"stripPrefix without Traefik CRD", features, "hello", domain, "needs the Traefik Middleware CRD"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := []string{"-f", writeFile(t, "platform.yaml", tt.platform)}
 			if tt.app != "" {
-				args = append(args, "-f", renderValues(t, tt.app))
+				args = append(args, "-f", renderValues(t, "hello", tt.app))
 			}
 			_, err := helmTemplate(t, tt.namespace, args...)
 			if err == nil {
