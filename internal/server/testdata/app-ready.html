@@ -79,7 +79,7 @@ reaches them.</p>
 <input type="hidden" name="csrf" value="CSRF">
 
 <label for="artifact">Artifact and tag</label>
-<input id="artifact" name="artifact" value="oci://ghcr.io/tweinmann/greeter:main" required>
+<input id="artifact" name="artifact" value="oci://ghcr.io/tweinmann/greeter:main" required data-registry="ghcr" data-tag-only>
 <button type="submit">Deploy this</button>
 </form>
 <p class="muted">Point it at another tag to move the app there — a commit tag such as
@@ -114,8 +114,7 @@ you come forward again.</p>
 <option value="tobile" selected>tobile (account acc-1)</option>
 </select>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="" placeholder="example.com" list="zones">
-<datalist id="zones"><option value="example.com"><option value="shop.ch"></datalist>
+<input id="domain" name="domain" value="" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="the cluster's: example.com">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
@@ -181,6 +180,7 @@ backup on this machine is kept. Type the name to confirm.</p>
 <button type="submit" class="danger">Remove it</button>
 </form>
 </section>
+<script src="/static/form.js" defer></script>
 
 </main>
 <footer>shelf v0.3.0</footer>

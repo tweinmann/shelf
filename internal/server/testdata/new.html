@@ -33,7 +33,7 @@ shelf reads it, generates the secrets it declares, and keeps the app on that tag
 <label for="name">Name</label>
 <input id="name" name="name" value="" placeholder="greeter" autofocus required>
 <label for="artifact">Deploy artifact</label>
-<input id="artifact" name="artifact" value="" placeholder="oci://ghcr.io/owner/greeter:main" required>
+<input id="artifact" name="artifact" value="" placeholder="oci://ghcr.io/owner/greeter:main" required data-registry-from="registry">
 
 <fieldset>
 <legend>Connections</legend>
@@ -49,20 +49,21 @@ shelf reads it, generates the secrets it declares, and keeps the app on that tag
 <option value="tobile">tobile (account acc-1)</option>
 </select>
 <p>Connections are defined once, on the <a href="/connections">connections page</a>, and chosen
-here. With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS
-record in its zone.</p>
+here. With a registry connection, the form offers the deploy artifacts and tags of its user.
+With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS record
+in its zone.</p>
 </fieldset>
 <fieldset>
 <legend>Domain</legend>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="" placeholder="example.com" list="zones">
-<datalist id="zones"><option value="example.com"><option value="shop.ch"></datalist>
+<input id="domain" name="domain" value="" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="the cluster's: example.com">
 <p>Empty, it answers at &lt;app&gt;-dev.example.com, with its name in place of &lt;app&gt;.
 To reach it from the internet, the domain has to be a zone of the Cloudflare connection's account.</p>
 </fieldset>
 <button type="submit">Add the app</button>
 </form>
 </section>
+<script src="/static/form.js" defer></script>
 
 </main>
 <footer>shelf v0.3.0</footer>

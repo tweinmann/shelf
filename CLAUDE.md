@@ -52,6 +52,10 @@ green; level 2 and 3 not run yet, because migrating the dev cluster takes `greet
 off the shared tunnel.
 Also in 8b (2026-09-29): `name` in app.yaml names the packages only; the app's name is chosen at
 `shelf app add`, so one artifact can run as several apps. Level 1 green; release v0.5.0 open.
+Also in 8b (2026-09-29): the forms offer the deploy artifacts and tags of the registry connection
+(GitHub API, `internal/github`) and the zones of the Cloudflare connection as selects, with free
+text as the fallback; `shelf connection packages|zones` and `shelf app tags` list the same. Level 1
+green; `form.js` untested against real connections.
 Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements

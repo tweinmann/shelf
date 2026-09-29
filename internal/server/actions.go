@@ -47,12 +47,10 @@ func (s *Server) newAppForm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := withTimeout(r)
 	defer cancel()
 	status := s.platform.Status(ctx)
-	conns, zones := s.choices(ctx)
 	s.render(w, "new.html", http.StatusOK, newAppView{
 		base:        s.base(r, "Add an app"),
 		Status:      status,
-		Connections: conns,
-		Zones:       zones,
+		Connections: s.connections(ctx),
 		Insecure:    status.Settings.InsecureRegistry,
 	})
 }
@@ -111,19 +109,20 @@ func (s *Server) failedForm(w http.ResponseWriter, r *http.Request, form newAppV
 	defer cancel()
 	form.base = s.base(r, "Add an app")
 	form.Status = s.platform.Status(ctx)
-	form.Connections, form.Zones = s.choices(ctx)
+	form.Connections = s.connections(ctx)
 	form.Error = err.Error()
 	s.render(w, "new.html", http.StatusBadRequest, form)
 }
 
-// choices are the connections and zones a form offers. A cluster that cannot list them leaves
-// the lists empty; the operation itself says what is wrong.
-func (s *Server) choices(ctx context.Context) (ops.Connections, []string) {
+// connections are what a form offers to choose from. A cluster that cannot list them leaves
+// the lists empty; the operation itself says what is wrong. What each connection offers in turn
+// — packages, tags, zones — the page fetches from the api routes below once one is chosen.
+func (s *Server) connections(ctx context.Context) ops.Connections {
 	conns, err := s.platform.Connections(ctx)
 	if err != nil {
-		return ops.Connections{}, nil
+		return ops.Connections{}
 	}
-	return conns, s.platform.Zones(ctx)
+	return conns
 }
 
 // setAccess changes an app's domain and connections, and deploys it again from the artifact it

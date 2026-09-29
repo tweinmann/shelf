@@ -62,7 +62,7 @@ The buttons below wait until it is done.</p>
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 {{if .App.Insecure}}<input type="hidden" name="insecure" value="1">{{end}}
 <label for="artifact">Artifact and tag</label>
-<input id="artifact" name="artifact" value="{{.App.Artifact}}" required>
+<input id="artifact" name="artifact" value="{{.App.Artifact}}" required{{with .App.Registry}} data-registry="{{.}}" data-tag-only{{end}}>
 <button type="submit">Deploy this</button>
 </form>
 <p class="muted">Point it at another tag to move the app there — a commit tag such as
@@ -97,8 +97,7 @@ you come forward again.</p>
 {{range .Connections.Cloudflare}}<option value="{{.Name}}"{{if eq .Name $.App.Cloudflare}} selected{{end}}>{{.Name}}{{if .Missing}} (not on this machine){{else}} (account {{.Account}}){{end}}</option>
 {{end}}</select>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="{{.App.Domain}}" placeholder="{{.Status.Settings.Domain}}" list="zones">
-<datalist id="zones">{{range .Zones}}<option value="{{.}}">{{end}}</datalist>
+<input id="domain" name="domain" value="{{.App.Domain}}" placeholder="{{.Status.Settings.Domain}}" data-cloudflare-from="cloudflare" data-empty-label="{{if .App.Domain}}unchanged: {{.App.Domain}}{{else}}the cluster's{{with .Status.Settings.Domain}}: {{.}}{{end}}{{end}}">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
@@ -151,4 +150,5 @@ backup on this machine is kept. Type the name to confirm.</p>
 <button type="submit" class="danger">Remove it</button>
 </form>
 </section>
+<script src="/static/form.js" defer></script>
 {{end}}

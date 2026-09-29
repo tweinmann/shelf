@@ -35,7 +35,7 @@ func tunnelKey(account, name string) string { return account + "/" + name }
 
 func (f *fakeCloudflare) VerifyToken(context.Context) error { return f.verifyErr }
 
-func (f *fakeCloudflare) Zones(context.Context) ([]cloudflare.Zone, error) {
+func (f *fakeCloudflare) Zones(context.Context, string) ([]cloudflare.Zone, error) {
 	return []cloudflare.Zone{{ID: "zone-example.com", Name: "example.com"}, {ID: "zone-shop.ch", Name: "shop.ch"}}, nil
 }
 

@@ -183,6 +183,7 @@ type harness struct {
 
 	cluster *fakeCluster
 	api     *fakeCloudflare
+	gh      *fakeGitHub
 
 	// app is what the registry serves as the deploy artifact.
 	app      *schema.App
@@ -208,6 +209,7 @@ func newHarness(t *testing.T) *harness {
 		version:    "v0.0.0-test",
 		cluster:    &fakeCluster{},
 		api:        &fakeCloudflare{accounts: []string{"acc-1"}},
+		gh:         &fakeGitHub{},
 	}
 }
 
@@ -234,6 +236,10 @@ func (h *harness) options() Options {
 				Cluster:       h.cluster,
 				Fetch:         h.fetch,
 				NewCloudflare: func(string) ops.CloudflareAPI { return h.api },
+				NewGitHub: func(token string) ops.GitHubAPI {
+					h.gh.token = token
+					return h.gh
+				},
 			}
 		},
 	}

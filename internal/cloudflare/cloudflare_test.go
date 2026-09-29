@@ -298,11 +298,33 @@ func TestDeleteTunnel(t *testing.T) {
 }
 
 func TestZones(t *testing.T) {
-	api := &fakeAPI{zones: []Zone{{ID: "z-1", Name: "example.com"}, {ID: "z-2", Name: "shop.ch"}}}
-	c := newTestClient(t, api)
-	zones, err := c.Zones(context.Background())
+	// Two pages of one zone each, so that the client has to follow the paging.
+	pages := [][]Zone{{{ID: "z-1", Name: "example.com"}}, {{ID: "z-2", Name: "shop.ch"}}}
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("account.id")+" "+r.URL.Query().Get("page"))
+		page := 1
+		if r.URL.Query().Get("page") == "2" {
+			page = 2
+		}
+		data, _ := json.Marshal(pages[page-1])
+		env := response{Success: true, Result: data}
+		env.ResultInfo = &struct {
+			Page       int `json:"page"`
+			TotalPages int `json:"total_pages"`
+		}{page, len(pages)}
+		if err := json.NewEncoder(w).Encode(env); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{Token: "test-token", BaseURL: srv.URL, HTTP: srv.Client()}
+	zones, err := c.Zones(context.Background(), "acc-1")
 	if err != nil || len(zones) != 2 || zones[1].Name != "shop.ch" {
 		t.Fatalf("zones %+v, %v", zones, err)
+	}
+	if want := []string{"acc-1 1", "acc-1 2"}; !slices.Equal(queries, want) {
+		t.Errorf("queries %v, want %v", queries, want)
 	}
 }
 

@@ -18,7 +18,7 @@ func newAppCmd(o Options) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newAppAddCmd(o), newAppRmCmd(o), newAppStatusCmd(o),
-		newAppRedeployCmd(o), newAppSecretsCmd(o), newAppCredentialsCmd(o),
+		newAppRedeployCmd(o), newAppSecretsCmd(o), newAppCredentialsCmd(o), newAppTagsCmd(o),
 	)
 	return cmd
 }

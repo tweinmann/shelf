@@ -15,7 +15,7 @@ import (
 // CloudflareAPI is the part of the Cloudflare API shelf uses.
 type CloudflareAPI interface {
 	VerifyToken(ctx context.Context) error
-	Zones(ctx context.Context) ([]cloudflare.Zone, error)
+	Zones(ctx context.Context, account string) ([]cloudflare.Zone, error)
 	ZoneFor(ctx context.Context, name string) (*cloudflare.Zone, error)
 	EnsureRecord(ctx context.Context, zone, name, target string) (cloudflare.Action, error)
 	DeleteRecord(ctx context.Context, zone, name string) (bool, error)

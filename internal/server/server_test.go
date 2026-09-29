@@ -53,7 +53,28 @@ func (f *fakePlatform) Connections(context.Context) (ops.Connections, error) {
 	return f.connections, nil
 }
 
-func (f *fakePlatform) Zones(context.Context) []string { return []string{"example.com", "shop.ch"} }
+// Zones, Packages and Tags answer for the connections "cf" and "ghcr"; any other name is one
+// whose list cannot be read.
+func (f *fakePlatform) Zones(_ context.Context, name string) ([]string, error) {
+	if name != "cf" {
+		return nil, errors.New("this machine holds no Cloudflare connection " + name)
+	}
+	return []string{"example.com", "shop.ch"}, nil
+}
+
+func (f *fakePlatform) Packages(_ context.Context, name string) ([]ops.Package, error) {
+	if name != "ghcr" {
+		return nil, errors.New("Bad credentials (HTTP 401)")
+	}
+	return []ops.Package{{Name: "greeter", Artifact: "oci://ghcr.io/owner/greeter", Updated: now}}, nil
+}
+
+func (f *fakePlatform) Tags(_ context.Context, name, artifact string) ([]ops.Tag, error) {
+	if name != "ghcr" || artifact != "oci://ghcr.io/owner/greeter" {
+		return nil, errors.New("no tags for " + artifact)
+	}
+	return []ops.Tag{{Name: "main", Created: now}, {Name: "sha-905acce", Created: now.Add(-time.Hour)}}, nil
+}
 
 func (f *fakePlatform) SaveRegistryConnection(_ context.Context, name string, auth cluster.RegistryAuth,
 	rep progress.Reporter) error {
@@ -720,6 +741,41 @@ func TestAPIStatus(t *testing.T) {
 	for _, want := range []string{`"greeter"`, `"Failed"`, `"tunnel": "t-1"`, `"registry": "ghcr"`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("body lacks %s:\n%s", want, rec.Body)
+		}
+	}
+}
+
+// TestChoicesAPI checks the lists a form fetches once a connection is chosen: the items, or the
+// reason they cannot be read, and never without a session.
+func TestChoicesAPI(t *testing.T) {
+	t.Parallel()
+	h, cookie := claimed(t, runningPlatform())
+	tests := []struct {
+		path string
+		code int
+		want string
+	}{
+		{"/api/connections/registry/ghcr/packages", http.StatusOK,
+			`{"items":[{"name":"greeter","artifact":"oci://ghcr.io/owner/greeter","updated":"2026-09-20T12:00:00Z"}]}`},
+		{"/api/connections/registry/other/packages", http.StatusBadGateway,
+			`{"items":[],"error":"Bad credentials (HTTP 401)"}`},
+		{"/api/connections/registry/ghcr/tags?artifact=" + url.QueryEscape("oci://ghcr.io/owner/greeter"), http.StatusOK,
+			`{"items":[{"name":"main","created":"2026-09-20T12:00:00Z"},{"name":"sha-905acce","created":"2026-09-20T11:00:00Z"}]}`},
+		{"/api/connections/registry/ghcr/tags", http.StatusBadGateway, `{"items":[],"error":"no tags for "}`},
+		{"/api/connections/cloudflare/cf/zones", http.StatusOK, `{"items":["example.com","shop.ch"]}`},
+		{"/api/connections/cloudflare/gone/zones", http.StatusBadGateway,
+			`{"items":[],"error":"this machine holds no Cloudflare connection gone"}`},
+	}
+	for _, tt := range tests {
+		rec := get(h, tt.path, cookie)
+		if rec.Code != tt.code || strings.TrimSpace(rec.Body.String()) != tt.want {
+			t.Errorf("%s: %d %s\nwant %d %s", tt.path, rec.Code, rec.Body, tt.code, tt.want)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Errorf("%s: content type %q", tt.path, got)
+		}
+		if rec := get(h, tt.path, nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without a session: %d", tt.path, rec.Code)
 		}
 	}
 }

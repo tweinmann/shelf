@@ -166,9 +166,8 @@ type appView struct {
 	Secrets map[string]string
 	// SecretError is why the values are not shown.
 	SecretError string
-	// Connections and Zones are what the access form offers.
+	// Connections are what the access form offers.
 	Connections ops.Connections
-	Zones       []string
 	Running     *Job
 }
 
@@ -178,15 +177,13 @@ type newAppView struct {
 	base
 	Status      ops.Status
 	Connections ops.Connections
-	// Zones are the domains the Cloudflare connections can serve, as suggestions.
-	Zones      []string
-	Name       string
-	Artifact   string
-	Insecure   bool
-	Domain     string
-	Registry   string
-	Cloudflare string
-	Error      string
+	Name        string
+	Artifact    string
+	Insecure    bool
+	Domain      string
+	Registry    string
+	Cloudflare  string
+	Error       string
 }
 
 // jobView is the page that watches one change.

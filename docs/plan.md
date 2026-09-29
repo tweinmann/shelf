@@ -179,6 +179,7 @@ connections the apps choose:
 | The cluster's domain | **Stays, as the default.** `init cluster --domain` is where an app without a domain of its own answers; the host suffix stays per cluster, so the dev cluster never takes the mini's names. `--move-hosts` now only counts the apps a change actually moves: a new suffix moves all of them, a new domain those on the cluster's. |
 | How it is given | **`shelf connection add registry|cloudflare <name>`** reads `GHCR_USERNAME`/`GHCR_TOKEN` or `CF_API_TOKEN`/`CF_ACCOUNT_ID`; `shelf connection list` and `rm` go with it. `shelf app add` and `shelf app credentials` take `--registry <name>`, `--cloudflare <name>` and `--domain`, and `credentials` also `--no-registry` and `--no-cloudflare`; they read no tokens at all. In the admin UI connections are defined **only on the page `/connections`**, the one page with token fields; the add form and the app page offer them as a choice. A token is never rendered, not even back into a form that was refused. |
 | Phase | **A phase of its own, 8b**, before the Mac mini. Phase 8 is accepted as it was. |
+| Choices in the forms (2026-09-29) | **The forms offer what a connection can reach, as real choices.** The add form lists the deploy artifacts of the registry connection's user and their tags (newest first), and the zones in the account of the Cloudflare connection; the app page lists the tags of the app's own artifact, so going back is a choice. The packages and tags come from the **GitHub API** (`/user/packages`, the versions of a package) with the connection's token — a classic PAT with `read:packages` is enough. That is the host service talking to a forge for convenience, which the guardrail allows: the form still sends a plain `oci://…:tag`, parsed and checked as before, and when a list cannot be read, or there is no connection, the text field is shown as it always was. Only the user's own packages are listed; the images of the components (`<name>/<component>`) and signature tags (`sha256-…`) are left out. The domain is a select with the cluster's domain, the zones and "other…", which keeps a subdomain of a zone or a LAN-only domain possible. A small `form.js` follows a change of connection through three JSON routes under `/api/connections/`; without JavaScript the page is the one it was. The same lists are `shelf connection packages <registry>`, `shelf connection zones <cloudflare>` and `shelf app tags <app>`. Packages of an organisation are not listed yet. |
 
 Tried and reverted on 2026-09-29: **app.yaml without a name** (the short-lived Phase 8c). shelf
 named an app only at `shelf app add`, so one artifact could run as several apps, and the reusable
@@ -1610,8 +1611,9 @@ Design:
   the token that made them.
 - **Admin UI**: the page `/connections` lists both kinds with the apps that use each and holds
   the only token fields; saving and removing run as jobs like every other change, audited without
-  values. The add form and the app's "Access" section offer the connections as choices, and the
-  domain with the zones the Cloudflare connections see as suggestions.
+  values. The add form and the app's "Access" section offer the connections as choices; once one
+  is chosen, the add form offers its deploy artifacts, their tags and the zones of its account,
+  and the app page the tags of the app's artifact (see "Choices in the forms" above).
 
 Steps:
 
@@ -1651,6 +1653,12 @@ Results so far (2026-09-29):
 - The templates in the ResourceSet are strings to kubeconform, so they were rendered offline with
   `text/template`, the operator's `<< >>` delimiters and `missingkey=error`, with and without a
   registry connection and a tunnel.
+- The choices in the forms: `internal/github` is tested against a fake API (paging, a package
+  name with a slash, a next page on another host is not followed, errors without the token), the
+  Cloudflare zones page through `result_info` and are filtered by account, the three CLI lists run
+  against fakes, and the server tests pin the JSON routes (items, the reason as a 502, 401 without
+  a session). `form.js` itself has no automated test; it is part of the level-3 check with real
+  connections.
 - Not run yet: level 2 and 3. The dev cluster still serves `greeter-dev.tobile.ch` through the
   shared tunnel of Phase 5; the migration switches that off, and exposing the app again needs the
   Cloudflare token. That is the maintainer's call, not a side effect of a test.
@@ -1732,6 +1740,9 @@ Due in Phase 9:
   miss, unpleasant to debug remotely.
 
 Later:
+- **Packages of an organisation** in the choices of the forms: `/user/packages` lists the
+  user's own only. An organisation's would need `/orgs/<org>/packages` and a way to know which
+  organisations to ask (`read:org`, or the owner typed once).
 - **Short 504 during a rollout** (seen once in Phase 4, not reproduced in Phase 5): Traefik
   answered 504 for a moment while a single-instance app was replaced. Worth a look under real
   traffic on the mini.
