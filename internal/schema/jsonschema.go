@@ -52,9 +52,6 @@ func portName() *jsonschema.Schema {
 
 func (App) JSONSchemaExtend(s *jsonschema.Schema) {
 	prop(s, "apiVersion").Const = APIVersion
-	name := prop(s, "name")
-	name.Pattern = AppNamePattern
-	name.MaxLength = ptr(uint64(MaxAppNameLength))
 	components := prop(s, "components")
 	components.PropertyNames = namePattern(ComponentNamePattern, MaxComponentNameLength)
 	components.MinProperties = ptr(uint64(1))

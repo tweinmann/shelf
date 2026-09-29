@@ -185,15 +185,13 @@ func readyCondition(obj *unstructured.Unstructured) (bool, string, error) {
 // itself, so it ends with an error instead of running into the timeout.
 var authProblem = regexp.MustCompile(`(?i)\b(denied|unauthorized|forbidden|authentication required)\b`)
 
-// failOnAuthError turns a registry authentication failure into an error that names the cause.
-func failOnAuthError(ready readyFunc) readyFunc {
+// failOnAuthError turns a registry authentication failure into an error that names the cause,
+// followed by the hint what to do about it.
+func failOnAuthError(ready readyFunc, hint string) readyFunc {
 	return func(obj *unstructured.Unstructured) (bool, string, error) {
 		ok, msg, err := ready(obj)
 		if err == nil && !ok && authProblem.MatchString(msg) {
-			return false, msg, fmt.Errorf("%s cannot read the registry: %s\n"+
-				"the login the cluster uses is in the Secret %s/%s; store a working one with "+
-				"GHCR_USERNAME and GHCR_TOKEN set and `shelf init cluster`",
-				describe(obj), msg, SystemNamespace, RegistrySecretName)
+			return false, msg, fmt.Errorf("%s cannot read the registry: %s\n%s", describe(obj), msg, hint)
 		}
 		return ok, msg, err
 	}

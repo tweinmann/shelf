@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add an app · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<nav class="links">
+<a href="/">Apps</a>
+<a href="/connections">Connections</a>
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+</nav>
+
+</header>
+<main>
+
+<nav class="crumbs"><a href="/">Apps</a> / add</nav>
+<section class="card narrow">
+<h1>Add an app</h1>
+<p>An app comes from its deploy artifact: the package your pipeline publishes to the registry.
+shelf reads it, generates the secrets it declares, and keeps the app on that tag from then on.</p>
+
+<form method="post" action="/apps">
+<input type="hidden" name="csrf" value="CSRF">
+<label for="name">Name</label>
+<input id="name" name="name" value="" placeholder="greeter" autofocus required>
+<label for="artifact">Deploy artifact</label>
+<input id="artifact" name="artifact" value="" placeholder="oci://ghcr.io/owner/greeter:main" required>
+
+<fieldset>
+<legend>Connections</legend>
+<label for="registry">Registry connection</label>
+<select id="registry" name="registry">
+<option value="">none: pull without a login</option>
+<option value="ghcr">ghcr (tobi)</option>
+<option value="spare">spare (tobi)</option>
+</select>
+<label for="cloudflare">Cloudflare connection</label>
+<select id="cloudflare" name="cloudflare">
+<option value="">none: inside the cluster only</option>
+<option value="tobile">tobile (account acc-1)</option>
+</select>
+<p>Connections are defined once, on the <a href="/connections">connections page</a>, and chosen
+here. With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS
+record in its zone.</p>
+</fieldset>
+<fieldset>
+<legend>Domain</legend>
+<label for="domain">A domain of its own</label>
+<input id="domain" name="domain" value="" placeholder="example.com" list="zones">
+<datalist id="zones"><option value="example.com"><option value="shop.ch"></datalist>
+<p>Empty, it answers at &lt;app&gt;-dev.example.com, with its name in place of &lt;app&gt;.
+To reach it from the internet, the domain has to be a zone of the Cloudflare connection's account.</p>
+</fieldset>
+<button type="submit">Add the app</button>
+</form>
+</section>
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

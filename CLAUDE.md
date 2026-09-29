@@ -26,7 +26,35 @@ workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the regist
 Phase 5 complete and approved: `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
 records written by shelf), `just smoke-expose`. `greeter-dev.<domain>` is reachable over HTTPS
 from the dev cluster. Results in docs/plan.md.
-Next: Phase 6 (Mac mini).
+Target product revised on 2026-09-20, after Phase 5: shelf becomes an appliance with an admin UI
+(host service on the mini, LAN with a login, one-command install plus a browser wizard), and the
+phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions and the new
+phase plan in docs/plan.md; the work happens on the branch `appliance`, so `main` still carries
+the old path.
+Phase 6 complete: `internal/ops` holds the operations both the CLI and the server call,
+`internal/progress` replaces the `io.Writer` progress pattern with typed events, `cli.New` takes
+injected dependencies instead of package variables, and the CLI tests run in parallel under
+`-race`. The output did not change.
+Phase 7 complete: `shelf serve` is the admin UI — claim with a setup code, password login, and a
+read-only dashboard that lists the apps and says which step is broken. `cluster.AppStates` and
+the five-stage diagnosis back both the pages and `shelf app status`.
+Phase 8 complete: apps are added, pointed at another tag, deployed again and
+removed from the browser. Each change is a job with a live log that reads like the command
+line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
+level with the UI. The app page also lists the app's components with their addresses, the routed
+ones as links. Results in docs/plan.md.
+Phase 8b in progress: connections instead of platform credentials. Registry logins
+(`shelf-system/connection-registry-<name>`) and Cloudflare tokens (`~/.shelf/connections/cloudflare/`)
+are defined once with `shelf connection add` or on the UI page `/connections`, and chosen per app
+with `--registry`/`--cloudflare`. An exposed app has its own tunnel in the connection's account and
+cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Level 1
+green; level 2 and 3 not run yet, because migrating the dev cluster takes `greeter-dev.tobile.ch`
+off the shared tunnel.
+Phase 8c in progress: the app name left `app.yaml` and the artifact; shelf names an app at
+`shelf app add`, so one artifact can be deployed more than once. The workflow names the packages
+after the repository (input `package` overrides it). Level 1 green; level 2, the release v0.3.0
+and `shelf-hello` still open.
+Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
 
@@ -40,10 +68,14 @@ Next: Phase 6 (Mac mini).
 ## Guardrails
 
 - The registry is the only interface between build and platform. The platform never talks to
-  Git or forge APIs.
+  Git or forge APIs. That rule is about the cluster: the host service may call the GitHub API for
+  convenience (checking for a newer release), as long as no deploy path depends on it.
+- Every action the admin UI offers exists as a CLI command, and both call the same function in
+  `internal/ops`. The UI is a second face on one operations layer, never a second implementation.
 - The platform is generic: no knowledge of databases or specific services. Everything is a
   component.
-- Apps are isolated from each other; nothing is shared between apps.
+- Apps are isolated from each other. The only thing apps share is a connection the user assigned
+  to several of them; namespace, secret values, tunnel and cloudflared are every app's own.
 - Prefer standard building blocks used by larger platforms (Flux, Helm, Traefik,
   Cloudflare Tunnel) over custom code.
 - `shelf init cluster` must work against any kubecontext. No Colima or macOS assumptions
@@ -57,7 +89,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 
 | Command | Run from | Purpose |
 |---|---|---|
-| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, tests, helm lint, kubeconform, examples) |
+| `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, `go test -race`, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
 | `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry:5000` (added to `/etc/hosts`), write kubeconfig (run after every container restart or rebuild) |
@@ -66,6 +98,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
 | `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
 | `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
+| `just serve` | devcontainer | run the admin UI against the dev cluster on port 8080 (forwarded to the Mac's browser); prints the setup code on the first start |
 | `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart, domain `dev.local` |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
@@ -74,7 +107,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
-| `just smoke-expose <app>` | devcontainer | Phase 5 acceptance: `shelf init expose`, DNS record and HTTPS; asks for the Cloudflare API token |
+| `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token; needs a cluster with a host suffix |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -91,20 +124,44 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   `devcontainer.json` together.
 - A plain `go build` produces a Linux binary. Anything shipped to the mini needs
   `GOOS=darwin GOARCH=arm64`.
-- `internal/host` (brew, pmset, colima) cannot run in the devcontainer. Test it through the
-  fake command runner.
+- `internal/host` (brew, pmset, colima, launchctl) cannot run in the devcontainer. Test it
+  through the fake command runner. The launchd service is a level-3 concern too.
 - Secret values never appear in rendered manifests, logs or golden files (golden files may
-  hold obviously fake values such as `not-a-real-token`). The GHCR token is read from
-  `GHCR_TOKEN` only, never from a flag.
+  hold obviously fake values such as `not-a-real-token`). Tokens are read from `GHCR_TOKEN` and
+  `CF_API_TOKEN` only, never from a flag, and only by `shelf connection add`. The same holds for
+  the files under `~/.shelf`: a token never goes into the launchd plist, into a log line or into a
+  rendered page, and a form never sends one back. `/connections` is the only page with token fields.
+- A Cloudflare token lives in `~/.shelf/connections/cloudflare/<name>.yaml` and never in the
+  cluster. A registry token lives in `shelf-system/connection-registry-<name>` and is copied into
+  the namespaces of the apps that chose that connection only.
+- Tunnels of the dev cluster are named `shelf-dev-<app>`; never delete a Cloudflare tunnel or
+  record by anything but its exact name, and never one without the `-dev` suffix.
 - `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
   this session.
+- `shelf init cluster` with a different `--host-suffix` moves every app to another host name, a
+  different `--domain` every app without a domain of its own, and strands their DNS records. It
+  refuses to do that while such apps exist unless `--move-hosts` is passed. The smoke tests install `dev.local` and refuse to run against a
+  cluster that serves anything else — run `just cluster-reset` first, or restore the domain
+  afterwards.
 
 ## Conventions
 
 - API group `shelf.dev/v1alpha1`; system namespace `shelf-system`; app namespace = app name
+- `app.yaml` has no `name`: an app is named at `shelf app add <name>` (checked by
+  `ops.CheckAppName`), and the artifact's ConfigMap is `shelf-values` in every app
 - A component has either `image:` or `build: ./dir`; package names are the workflow's business,
-  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<app>`, a built image
-  `ghcr.io/<owner>/<app>/<component>`
+  never `app.yaml`'s: the deploy artifact is `ghcr.io/<owner>/<package>`, a built image
+  `ghcr.io/<owner>/<package>/<component>`, the package being the repository name unless the
+  workflow input `package` sets another
+- Reading a deploy artifact uses the login of the app's registry connection, and only for the
+  registry it is for (`ghcr.io`); `ops.Env.Pull` overrides it, the Docker keychain is the last
+  resort. A machine running shelf as a service has no Docker config
+- Per app in `shelf-system`, all labelled `shelf.dev/app`: the provider `<app>` (inputs `name`,
+  `url`, `tag`, `insecure`, `domain`, `tunnel`, `registry`, `cloudflare` — the last two are
+  connection names), `app-<app>` (secret values), `tunnel-<app>`. Registry connections are
+  `connection-registry-<name>` (label `shelf.dev/connection=registry`), and `registry-anonymous`
+  is what an app without one gets. An app's tunnel is `shelf<host-suffix>-<app>`, its host
+  `<app><host-suffix>.<own domain or the cluster's>`
 - Secret env prefix `SHELF_SECRET_<NAME>`; secret values live in the Secret `shelf-secrets` in
   the app namespace, one key per secret name; labels `shelf.dev/app`, `shelf.dev/component`;
   OCI annotations `dev.shelf.*`
@@ -112,7 +169,25 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
   (`-update` via `just golden`); the registry is behind `render.Resolver`, so tests never need
   the network
 - `internal/cluster` talks to the API server only (client-go, server-side apply with field
-  manager `shelf`); it must not shell out to kubectl, helm or flux
+  manager `shelf`); it must not shell out to kubectl, helm or flux, and it knows nothing about
+  `~/.shelf`, HTTP or the operator's machine. Orchestration lives in `internal/ops`, flags and
+  prompts in `internal/cli`, routes and templates in `internal/server`
+- Operations report through `progress.Reporter`, never to an `io.Writer`: the CLI renders the
+  events as text (`progress.Writer`), the server keeps them as a job log. The exact wording of
+  a line is decided in `internal/progress` alone, with a golden file over every kind of event
+- What an operation needs from the machine it runs on (backup directory, tokens, registry
+  authenticator) goes into `ops.Env`; what a test replaces (cluster, registry, Cloudflare) is a
+  field of `ops.Ops`. No package-level variable is a test seam — tests must be able to run in
+  parallel, which also rules out `t.Setenv`: the CLI reads the environment through
+  `cli.Options.Getenv`
+- `internal/server` renders `html/template` pages from `internal/server/ui`, embedded in the
+  binary; every page has a golden file in `internal/server/testdata`, rendered against a fake
+  `Platform` with a fixed clock, so its tests need neither cluster nor network
+- A change the admin UI makes runs as a job in `internal/server`: it reports `progress.Event`s,
+  the page renders them as the text the CLI prints, and the browser follows the rest over
+  server-sent events. One change runs at a time, and every one is written to `~/.shelf/audit.log`
+- Files under `~/.shelf` belong to `internal/hostcfg`: mode 0600 in a 0700 directory, written
+  atomically. Passwords are PBKDF2-SHA256 with the algorithm in the stored string
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
   themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):

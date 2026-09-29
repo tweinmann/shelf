@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # Checks the Phase 4 flow against the dev cluster, with the dev registry standing in for GHCR:
 # shelf app add deploys examples/hello from a deploy artifact, a new artifact under the same tag
-# is rolled out by Flux alone, a tampered artifact is refused, shelf app rm removes everything,
-# and a second add restores the secret from the host backup.
+# is rolled out by Flux alone, the same artifact runs as a second app next to it, a tampered
+# artifact is refused, shelf app rm removes everything, and a second add restores the secret from
+# the host backup.
 #
 # Installs or updates the platform first (idempotent). Needs network access for images.
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
+require_dev_domain
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d)"
 app=hello
+# The same artifact, added under a second name.
+copy=hello-copy
 artifact="oci://$SHELF_REGISTRY_HOST/smoke/$app-deploy"
 pf_pid=""
 export SHELF_HOME="$work/home"
@@ -24,6 +28,7 @@ cleanup() {
     echo "KEEP=1: leaving app $app in place; its secret backup is in $SHELF_HOME"
     return
   fi
+  shelf app rm "$copy" --yes >/dev/null 2>&1 || true
   shelf app rm "$app" --yes >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -54,11 +59,13 @@ render() {
   (cd "$repo" && go run ./cmd/shelf render "$1") >"$2/configmap.yaml" 2>/dev/null
 }
 
-for leftover in "namespace/$app" "-n shelf-system secret/app-$app" \
-  "-n shelf-system resourcesetinputprovider/$app"; do
-  # shellcheck disable=SC2086
-  kubectl get $leftover >/dev/null 2>&1 \
-    && die "$leftover already exists; remove it first (shelf app rm $app)"
+for name in "$app" "$copy"; do
+  for leftover in "namespace/$name" "-n shelf-system secret/app-$name" \
+    "-n shelf-system resourcesetinputprovider/$name"; do
+    # shellcheck disable=SC2086
+    kubectl get $leftover >/dev/null 2>&1 \
+      && die "$leftover already exists; remove it first (shelf app rm $name)"
+  done
 done
 trap cleanup EXIT
 
@@ -85,6 +92,13 @@ password="$(sed -n 's/^ *db-password: //p' "$SHELF_HOME/apps/$app/secrets.yaml")
 grep -qF "$password" "$work/add1.txt" && die "the secret value appears in the output"
 [[ "$(stat -c %a "$SHELF_HOME/apps/$app/secrets.yaml")" == 600 ]] || die "the backup is not 0600"
 
+step "an app without a registry connection pulls without a login, and has no tunnel"
+copied() {
+  [[ "$(kubectl -n "$app" get secret shelf-registry -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d)" == '{"auths":{}}' ]]
+}
+retry 30 copied || die "namespace $app did not get the empty login of registry-anonymous"
+kubectl -n "$app" get deploy cloudflared >/dev/null 2>&1 && die "an app without a tunnel runs cloudflared"
+
 step "the app runs with the generated secret and is routed by Traefik"
 kubectl -n "$app" rollout status deploy/web --timeout=60s >/dev/null
 url="$(kubectl -n "$app" exec deploy/check -- printenv DATABASE_URL)"
@@ -93,6 +107,22 @@ kubectl -n traefik port-forward svc/traefik 18082:80 >/dev/null 2>&1 &
 pf_pid=$!
 routed() { curl -sS -H "Host: $app.dev.local" http://127.0.0.1:18082/ | grep -q '^Hostname: web-'; }
 retry 30 routed || die "$app.dev.local does not reach web"
+
+step "the same artifact as a second app, with a host and a secret of its own"
+shelf app add "$copy" "$artifact:main" --insecure-registry >"$work/copy.txt"
+copy_password="$(sed -n 's/^ *db-password: //p' "$SHELF_HOME/apps/$copy/secrets.yaml")"
+[[ ${#copy_password} -ge 26 ]] || die "no password in the backup of $copy"
+[[ "$copy_password" != "$password" ]] || die "$copy got the secret value of $app"
+copy_ready() { kubectl -n "$copy" rollout status deploy/check --timeout=5s; }
+retry 180 copy_ready || die "$copy did not come up"
+url="$(kubectl -n "$copy" exec deploy/check -- printenv DATABASE_URL)"
+[[ "$url" == "postgres://app:$copy_password@db:5432/hello" ]] || die "unexpected DATABASE_URL in $copy"
+copy_routed() { curl -sS -H "Host: $copy.dev.local" http://127.0.0.1:18082/ | grep -q '^Hostname: web-'; }
+retry 30 copy_routed || die "$copy.dev.local does not reach web"
+routed || die "$app.dev.local stopped answering"
+shelf app rm "$copy" --yes >/dev/null
+kubectl get namespace "$copy" >/dev/null 2>&1 && die "namespace $copy is still there"
+kubectl -n "$app" get deploy web >/dev/null || die "removing $copy took $app with it"
 
 step "a new artifact under the same tag is rolled out without any command"
 sed 's/^    instances: 2$/    instances: 3/' "$repo/examples/hello/app.yaml" >"$work/v2.app.yaml"
@@ -143,6 +173,7 @@ shelf app rm "$app" --yes | tee "$work/rm.txt"
 echo "rm: $((SECONDS - start)) s"
 kubectl get namespace "$app" >/dev/null 2>&1 && die "namespace $app is still there"
 kubectl -n shelf-system get secret "app-$app" >/dev/null 2>&1 && die "secret app-$app is still there"
+kubectl -n shelf-system get secret registry-anonymous >/dev/null || die "registry-anonymous went with the app"
 kubectl -n shelf-system get resourcesetinputprovider "$app" >/dev/null 2>&1 && die "the provider is still there"
 [[ -z "$(kubectl get pv -o name)" ]] || die "a persistent volume is left"
 [[ -f "$SHELF_HOME/apps/$app/secrets.yaml" ]] || die "the backup was deleted"
@@ -154,5 +185,5 @@ grep -q '^secret db-password: restored from the backup$' "$work/add3.txt" || die
 url="$(kubectl -n "$app" exec deploy/check -- printenv DATABASE_URL)"
 [[ "$url" == "postgres://app:$password@db:5432/hello" ]] || die "the restored password differs"
 
-echo "PASS: app add, routing, rollout by polling, idempotent add, tampered artifact refused," \
-  "app rm, restore from backup"
+echo "PASS: app add, routing, one artifact as two apps, rollout by polling, idempotent add," \
+  "tampered artifact refused, app rm, restore from backup"

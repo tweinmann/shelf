@@ -1,0 +1,22 @@
+{{define "content"}}
+<nav class="crumbs"><a href="/">Apps</a> / {{.Job.Title}}</nav>
+
+<div class="app-head">
+<h1>{{.Job.Title}}</h1>
+{{if .Job.Running}}<span class="pill Working" id="job-state">running</span>
+{{else if .Job.Err}}<span class="pill Failed" id="job-state">failed</span>
+{{else}}<span class="pill Ready" id="job-state">done</span>{{end}}
+</div>
+
+<pre id="job-log" class="log">{{.Log}}</pre>
+{{if .Job.Err}}<p class="problem-line" id="job-error">{{.Job.Err}}</p>{{end}}
+
+<p id="job-links">
+{{if .Job.App}}<a href="/apps/{{.Job.App}}">{{.Job.App}}</a> · {{end}}
+<a href="/">All apps</a>
+</p>
+
+{{if .Job.Running}}
+<script src="/static/job.js" defer data-job="{{.Job.ID}}" data-from="{{.From}}"></script>
+{{end}}
+{{end}}

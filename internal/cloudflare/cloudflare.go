@@ -1,5 +1,5 @@
-// Package cloudflare talks to the Cloudflare API: it finds or creates the tunnel that exposes a
-// cluster, and writes the DNS record that points an app's host name at that tunnel.
+// Package cloudflare talks to the Cloudflare API: it finds or creates the tunnel that exposes an
+// app, and writes the DNS record that points the app's host name at that tunnel.
 package cloudflare
 
 import (
@@ -23,7 +23,7 @@ const DefaultBaseURL = "https://api.cloudflare.com/client/v4"
 const TunnelDomain = "cfargotunnel.com"
 
 // Client calls the Cloudflare API with an API token. The token needs
-// Account:Cloudflare Tunnel:Edit, and Zone:DNS:Edit for the zone the apps live in.
+// Account:Cloudflare Tunnel:Edit, and Zone:DNS:Edit for the zone the app lives in.
 type Client struct {
 	Token   string
 	BaseURL string
@@ -154,11 +154,11 @@ func (c *Client) AccountID(ctx context.Context) (string, error) {
 	accounts, err := c.Accounts(ctx)
 	if err != nil {
 		return "", fmt.Errorf("looking up the account: %w\nThe token needs Account Settings:Read for this; "+
-			"or set CF_ACCOUNT_ID to the account the tunnel belongs to", err)
+			"or give the account ID the tunnel belongs to (CF_ACCOUNT_ID, or the account field of the admin UI)", err)
 	}
 	switch len(accounts) {
 	case 0:
-		return "", fmt.Errorf("the API token sees no account; set CF_ACCOUNT_ID")
+		return "", fmt.Errorf("the API token sees no account; give the account ID (CF_ACCOUNT_ID)")
 	case 1:
 		return accounts[0].ID, nil
 	default:
@@ -166,7 +166,7 @@ func (c *Client) AccountID(ctx context.Context) (string, error) {
 		for _, a := range accounts {
 			names = append(names, fmt.Sprintf("%s (%s)", a.Name, a.ID))
 		}
-		return "", fmt.Errorf("the API token sees several accounts, set CF_ACCOUNT_ID to one of: %s",
+		return "", fmt.Errorf("the API token sees several accounts; give the account ID (CF_ACCOUNT_ID) of one of: %s",
 			strings.Join(names, ", "))
 	}
 }
@@ -213,7 +213,14 @@ func (c *Client) CreateTunnel(ctx context.Context, account, name string) (*Tunne
 	return &tunnel, credentials, nil
 }
 
-// DeleteTunnel removes a tunnel. Cloudflare refuses while connections are still open.
+// DeleteTunnel removes a tunnel. Cloudflare refuses while connections are still open, and it
+// keeps a connection open for a while after cloudflared has gone; shelf deletes a tunnel right
+// after it stopped cloudflared, so the connections that are left are cleaned up first. A
+// cloudflared that still runs would simply connect again, and the delete would fail as before.
 func (c *Client) DeleteTunnel(ctx context.Context, account, id string) error {
-	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/accounts/%s/cfd_tunnel/%s", account, id), nil, nil)
+	path := fmt.Sprintf("/accounts/%s/cfd_tunnel/%s", account, id)
+	if err := c.do(ctx, http.MethodDelete, path+"/connections", nil, nil); err != nil {
+		return fmt.Errorf("closing its connections: %w", err)
+	}
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }

@@ -1,5 +1,4 @@
 apiVersion: shelf.dev/v1alpha1
-name: hello
 components:
   check:
     image: postgres:16@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

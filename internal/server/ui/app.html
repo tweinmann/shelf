@@ -1,0 +1,154 @@
+{{define "content"}}
+<nav class="crumbs"><a href="/">Apps</a> / {{.App.Name}}</nav>
+
+<div class="app-head">
+<h1>{{.App.Name}}</h1>
+<span class="pill {{.App.Phase}}">{{.App.Phase}}</span>
+</div>
+
+{{with .Trouble}}
+<section class="card problem">
+<h2>{{.Name}}</h2>
+{{if .Message}}<pre>{{.Message}}</pre>{{end}}
+{{if .Hint}}<p>{{.Hint}}</p>{{end}}
+<p class="muted">{{.Object}}{{if .Reason}} · {{.Reason}}{{end}}</p>
+</section>
+{{end}}
+
+<section class="card">
+<dl class="facts">
+{{if .App.URL}}<dt>Address</dt><dd><a href="{{.App.URL}}">{{.App.Host}}</a></dd>
+{{else if .App.Host}}<dt>Address</dt><dd>{{.App.Host}}
+<span class="muted">{{if .App.Public}}not exposed{{else}}inside the cluster only{{end}}</span></dd>{{end}}
+<dt>Artifact</dt><dd>{{.App.Artifact}}</dd>
+{{if .App.Revision}}<dt>Running</dt><dd><span title="{{.App.Revision}}">{{short .App.Revision}}</span></dd>{{end}}
+{{with ago .App.Deployed}}<dt>Deployed</dt><dd>{{.}}</dd>{{end}}
+</dl>
+<p class="muted">The app itself is described in the <code>app.yaml</code> of its repository. shelf deploys
+what the artifact above carries; to change ports, volumes or secrets, change that file and let your
+pipeline publish a new artifact.</p>
+</section>
+
+<section class="card">
+<h2>Components</h2>
+{{if .App.Components}}
+<ul class="components">
+{{range .App.Components}}
+<li>
+<div class="app-head"><span class="name">{{.Name}}</span><span class="pill {{.Phase}}">{{.Phase}}</span></div>
+{{if .URL}}<p class="address"><a href="{{.URL}}">{{.URL}}</a></p>
+{{- else}}<p class="address">{{with .Address}}{{.}} {{end}}<span class="muted">
+{{- if and (not .Internal) $.App.Public}}not exposed{{else}}inside the cluster only{{end}}</span></p>{{end}}
+</li>
+{{end}}
+</ul>
+<p class="muted">A component answers from outside only where its <code>app.yaml</code> gives it a
+route. The others carry the app from within, and their address is how a component of this app
+reaches them.</p>
+{{else}}
+<p class="muted">shelf does not know yet what this app is made of. The components appear once the
+app values have been applied; the chain below says how far that got.</p>
+{{end}}
+</section>
+
+{{if .Running}}
+<p class="notice">A change is running: <a href="/jobs/{{.Running.ID}}">{{.Running.Title}}</a>.
+The buttons below wait until it is done.</p>
+{{end}}
+
+<section class="card">
+<h2>Deploy</h2>
+<form method="post" action="/apps/{{.App.Name}}/deploy" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if .App.Insecure}}<input type="hidden" name="insecure" value="1">{{end}}
+<label for="artifact">Artifact and tag</label>
+<input id="artifact" name="artifact" value="{{.App.Artifact}}" required>
+<button type="submit">Deploy this</button>
+</form>
+<p class="muted">Point it at another tag to move the app there — a commit tag such as
+<code>sha-905acce</code> is how you go back to a version that worked, and the branch tag is how
+you come forward again.</p>
+<form method="post" action="/apps/{{.App.Name}}/redeploy" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<button type="submit" class="secondary">Deploy again</button>
+</form>
+<p class="muted">Fetches the same tag once more, for when it was moved or something failed.</p>
+</section>
+
+<section class="card">
+<h2>Access</h2>
+<dl class="facts">
+<dt>Domain</dt><dd>{{with .App.Domain}}{{.}}{{else}}{{.Status.Settings.Domain}} <span class="muted">the cluster's</span>{{end}}</dd>
+<dt>Registry</dt><dd>{{with .App.Registry}}{{.}}{{else}}<span class="muted">no connection, pulls without a login</span>{{end}}</dd>
+<dt>Internet</dt><dd>{{if .App.CloudflareMissing}}{{.App.Cloudflare}} <span class="muted">this machine does not hold this connection</span>
+{{- else if .App.Cloudflare}}{{.App.Cloudflare}} <span class="muted">its own tunnel, account {{.App.CloudflareAccount}}</span>
+{{- else}}<span class="muted">not exposed</span>{{end}}</dd>
+</dl>
+<form method="post" action="/apps/{{.App.Name}}/access">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="registry">Registry connection</label>
+<select id="registry" name="registry">
+<option value="">none: pull without a login</option>
+{{range .Connections.Registry}}<option value="{{.Name}}"{{if eq .Name $.App.Registry}} selected{{end}}>{{.Name}} ({{.Username}})</option>
+{{end}}</select>
+<label for="cloudflare">Cloudflare connection</label>
+<select id="cloudflare" name="cloudflare">
+<option value="">none: take it off the internet</option>
+{{range .Connections.Cloudflare}}<option value="{{.Name}}"{{if eq .Name $.App.Cloudflare}} selected{{end}}>{{.Name}}{{if .Missing}} (not on this machine){{else}} (account {{.Account}}){{end}}</option>
+{{end}}</select>
+<label for="domain">A domain of its own</label>
+<input id="domain" name="domain" value="{{.App.Domain}}" placeholder="{{.Status.Settings.Domain}}" list="zones">
+<datalist id="zones">{{range .Zones}}<option value="{{.}}">{{end}}</datalist>
+<button type="submit" class="secondary">Change</button>
+</form>
+<p class="muted">The connections themselves are defined on the <a href="/connections">connections
+page</a>. A new domain or a Cloudflare connection in another account moves the app's record, and
+its tunnel with it; the app is deployed again from the artifact above.</p>
+</section>
+
+<section class="card">
+<h2>Secrets</h2>
+{{if .SecretNames}}
+<p class="muted">shelf generated these and hands them to the app as environment variables. They
+are stored in the cluster and backed up on this machine.</p>
+<dl class="facts">
+{{range .SecretNames}}<dt>{{.}}</dt><dd>{{with index $.Secrets .}}{{.}}{{else}}••••••••{{end}}</dd>{{end}}
+</dl>
+{{if not .Secrets}}
+{{if .SecretError}}<p class="problem-line">{{.SecretError}}</p>{{end}}
+<form method="post" action="/apps/{{.App.Name}}/secrets" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="password">Your password, to show the values</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit" class="secondary">Show</button>
+</form>
+{{end}}
+{{else}}
+<p class="muted">This app declares no secrets.</p>
+{{end}}
+</section>
+
+<h2>How it gets here</h2>
+<ol class="chain">
+{{range .Diagnosis.Stages}}
+<li class="{{.Phase}}">
+<div class="app-head"><span class="name">{{.Name}}</span><span class="pill {{.Phase}}">{{.Phase}}</span></div>
+{{if .Message}}<pre>{{.Message}}</pre>{{end}}
+{{if .Hint}}<p>{{.Hint}}</p>{{end}}
+<p class="muted">{{.Object}}{{if .Reason}} · {{.Reason}}{{end}}</p>
+</li>
+{{end}}
+</ol>
+
+<section class="card problem">
+<h2>Remove {{.App.Name}}</h2>
+<p>This deletes the app, its namespace and its volumes. The data in them is gone; the secret
+backup on this machine is kept. Type the name to confirm.</p>
+<form method="post" action="/apps/{{.App.Name}}/delete" class="inline">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="confirm">Name of the app</label>
+<input id="confirm" name="confirm" placeholder="{{.App.Name}}" autocomplete="off" required>
+<button type="submit" class="danger">Remove it</button>
+</form>
+</section>
+{{end}}

@@ -19,9 +19,10 @@ test:
       exit 1
     fi
     go vet ./...
-    go test ./...
+    # -race, because the CLI tests run in parallel and the server will run operations concurrently.
+    go test -race ./...
     helm lint --strict charts/shelf-app --namespace hello \
-      -f internal/cli/testdata/render-hello.app.yaml --set platform.domain=dev.local
+      -f internal/cli/testdata/render-hello.app.yaml --set name=hello --set platform.domain=dev.local
     # Custom resources (Flux, Flux Operator, Traefik) are checked against the CRDs-catalog.
     schemas=(-schema-location default -schema-location \
       'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{"{{"}}.Group{{"}}"}}/{{"{{"}}.ResourceKind{{"}}"}}_{{"{{"}}.ResourceAPIVersion{{"}}"}}.json')
@@ -33,7 +34,7 @@ test:
 
 # Rewrite golden files and schema/app.schema.json from the current code
 golden:
-    go test ./internal/schema ./internal/render ./internal/cli ./internal/chart ./internal/cluster -update
+    go test ./internal/schema ./internal/render ./internal/cli ./internal/chart ./internal/cluster ./internal/server -update
 
 # Replace the embedded Flux Operator manifest with the install.yaml of another release
 flux-operator-update version:
@@ -75,6 +76,11 @@ init-cluster *flags:
       --platform oci://shelf-registry:5000/shelf/platform:dev \
       --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
 
+# Run the admin UI against the dev cluster. The devcontainer forwards 8080, so the browser on
+# the Mac reaches it at http://localhost:8080; the setup code is printed on the first start.
+serve *flags:
+    go run ./cmd/shelf serve --listen :8080 {{flags}}
+
 # Smoke test: $(VAR) expansion from secretKeyRef in env and args
 smoke-secrets:
     hack/smoke/secret-expansion.sh
@@ -91,9 +97,9 @@ smoke-init:
 smoke-apps:
     hack/smoke/apps.sh
 
-# Phase 5 acceptance: expose the dev cluster through Cloudflare (asks for the API token)
-smoke-expose app:
-    hack/smoke/expose.sh {{app}}
+# Phase 8b acceptance: expose an app through its own Cloudflare tunnel (asks for the API token)
+smoke-expose app domain:
+    hack/smoke/expose.sh {{app}} {{domain}}
 
 # Phase 4 acceptance with a real tenant repository and GHCR (asks for the GHCR login)
 smoke-tenant app artifact:

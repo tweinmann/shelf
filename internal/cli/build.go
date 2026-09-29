@@ -17,10 +17,9 @@ import (
 
 var componentNameRE = regexp.MustCompile(schema.ComponentNamePattern)
 
-// buildPlan is what a CI needs before it can render an app.yaml: the app name, which the
-// package names are derived from, and the components it has to build.
+// buildPlan is what a CI needs before it can render an app.yaml: the components it has to
+// build. The package names are the CI's business; app.yaml carries no name to derive them from.
 type buildPlan struct {
-	App    string      `json:"app"`
 	Builds []buildItem `json:"builds"`
 }
 
@@ -34,12 +33,12 @@ type buildItem struct {
 func newBuildPlanCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "build-plan <app.yaml>",
-		Short: "Print the app name and the components that have to be built, as JSON",
-		Long: `Print {app, builds} as JSON: the app name, and every component with a build directory.
-The build contexts are relative to the app.yaml, and printed relative to the working directory.
+		Short: "Print the components that have to be built, as JSON",
+		Long: `Print {builds} as JSON: every component with a build directory. The build contexts are
+relative to the app.yaml, and printed relative to the working directory.
 
-A CI workflow names the packages after the app, builds each component, pushes the image and
-passes the result to ` + "`shelf render --image <component>=<reference>`" + `.`,
+A CI workflow names the packages (the shelf workflow after the repository), builds each
+component, pushes the image and passes the result to ` + "`shelf render --image <component>=<reference>`" + `.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file := args[0]
@@ -47,7 +46,7 @@ passes the result to ` + "`shelf render --image <component>=<reference>`" + `.`,
 			if err != nil {
 				return err
 			}
-			plan := buildPlan{App: doc.App.Name, Builds: []buildItem{}}
+			plan := buildPlan{Builds: []buildItem{}}
 			for _, compName := range slices.Sorted(maps.Keys(doc.App.Components)) {
 				comp := doc.App.Components[compName]
 				if comp == nil || !comp.IsBuilt() {

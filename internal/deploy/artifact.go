@@ -32,9 +32,11 @@ const ContentMediaType types.MediaType = "application/vnd.cncf.flux.content.v1.t
 // maxFileSize bounds each file read from an artifact; a deploy artifact is a few kilobytes.
 const maxFileSize = 1 << 20
 
-// Fetch downloads the artifact at ref (<registry>/<repository>:<tag>) with credentials from the
-// Docker config and returns the app it deploys.
-func Fetch(ctx context.Context, ref string, insecure bool) (*schema.App, error) {
+// Fetch downloads the artifact at ref (<registry>/<repository>:<tag>) and returns the app it
+// deploys. auth are the registry credentials; nil takes them from the Docker config, which is
+// what the command line does. A machine that runs shelf as a service has no Docker config, so
+// there the caller passes the login it stores itself.
+func Fetch(ctx context.Context, ref string, auth authn.Authenticator, insecure bool) (*schema.App, error) {
 	var nameOpts []name.Option
 	if insecure {
 		nameOpts = append(nameOpts, name.Insecure)
@@ -43,7 +45,11 @@ func Fetch(ctx context.Context, ref string, insecure bool) (*schema.App, error) 
 	if err != nil {
 		return nil, err
 	}
-	img, err := remote.Image(r, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	authOpt := remote.WithAuthFromKeychain(authn.DefaultKeychain)
+	if auth != nil {
+		authOpt = remote.WithAuth(auth)
+	}
+	img, err := remote.Image(r, remote.WithContext(ctx), authOpt)
 	if err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", ref, err)
 	}
@@ -140,6 +146,10 @@ func appValues(data []byte) ([]string, error) {
 
 func parseApp(values string) (*schema.App, error) {
 	doc, err := schema.Parse(render.ConfigMapKey, []byte(values))
+	if errors.Is(err, schema.ErrAppName) {
+		return nil, errors.New("the artifact was rendered by a shelf older than v0.3.0, which named " +
+			"the app in it; push the app again with a current shelf")
+	}
 	if err != nil {
 		return nil, err
 	}

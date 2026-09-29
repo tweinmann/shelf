@@ -1,69 +1,76 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/tweinmann/shelf/internal/cluster"
-	"github.com/tweinmann/shelf/internal/deploy"
-	"github.com/tweinmann/shelf/internal/schema"
-	"github.com/tweinmann/shelf/internal/secrets"
+	"github.com/tweinmann/shelf/internal/ops"
+	"github.com/tweinmann/shelf/internal/progress"
 )
 
-// Cluster and registry access of the app commands; replaced in tests.
-var (
-	fetchApp   = deploy.Fetch
-	appSecrets = cluster.AppSecrets
-	addApp     = cluster.AddApp
-	removeApp  = cluster.RemoveApp
-)
-
-var appNameRE = regexp.MustCompile(schema.AppNamePattern)
-
-// shelfHome is where shelf keeps state on the host: $SHELF_HOME, or ~/.shelf.
-func shelfHome() (string, error) {
-	if dir := os.Getenv("SHELF_HOME"); dir != "" {
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".shelf"), nil
-}
-
-func secretBackup() (secrets.Backup, error) {
-	home, err := shelfHome()
-	if err != nil {
-		return secrets.Backup{}, err
-	}
-	return secrets.Backup{Dir: filepath.Join(home, "apps")}, nil
-}
-
-func checkAppName(name string) error {
-	if len(name) > schema.MaxAppNameLength || !appNameRE.MatchString(name) {
-		return fmt.Errorf("app name %q must be a DNS label of at most %d characters", name, schema.MaxAppNameLength)
-	}
-	return nil
-}
-
-func newAppCmd() *cobra.Command {
+func newAppCmd(o Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "app",
-		Short: "Add and remove apps",
+		Short: "Add, inspect and remove apps",
 	}
-	cmd.AddCommand(newAppAddCmd(), newAppRmCmd())
+	cmd.AddCommand(
+		newAppAddCmd(o), newAppRmCmd(o), newAppStatusCmd(o),
+		newAppRedeployCmd(o), newAppSecretsCmd(o), newAppCredentialsCmd(o),
+	)
 	return cmd
 }
 
-func newAppAddCmd() *cobra.Command {
+// accessHelp explains what an app can be given, for every command that takes it.
+const accessHelp = `--registry names the registry connection the app pulls its deploy artifact and its images
+with; without one, it reads the registry anonymously. --cloudflare names the Cloudflare
+connection it is exposed through: it gets a tunnel of its own in that connection's account, and
+its domain has to be a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.`
+
+// accessFlags choose what an app reaches its registry and the internet with.
+type accessFlags struct {
+	domain       string
+	registry     string
+	noRegistry   bool
+	cloudflare   string
+	noCloudflare bool
+}
+
+// register adds the flags; removable adds the ones that take a connection away again.
+func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
+	fs.StringVar(&f.domain, "domain", "",
+		"a domain of the app's own: it answers at <name><host-suffix>.<domain> (default: the cluster's)")
+	fs.StringVar(&f.registry, "registry", "", "the registry connection the app pulls with")
+	fs.StringVar(&f.cloudflare, "cloudflare", "", "the Cloudflare connection the app is exposed through")
+	if removable {
+		fs.BoolVar(&f.noRegistry, "no-registry", false, "pull without a login")
+		fs.BoolVar(&f.noCloudflare, "no-cloudflare", false,
+			"take the app off the internet: delete its record and its tunnel")
+	}
+}
+
+// changes reports whether any flag asks for a change.
+func (f *accessFlags) changes() bool {
+	return f.domain != "" || f.registry != "" || f.noRegistry || f.cloudflare != "" || f.noCloudflare
+}
+
+func (f *accessFlags) access() (ops.Access, error) {
+	a := ops.Access{
+		Domain:           f.domain,
+		Registry:         f.registry,
+		RemoveRegistry:   f.noRegistry,
+		Cloudflare:       f.cloudflare,
+		RemoveCloudflare: f.noCloudflare,
+	}
+	return a, a.Check()
+}
+
+func newAppAddCmd(o Options) *cobra.Command {
 	var (
 		insecure bool
+		access   accessFlags
 		target   clusterFlags
 	)
 	cmd := &cobra.Command{
@@ -72,104 +79,115 @@ func newAppAddCmd() *cobra.Command {
 		Long: `Add an app to the platform. From then on, Flux deploys every new version of the deploy
 artifact under the given tag, usually "main".
 
-shelf reads the artifact (registry credentials come from the Docker config), generates the
-secrets the app declares and stores them in the cluster and in a backup file on this machine
-(` + "$SHELF_HOME/apps/<name>/secrets.yaml, default ~/.shelf" + `). If the cluster was rebuilt, the
-backup restores the old values. Running add again updates the artifact reference, generates
-secrets that were added to app.yaml since, and keeps all existing values.`,
+shelf reads the artifact, generates the secrets the app declares and stores them in the cluster
+and in a backup file on this machine (` + "$SHELF_HOME/apps/<name>/secrets.yaml, default ~/.shelf" + `).
+If the cluster was rebuilt, the backup restores the old values. Running add again updates the
+artifact reference, generates secrets that were added to app.yaml since, and keeps all existing
+values, and the app's domain and connections unless others are given.
+
+` + accessHelp,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := checkAppName(name); err != nil {
+			if err := ops.CheckAppName(name); err != nil {
 				return err
 			}
 			artifact, err := cluster.ParseArtifact(args[1])
 			if err != nil {
 				return err
 			}
-			backup, err := secretBackup()
+			given, err := access.access()
 			if err != nil {
 				return err
 			}
-			t, err := target.load()
+			shelf, err := target.load(o)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Adding app %s from %s to:\n", name, artifact)
-			t.print(out)
+			printTarget(out, shelf.Target)
 
-			app, err := fetchApp(cmd.Context(), artifact.Reference(), insecure)
-			if err != nil {
-				return err
-			}
-			if app.Name != name {
-				return fmt.Errorf("the artifact deploys app %q, not %q", app.Name, name)
-			}
-
-			stored, err := appSecrets(cmd.Context(), t.config, name)
-			if err != nil {
-				return err
-			}
-			saved, err := backup.Load(name)
-			if err != nil {
-				return err
-			}
-			declared := deploy.SecretNames(app)
-			values, sources := secrets.Merge(declared, stored, saved)
-			for _, s := range declared {
-				fmt.Fprintf(out, "secret %s: %s\n", s, sources[s])
-			}
-			// The backup is written first, so a generated value never exists only in the cluster.
-			if len(values) > 0 {
-				if err := backup.Save(name, values); err != nil {
-					return fmt.Errorf("writing the secret backup: %w", err)
-				}
-				fmt.Fprintf(out, "secret backup: %s\n", backup.Path(name))
-			}
-
-			publisher, err := newDNS(cmd.Context(), t.config, out)
-			if err != nil {
-				return err
-			}
-			if err := addApp(cmd.Context(), t.config, cluster.AppOptions{
+			return shelf.AddApp(cmd.Context(), ops.AddOptions{
 				Name:     name,
 				Artifact: artifact,
 				Insecure: insecure,
-				Secrets:  values,
+				Access:   given,
 				Timeout:  target.timeout,
-				Out:      out,
-			}); err != nil {
-				return err
-			}
-			return publisher.publish(cmd.Context(), name, out)
+			}, progress.Writer(out))
 		},
 	}
 	cmd.Flags().BoolVar(&insecure, "insecure-registry", false, "pull the deploy artifact without TLS (dev registry)")
+	access.register(cmd.Flags(), false)
 	target.register(cmd.Flags())
 	return cmd
 }
 
-func newAppRmCmd() *cobra.Command {
+func newAppCredentialsCmd(o Options) *cobra.Command {
+	var (
+		access accessFlags
+		target clusterFlags
+	)
+	cmd := &cobra.Command{
+		Use:   "credentials <name>",
+		Short: "Change an app's domain or the connections it uses",
+		Long: `Change how an app reaches its registry and the internet, and nothing else: the app is
+deployed again from the artifact it is registered with. What is not given stays as it is.
+
+Moving the app to another domain or another Cloudflare connection deletes its record, and its
+tunnel if the account changes; --no-cloudflare takes it off the internet.
+
+` + accessHelp,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			if err := ops.CheckAppName(name); err != nil {
+				return err
+			}
+			if !access.changes() {
+				return fmt.Errorf("nothing to change; pass --domain, --registry, --cloudflare, " +
+					"--no-registry or --no-cloudflare")
+			}
+			given, err := access.access()
+			if err != nil {
+				return err
+			}
+			shelf, err := target.load(o)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Changing the credentials of app %s on:\n", name)
+			printTarget(out, shelf.Target)
+			return shelf.SetAccess(cmd.Context(), name, given, target.timeout, progress.Writer(out))
+		},
+	}
+	access.register(cmd.Flags(), true)
+	target.register(cmd.Flags())
+	return cmd
+}
+
+func newAppRmCmd(o Options) *cobra.Command {
 	var target clusterFlags
 	cmd := &cobra.Command{
 		Use:   "rm <name>",
 		Short: "Remove an app with all its data",
-		Long: `Remove an app: its namespace with all objects and volumes, and its secrets in the
-cluster. The secret backup on this machine is kept.`,
+		Long: `Remove an app: its namespace with all objects and volumes, its secrets in the cluster,
+and, if it is exposed, its DNS record and its Cloudflare tunnel. The secret backup on this
+machine is kept.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if err := checkAppName(name); err != nil {
+			if err := ops.CheckAppName(name); err != nil {
 				return err
 			}
-			t, err := target.load()
+			shelf, err := target.load(o)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Removing app %s, including all its volumes, from:\n", name)
-			t.print(out)
+			printTarget(out, shelf.Target)
 			if !target.yes {
 				ok, err := confirm(cmd.InOrStdin(), out)
 				if err != nil {
@@ -179,29 +197,7 @@ cluster. The secret backup on this machine is kept.`,
 					return errAborted
 				}
 			}
-			publisher, err := newDNS(cmd.Context(), t.config, out)
-			if err != nil {
-				return err
-			}
-			found, err := removeApp(cmd.Context(), t.config, name, target.timeout, out)
-			if err != nil {
-				return err
-			}
-			if err := publisher.withdraw(cmd.Context(), name, out); err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("app %s does not exist", name)
-			}
-			if backup, err := secretBackup(); err == nil {
-				if _, err := os.Stat(backup.Path(name)); err == nil {
-					fmt.Fprintf(out, "The secret backup stays in %s; delete it if you do not need the values any more.\n",
-						backup.Path(name))
-				} else if !errors.Is(err, os.ErrNotExist) {
-					return err
-				}
-			}
-			return nil
+			return shelf.RemoveApp(cmd.Context(), name, target.timeout, progress.Writer(out))
 		},
 	}
 	target.register(cmd.Flags())

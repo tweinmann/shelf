@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>greeter · shelf</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+<a class="brand" href="/">shelf</a>
+
+<nav class="links">
+<a href="/">Apps</a>
+<a href="/connections">Connections</a>
+<form method="post" action="/logout">
+<input type="hidden" name="csrf" value="CSRF">
+<button class="link" type="submit">Log out</button>
+</form>
+</nav>
+
+</header>
+<main>
+
+<nav class="crumbs"><a href="/">Apps</a> / greeter</nav>
+
+<div class="app-head">
+<h1>greeter</h1>
+<span class="pill Ready">Ready</span>
+</div>
+
+
+
+<section class="card">
+<dl class="facts">
+<dt>Address</dt><dd><a href="https://greeter-dev.example.com/">greeter-dev.example.com</a></dd>
+
+<dt>Artifact</dt><dd>oci://ghcr.io/tweinmann/greeter:main</dd>
+<dt>Running</dt><dd><span title="main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7">main@sha256:00677bbefb02…</span></dd>
+<dt>Deployed</dt><dd>17 minutes ago</dd>
+</dl>
+<p class="muted">The app itself is described in the <code>app.yaml</code> of its repository. shelf deploys
+what the artifact above carries; to change ports, volumes or secrets, change that file and let your
+pipeline publish a new artifact.</p>
+</section>
+
+<section class="card">
+<h2>Components</h2>
+
+<ul class="components">
+
+<li>
+<div class="app-head"><span class="name">check</span><span class="pill Working">Working</span></div>
+<p class="address"><span class="muted">inside the cluster only</span></p>
+</li>
+
+<li>
+<div class="app-head"><span class="name">db</span><span class="pill Ready">Ready</span></div>
+<p class="address">db:5432 <span class="muted">inside the cluster only</span></p>
+</li>
+
+<li>
+<div class="app-head"><span class="name">web</span><span class="pill Ready">Ready</span></div>
+<p class="address"><a href="https://greeter-dev.example.com/">https://greeter-dev.example.com/</a></p>
+</li>
+
+</ul>
+<p class="muted">A component answers from outside only where its <code>app.yaml</code> gives it a
+route. The others carry the app from within, and their address is how a component of this app
+reaches them.</p>
+
+</section>
+
+
+
+<section class="card">
+<h2>Deploy</h2>
+<form method="post" action="/apps/greeter/deploy" class="inline">
+<input type="hidden" name="csrf" value="CSRF">
+
+<label for="artifact">Artifact and tag</label>
+<input id="artifact" name="artifact" value="oci://ghcr.io/tweinmann/greeter:main" required>
+<button type="submit">Deploy this</button>
+</form>
+<p class="muted">Point it at another tag to move the app there — a commit tag such as
+<code>sha-905acce</code> is how you go back to a version that worked, and the branch tag is how
+you come forward again.</p>
+<form method="post" action="/apps/greeter/redeploy" class="inline">
+<input type="hidden" name="csrf" value="CSRF">
+<button type="submit" class="secondary">Deploy again</button>
+</form>
+<p class="muted">Fetches the same tag once more, for when it was moved or something failed.</p>
+</section>
+
+<section class="card">
+<h2>Access</h2>
+<dl class="facts">
+<dt>Domain</dt><dd>example.com <span class="muted">the cluster's</span></dd>
+<dt>Registry</dt><dd>ghcr</dd>
+<dt>Internet</dt><dd>tobile <span class="muted">its own tunnel, account acc-1</span></dd>
+</dl>
+<form method="post" action="/apps/greeter/access">
+<input type="hidden" name="csrf" value="CSRF">
+<label for="registry">Registry connection</label>
+<select id="registry" name="registry">
+<option value="">none: pull without a login</option>
+<option value="ghcr" selected>ghcr (tobi)</option>
+<option value="spare">spare (tobi)</option>
+</select>
+<label for="cloudflare">Cloudflare connection</label>
+<select id="cloudflare" name="cloudflare">
+<option value="">none: take it off the internet</option>
+<option value="club">club (not on this machine)</option>
+<option value="tobile" selected>tobile (account acc-1)</option>
+</select>
+<label for="domain">A domain of its own</label>
+<input id="domain" name="domain" value="" placeholder="example.com" list="zones">
+<datalist id="zones"><option value="example.com"><option value="shop.ch"></datalist>
+<button type="submit" class="secondary">Change</button>
+</form>
+<p class="muted">The connections themselves are defined on the <a href="/connections">connections
+page</a>. A new domain or a Cloudflare connection in another account moves the app's record, and
+its tunnel with it; the app is deployed again from the artifact above.</p>
+</section>
+
+<section class="card">
+<h2>Secrets</h2>
+
+<p class="muted">This app declares no secrets.</p>
+
+</section>
+
+<h2>How it gets here</h2>
+<ol class="chain">
+
+<li class="Ready">
+<div class="app-head"><span class="name">the deploy artifact</span><span class="pill Ready">Ready</span></div>
+<pre>stored artifact for digest &#39;main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7&#39;</pre>
+
+<p class="muted">OCIRepository greeter/deploy · Succeeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the app values</span><span class="pill Ready">Ready</span></div>
+<pre>Applied revision: main@sha256:00677bbefb02ca2056a9eb0741e12735e38067d6f155938034a4ccb612450db7</pre>
+
+<p class="muted">Kustomization greeter/deploy · ReconciliationSucceeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the chart</span><span class="pill Ready">Ready</span></div>
+<pre>stored artifact for digest &#39;0.1.0@sha256:8f5bfec4&#39;</pre>
+
+<p class="muted">OCIRepository greeter/shelf-app · Succeeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the app</span><span class="pill Ready">Ready</span></div>
+<pre>Helm install succeeded</pre>
+
+<p class="muted">HelmRelease greeter/greeter · InstallSucceeded</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the pods</span><span class="pill Ready">Ready</span></div>
+<pre>2 running</pre>
+
+<p class="muted">Pods</p>
+</li>
+
+</ol>
+
+<section class="card problem">
+<h2>Remove greeter</h2>
+<p>This deletes the app, its namespace and its volumes. The data in them is gone; the secret
+backup on this machine is kept. Type the name to confirm.</p>
+<form method="post" action="/apps/greeter/delete" class="inline">
+<input type="hidden" name="csrf" value="CSRF">
+<label for="confirm">Name of the app</label>
+<input id="confirm" name="confirm" placeholder="greeter" autocomplete="off" required>
+<button type="submit" class="danger">Remove it</button>
+</form>
+</section>
+
+</main>
+<footer>shelf v0.3.0</footer>
+</body>
+</html>

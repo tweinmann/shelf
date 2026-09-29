@@ -61,7 +61,7 @@ func TestRenderHello(t *testing.T) {
 	testutil.Golden(t, "testdata/hello.configmap.yaml", cm)
 }
 
-const head = "apiVersion: shelf.dev/v1alpha1\nname: shop\n"
+const head = "apiVersion: shelf.dev/v1alpha1\n"
 
 func renderApp(t *testing.T, src string, images fakeResolver, built ...map[string]string) (*schema.App, validate.Findings) {
 	t.Helper()
@@ -277,8 +277,8 @@ components:
 		got = append(got, f.Format("app.yaml"))
 	}
 	want := []string{
-		"app.yaml:5: warning: components.web.port: port 8080 is not exposed by image web (EXPOSE 80 443)",
-		"app.yaml:6: warning: components.api.ports.metrics: port 9100 is not exposed by image api (EXPOSE 80)",
+		"app.yaml:4: warning: components.web.port: port 8080 is not exposed by image web (EXPOSE 80 443)",
+		"app.yaml:5: warning: components.api.ports.metrics: port 9100 is not exposed by image api (EXPOSE 80)",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -347,8 +347,8 @@ secrets:
 	if err := yaml.Unmarshal(cm, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Metadata.Name != "shop-values" || parsed.Metadata.Namespace != "" ||
-		parsed.Metadata.Labels["shelf.dev/app"] != "shop" {
+	// Neither namespace nor app name: the artifact does not know which app it becomes.
+	if parsed.Metadata.Name != "shelf-values" || parsed.Metadata.Namespace != "" || len(parsed.Metadata.Labels) != 0 {
 		t.Errorf("metadata = %+v", parsed.Metadata)
 	}
 	// The embedded app.yaml must parse back as an app and keep the reference.

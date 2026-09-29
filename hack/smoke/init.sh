@@ -7,6 +7,7 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
+require_dev_domain
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="$(mktemp -d)"
@@ -76,8 +77,8 @@ grep -q '(FluxInstance flux-system/flux): unchanged$' "$work/second.txt" \
   || die "the second run did not report the FluxInstance as unchanged"
 grep -q '^ConfigMap flux-system/shelf-config: unchanged$' "$work/second.txt" \
   || die "the second run did not report the settings as unchanged"
-grep -q '^Secret shelf-system/registry: kept' "$work/second.txt" \
-  || die "the second run did not keep the registry login"
+kubectl -n shelf-system get secret registry >/dev/null 2>&1 \
+  && die "a registry login shared by all apps exists; logins belong to each app"
 
 step "a new platform artifact under the same tag is applied at once"
 digest="$("$repo/hack/platform-push.sh" 2>&1 | sed -n 's/.*pushed to .*@\(sha256:[0-9a-f]*\).*/\1/p')"
@@ -105,14 +106,13 @@ install_app() {
       --from-literal=db-password="$(head -c 20 /dev/urandom | base32 | tr -d '=' | head -c 26)" >/dev/null
   fi
   helm install "$app" "$repo/charts/shelf-app" -n "$app" -f "$work/$app.values.yaml" \
-    --set platform.domain=dev.local --wait --timeout 3m >/dev/null
+    --set name="$app" --set platform.domain=dev.local --wait --timeout 3m >/dev/null
 }
 
 step "install examples/hello and an app with stripPrefix"
 install_app hello "$repo/examples/hello/app.yaml"
 cat >"$work/strip.app.yaml" <<'EOF'
 apiVersion: shelf.dev/v1alpha1
-name: strip
 components:
   api:
     image: traefik/whoami:v1.11.0

@@ -1,0 +1,15 @@
+Flux Operator v0.60.0: 42 objects, 40 created, 2 unchanged
+  waiting for the operator ... done after 7s
+Namespace shelf-system: created
+Secret shelf-system/registry: configured, for tobi@ghcr.io
+Secret shelf-system/registry: kept (no GHCR_TOKEN given)
+The apps move from <app>.old.example to <app>.new.example.
+Their records under the old name stay behind; delete them in Cloudflare:
+  greeter.old.example
+secret db-password: generated
+secret api-key: restored from the backup
+secret backup: /home/tobi/.shelf/apps/greeter/secrets.yaml
+  waiting for the deploy artifact ... done after 3s: sha-905acce
+  waiting for the app ... failed
+DNS greeter.example.com points at t-1.cfargotunnel.com: created
+DNS greeter.example.com: deleted

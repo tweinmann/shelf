@@ -18,7 +18,7 @@ func mustParse(t *testing.T, src string) *schema.Document {
 	return doc
 }
 
-const head = "apiVersion: shelf.dev/v1alpha1\nname: shop\n"
+const head = "apiVersion: shelf.dev/v1alpha1\n"
 
 func TestExamplesAreValid(t *testing.T) {
 	files, err := filepath.Glob("../../examples/*/app.yaml")
@@ -122,7 +122,7 @@ components:
 components:
   web: { image: nginx, instances: 3 }
 `,
-		"longest names": "apiVersion: shelf.dev/v1alpha1\nname: " + strings.Repeat("a", 40) + `
+		"longest names": head + `
 components:
   ` + strings.Repeat("c", 40) + `:
     image: nginx
@@ -146,16 +146,9 @@ func TestErrors(t *testing.T) {
 		path string // expected finding path
 		msg  string // expected substring of the message
 	}{
-		// apiVersion and name
-		{"missing apiVersion", "name: a\ncomponents:\n  web: { image: nginx }\n", "apiVersion", "must be shelf.dev/v1alpha1"},
-		{"wrong apiVersion", "apiVersion: shelf.dev/v1\nname: a\ncomponents:\n  web: { image: nginx }\n", "apiVersion", `got "shelf.dev/v1"`},
-		{"missing name", "apiVersion: shelf.dev/v1alpha1\ncomponents:\n  web: { image: nginx }\n", "name", "is required"},
-		{"uppercase name", "apiVersion: shelf.dev/v1alpha1\nname: Shop\ncomponents:\n  web: { image: nginx }\n", "name", "lowercase"},
-		{"name ends with dash", "apiVersion: shelf.dev/v1alpha1\nname: shop-\ncomponents:\n  web: { image: nginx }\n", "name", "lowercase"},
-		{"name too long", "apiVersion: shelf.dev/v1alpha1\nname: " + strings.Repeat("a", 41) + "\ncomponents:\n  web: { image: nginx }\n", "name", "at most 40"},
-		{"reserved name", "apiVersion: shelf.dev/v1alpha1\nname: flux-system\ncomponents:\n  web: { image: nginx }\n", "name", "reserved"},
-		{"reserved name prefix kube", "apiVersion: shelf.dev/v1alpha1\nname: kube-public\ncomponents:\n  web: { image: nginx }\n", "name", "reserved"},
-		{"reserved name prefix shelf", "apiVersion: shelf.dev/v1alpha1\nname: shelf-system\ncomponents:\n  web: { image: nginx }\n", "name", "reserved"},
+		// apiVersion
+		{"missing apiVersion", "components:\n  web: { image: nginx }\n", "apiVersion", "must be shelf.dev/v1alpha1"},
+		{"wrong apiVersion", "apiVersion: shelf.dev/v1\ncomponents:\n  web: { image: nginx }\n", "apiVersion", `got "shelf.dev/v1"`},
 
 		// components
 		{"no components", head, "components", "at least one component"},
@@ -285,7 +278,6 @@ secrets:
 
 func TestFindingFormatAndOrder(t *testing.T) {
 	doc := mustParse(t, `apiVersion: shelf.dev/v1alpha1
-name: shop
 components:
   web:
     image: nginx
@@ -295,9 +287,9 @@ components:
 `)
 	got := formatAll(Validate(doc))
 	want := strings.Join([]string{
-		"  app.yaml:6: error: components.web.route: route needs a port; add port or ports to the component",
-		"  app.yaml:7: error: components.db: needs image or build",
-		"  app.yaml:8: error: components.db.port: must be between 1 and 65535, got 0",
+		"  app.yaml:5: error: components.web.route: route needs a port; add port or ports to the component",
+		"  app.yaml:6: error: components.db: needs image or build",
+		"  app.yaml:7: error: components.db.port: must be between 1 and 65535, got 0",
 	}, "\n")
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)

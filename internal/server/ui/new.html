@@ -1,0 +1,45 @@
+{{define "content"}}
+<nav class="crumbs"><a href="/">Apps</a> / add</nav>
+<section class="card narrow">
+<h1>Add an app</h1>
+<p>An app comes from its deploy artifact: the package your pipeline publishes to the registry.
+shelf reads it, generates the secrets it declares, and keeps the app on that tag from then on.</p>
+{{if .Error}}<p class="problem-line">{{.Error}}</p>{{end}}
+<form method="post" action="/apps">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="name">Name</label>
+<input id="name" name="name" value="{{.Name}}" placeholder="greeter" autofocus required>
+<label for="artifact">Deploy artifact</label>
+<input id="artifact" name="artifact" value="{{.Artifact}}" placeholder="oci://ghcr.io/owner/greeter:main" required>
+{{if .Status.Settings.InsecureRegistry}}
+<label class="check"><input type="checkbox" name="insecure" {{if .Insecure}}checked{{end}}>
+Registry without TLS (this cluster uses one)</label>
+{{end}}
+<fieldset>
+<legend>Connections</legend>
+<label for="registry">Registry connection</label>
+<select id="registry" name="registry">
+<option value="">none: pull without a login</option>
+{{range .Connections.Registry}}<option value="{{.Name}}"{{if eq .Name $.Registry}} selected{{end}}>{{.Name}} ({{.Username}})</option>
+{{end}}</select>
+<label for="cloudflare">Cloudflare connection</label>
+<select id="cloudflare" name="cloudflare">
+<option value="">none: inside the cluster only</option>
+{{range .Connections.Cloudflare}}{{if not .Missing}}<option value="{{.Name}}"{{if eq .Name $.Cloudflare}} selected{{end}}>{{.Name}} (account {{.Account}})</option>
+{{end}}{{end}}</select>
+<p>Connections are defined once, on the <a href="/connections">connections page</a>, and chosen
+here. With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS
+record in its zone.</p>
+</fieldset>
+<fieldset>
+<legend>Domain</legend>
+<label for="domain">A domain of its own</label>
+<input id="domain" name="domain" value="{{.Domain}}" placeholder="{{.Status.Settings.Domain}}" list="zones">
+<datalist id="zones">{{range .Zones}}<option value="{{.}}">{{end}}</datalist>
+<p>{{if .Status.Hosts}}Empty, it answers at {{.Status.Hosts}}, with its name in place of &lt;app&gt;.{{end}}
+To reach it from the internet, the domain has to be a zone of the Cloudflare connection's account.</p>
+</fieldset>
+<button type="submit">Add the app</button>
+</form>
+</section>
+{{end}}
