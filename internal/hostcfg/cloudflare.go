@@ -6,90 +6,125 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
-// CloudflareFile is the file in an app's directory that holds the app's Cloudflare access.
-const CloudflareFile = "cloudflare.yaml"
+// ConnectionsDir is the directory under the shelf directory that holds the connections kept on
+// this machine, one directory per kind.
+const ConnectionsDir = "connections"
 
-const cloudflareHeader = "# shelf Cloudflare access of one app. Keep this file private; the token can change the app's DNS zone.\n"
+const cloudflareHeader = "# shelf Cloudflare connection. Keep this file private; the token can change DNS zones.\n"
 
-// Cloudflare is how shelf reaches the Cloudflare account an app is exposed through: the API token
-// and the account the app's tunnel belongs to. It lives on this machine only. Nothing in the
-// cluster needs it, and a token that can rewrite a DNS zone has no business there.
+// Cloudflare is a Cloudflare connection: an API token and the account the apps' tunnels are made
+// in. It lives on this machine only. Nothing in the cluster needs it, and a token that can rewrite
+// a DNS zone has no business there.
 type Cloudflare struct {
+	Name    string `yaml:"name"`
 	Token   string `yaml:"token"`
 	Account string `yaml:"account"`
 }
 
-// AppAccess keeps the Cloudflare access of the apps, one file per app next to its secret backup.
-type AppAccess struct {
-	// Dir holds one directory per app, e.g. ~/.shelf/apps.
+// Connections keeps the Cloudflare connections the user defined, one file each, so that any
+// number of apps can be exposed through the same one.
+type Connections struct {
+	// Dir is the connections directory, e.g. ~/.shelf/connections.
 	Dir string
 }
 
-type cloudflareFile struct {
-	App        string `yaml:"app"`
-	Cloudflare `yaml:",inline"`
+func (c Connections) cloudflareDir() string { return filepath.Join(c.Dir, "cloudflare") }
+
+// CloudflarePath returns the file of a Cloudflare connection.
+func (c Connections) CloudflarePath(name string) string {
+	return filepath.Join(c.cloudflareDir(), name+".yaml")
 }
 
-// Path returns the file with the Cloudflare access of app.
-func (a AppAccess) Path(app string) string { return filepath.Join(a.Dir, app, CloudflareFile) }
-
-// Cloudflare returns the stored access of app, or nil if this machine holds none.
-func (a AppAccess) Cloudflare(app string) (*Cloudflare, error) {
-	if a.Dir == "" {
+// Cloudflare returns a Cloudflare connection, or nil if this machine holds none of that name.
+func (c Connections) Cloudflare(name string) (*Cloudflare, error) {
+	if c.Dir == "" || name == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(a.Path(app))
+	data, err := os.ReadFile(c.CloudflarePath(name))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var f cloudflareFile
-	if err := yaml.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("%s: %w", a.Path(app), err)
+	var conn Cloudflare
+	if err := yaml.Unmarshal(data, &conn); err != nil {
+		return nil, fmt.Errorf("%s: %w", c.CloudflarePath(name), err)
 	}
-	if f.App != app {
-		return nil, fmt.Errorf("%s belongs to app %q, not %q", a.Path(app), f.App, app)
+	if conn.Name != name {
+		return nil, fmt.Errorf("%s holds the connection %q, not %q", c.CloudflarePath(name), conn.Name, name)
 	}
-	if f.Token == "" {
-		return nil, fmt.Errorf("%s holds no token", a.Path(app))
+	if conn.Token == "" {
+		return nil, fmt.Errorf("%s holds no token", c.CloudflarePath(name))
 	}
-	return &f.Cloudflare, nil
+	return &conn, nil
 }
 
-// SaveCloudflare replaces the access of app, privately and atomically.
-func (a AppAccess) SaveCloudflare(app string, c Cloudflare) error {
-	if a.Dir == "" {
-		return errors.New("no directory for the Cloudflare access")
+// CloudflareConnections returns every Cloudflare connection on this machine, by name.
+func (c Connections) CloudflareConnections() ([]Cloudflare, error) {
+	if c.Dir == "" {
+		return nil, nil
 	}
-	dir := filepath.Dir(a.Path(app))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+	entries, err := os.ReadDir(c.cloudflareDir())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
-	// MkdirAll leaves existing directories alone; this one has to be private.
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
+	if err != nil {
+		return nil, err
 	}
-	data, err := yaml.Marshal(cloudflareFile{App: app, Cloudflare: c})
+	var out []Cloudflare
+	for _, e := range entries {
+		name, ok := strings.CutSuffix(e.Name(), ".yaml")
+		if !ok || e.IsDir() || strings.HasPrefix(name, ".") {
+			continue
+		}
+		conn, err := c.Cloudflare(name)
+		if err != nil {
+			return nil, err
+		}
+		if conn != nil {
+			out = append(out, *conn)
+		}
+	}
+	slices.SortFunc(out, func(a, b Cloudflare) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+// SaveCloudflare creates or replaces a Cloudflare connection, privately and atomically.
+func (c Connections) SaveCloudflare(conn Cloudflare) error {
+	if c.Dir == "" {
+		return errors.New("no directory for the connections")
+	}
+	for _, dir := range []string{c.Dir, c.cloudflareDir()} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		// MkdirAll leaves existing directories alone; these have to be private.
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	data, err := yaml.Marshal(conn)
 	if err != nil {
 		return err
 	}
-	return writeFile(a.Path(app), append([]byte(cloudflareHeader), data...))
+	return writeFile(c.CloudflarePath(conn.Name), append([]byte(cloudflareHeader), data...))
 }
 
-// DeleteCloudflare removes the access of app. It is not an error if there is none.
-func (a AppAccess) DeleteCloudflare(app string) error {
-	if a.Dir == "" {
-		return nil
+// DeleteCloudflare removes a Cloudflare connection and reports whether it existed.
+func (c Connections) DeleteCloudflare(name string) (bool, error) {
+	if c.Dir == "" {
+		return false, nil
 	}
-	err := os.Remove(a.Path(app))
+	err := os.Remove(c.CloudflarePath(name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }

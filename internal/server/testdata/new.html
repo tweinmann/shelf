@@ -10,10 +10,14 @@
 <header class="bar">
 <a class="brand" href="/">shelf</a>
 
+<nav class="links">
+<a href="/">Apps</a>
+<a href="/connections">Connections</a>
 <form method="post" action="/logout">
 <input type="hidden" name="csrf" value="CSRF">
 <button class="link" type="submit">Log out</button>
 </form>
+</nav>
 
 </header>
 <main>
@@ -32,30 +36,29 @@ shelf reads it, generates the secrets it declares, and keeps the app on that tag
 <input id="artifact" name="artifact" value="" placeholder="oci://ghcr.io/owner/greeter:main" required>
 
 <fieldset>
+<legend>Connections</legend>
+<label for="registry">Registry connection</label>
+<select id="registry" name="registry">
+<option value="">none: pull without a login</option>
+<option value="ghcr">ghcr (tobi)</option>
+<option value="spare">spare (tobi)</option>
+</select>
+<label for="cloudflare">Cloudflare connection</label>
+<select id="cloudflare" name="cloudflare">
+<option value="">none: inside the cluster only</option>
+<option value="tobile">tobile (account acc-1)</option>
+</select>
+<p>Connections are defined once, on the <a href="/connections">connections page</a>, and chosen
+here. With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS
+record in its zone.</p>
+</fieldset>
+<fieldset>
 <legend>Domain</legend>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" value="" placeholder="example.com">
+<input id="domain" name="domain" value="" placeholder="example.com" list="zones">
+<datalist id="zones"><option value="example.com"><option value="shop.ch"></datalist>
 <p>Empty, it answers at &lt;app&gt;-dev.example.com, with its name in place of &lt;app&gt;.
-To reach it from the internet, the domain has to be a Cloudflare zone.</p>
-</fieldset>
-<fieldset>
-<legend>Registry login</legend>
-<label for="registry-user">GitHub user</label>
-<input id="registry-user" name="registry-user" value="" autocomplete="off">
-<label for="registry-token">Token</label>
-<input id="registry-token" name="registry-token" type="password" autocomplete="new-password">
-<p>A classic token with read:packages, for a private deploy artifact and private images on
-ghcr.io. Only this app uses it. Empty, the registry is read without a login.</p>
-</fieldset>
-<fieldset>
-<legend>Internet</legend>
-<label for="cloudflare-token">Cloudflare API token</label>
-<input id="cloudflare-token" name="cloudflare-token" type="password" autocomplete="new-password">
-<label for="cloudflare-account">Cloudflare account ID</label>
-<input id="cloudflare-account" name="cloudflare-account" value="" autocomplete="off">
-<p>With a token, the app gets a tunnel of its own in that account and a DNS record in its zone.
-The token needs Cloudflare Tunnel:Edit and DNS:Edit; the account is only needed when it sees
-several. It is kept on this machine, never in the cluster.</p>
+To reach it from the internet, the domain has to be a zone of the Cloudflare connection's account.</p>
 </fieldset>
 <button type="submit">Add the app</button>
 </form>

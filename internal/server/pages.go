@@ -86,6 +86,7 @@ func (s *Server) showApp(w http.ResponseWriter, r *http.Request, name string,
 		return
 	}
 	view.SecretNames = slices.Sorted(maps.Keys(stored))
+	view.Connections, view.Zones = s.choices(ctx)
 	status := http.StatusOK
 	if secretError != "" {
 		status = http.StatusUnauthorized

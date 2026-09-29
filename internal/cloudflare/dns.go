@@ -35,6 +35,15 @@ const (
 	Unchanged Action = "unchanged"
 )
 
+// Zones returns the zones the token can see, for offering them as the domain of an app.
+func (c *Client) Zones(ctx context.Context) ([]Zone, error) {
+	var zones []Zone
+	if err := c.do(ctx, http.MethodGet, "/zones?per_page=50", nil, &zones); err != nil {
+		return nil, err
+	}
+	return zones, nil
+}
+
 // ZoneFor returns the zone that holds name: the zone of the name itself, or of one of its parent
 // domains, so a host in a subdomain is found too.
 func (c *Client) ZoneFor(ctx context.Context, name string) (*Zone, error) {

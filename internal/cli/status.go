@@ -83,14 +83,14 @@ func printApp(out io.Writer, app ops.App) {
 		fmt.Fprintf(out, "  address   %s\n", address)
 	}
 	fmt.Fprintf(out, "  artifact  %s\n", app.Artifact)
-	if app.RegistryUser != "" {
-		fmt.Fprintf(out, "  registry  %s@%s\n", app.RegistryUser, cluster.RegistryHost)
+	if app.Registry != "" {
+		fmt.Fprintf(out, "  registry  connection %s\n", app.Registry)
 	}
 	switch {
-	case app.CloudflareAccount != "":
-		fmt.Fprintf(out, "  exposed   through Cloudflare account %s\n", app.CloudflareAccount)
-	case app.Tunnel != "":
-		fmt.Fprintf(out, "  exposed   through tunnel %s; this machine does not hold the access\n", app.Tunnel)
+	case app.CloudflareMissing:
+		fmt.Fprintf(out, "  exposed   through connection %s, which this machine does not hold\n", app.Cloudflare)
+	case app.Cloudflare != "":
+		fmt.Fprintf(out, "  exposed   through connection %s, account %s\n", app.Cloudflare, app.CloudflareAccount)
 	}
 	if app.Revision != "" {
 		fmt.Fprintf(out, "  running   %s\n", app.Revision)

@@ -57,15 +57,15 @@ func LoadTarget(kubeconfig, context string) (Target, error) {
 }
 
 // Env is what the machine shelf runs on supplies: where secrets are backed up, and where the
-// Cloudflare access of each app is kept. Both live under ~/.shelf, for the command line and the
-// admin UI alike.
+// Cloudflare connections are kept. Both live under ~/.shelf, for the command line and the admin
+// UI alike.
 type Env struct {
 	// Backup is where the generated secret values of an app are kept outside the cluster.
 	Backup secrets.Backup
-	// Access is where the Cloudflare access of an app is kept. It never goes into the cluster.
-	Access hostcfg.AppAccess
-	// Pull are the credentials for reading a deploy artifact from here. Nil takes the app's
-	// own login, and without one the Docker config.
+	// Connections is where the Cloudflare connections are kept. They never go into the cluster.
+	Connections hostcfg.Connections
+	// Pull are the credentials for reading a deploy artifact from here. Nil takes the login of
+	// the app's registry connection, and without one the Docker config.
 	Pull authn.Authenticator
 }
 
@@ -86,6 +86,12 @@ type Cluster interface {
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
 	// AppConfig returns how an app is registered, or nil when there is no such app.
 	AppConfig(ctx context.Context, cfg *rest.Config, app string) (*cluster.AppConfig, error)
+	RegistryConnections(ctx context.Context, cfg *rest.Config) ([]cluster.RegistryConnection, error)
+	// RegistryConnection returns the login of a registry connection, or nil if there is none.
+	RegistryConnection(ctx context.Context, cfg *rest.Config, name string) (*cluster.RegistryAuth, error)
+	SaveRegistryConnection(ctx context.Context, cfg *rest.Config, name string, auth cluster.RegistryAuth,
+		rep progress.Reporter) error
+	DeleteRegistryConnection(ctx context.Context, cfg *rest.Config, name string, rep progress.Reporter) (bool, error)
 }
 
 // liveCluster is internal/cluster itself.
@@ -135,6 +141,24 @@ func (liveCluster) Settings(ctx context.Context, cfg *rest.Config) (cluster.Sett
 
 func (liveCluster) AppConfig(ctx context.Context, cfg *rest.Config, app string) (*cluster.AppConfig, error) {
 	return cluster.ReadAppConfig(ctx, cfg, app)
+}
+
+func (liveCluster) RegistryConnections(ctx context.Context, cfg *rest.Config) ([]cluster.RegistryConnection, error) {
+	return cluster.RegistryConnections(ctx, cfg)
+}
+
+func (liveCluster) RegistryConnection(ctx context.Context, cfg *rest.Config, name string) (*cluster.RegistryAuth, error) {
+	return cluster.ReadRegistryConnection(ctx, cfg, name)
+}
+
+func (liveCluster) SaveRegistryConnection(ctx context.Context, cfg *rest.Config, name string,
+	auth cluster.RegistryAuth, rep progress.Reporter) error {
+	return cluster.SaveRegistryConnection(ctx, cfg, name, auth, rep)
+}
+
+func (liveCluster) DeleteRegistryConnection(ctx context.Context, cfg *rest.Config, name string,
+	rep progress.Reporter) (bool, error) {
+	return cluster.DeleteRegistryConnection(ctx, cfg, name, rep)
 }
 
 // FetchFunc reads a deploy artifact from a registry.

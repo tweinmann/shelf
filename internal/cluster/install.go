@@ -125,51 +125,37 @@ const (
 	sharedExposeProvider = "expose"
 )
 
-// migrateSharedCredentials takes a cluster from one set of credentials for all apps to one per
-// app. The shared registry login becomes the login of every app that has none of its own, so the
-// apps keep pulling. The shared tunnel cannot move: it belongs to a Cloudflare account whose token
-// shelf never stored, so it is switched off, and the apps have to be exposed again one by one.
+// SharedRegistryConnection is the name the registry login all apps used to share gets as a
+// registry connection.
+const SharedRegistryConnection = "ghcr"
+
+// migrateSharedCredentials takes a cluster from one set of credentials for all apps to
+// connections the apps choose. The shared registry login becomes the registry connection "ghcr",
+// and every app that was registered before gets it, so the apps keep pulling. The shared tunnel
+// cannot move: it belongs to a Cloudflare account whose token shelf never stored, so it is
+// switched off, and the apps have to be exposed again one by one. It also writes the Secret that
+// apps without a registry connection pull with.
 func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Reporter) error {
-	providers, err := c.list(ctx, providerGVK, SystemNamespace, AppLabel)
+	anonymous, err := AnonymousRegistrySecret()
 	if err != nil {
 		return err
 	}
-	apps := make([]string, 0, len(providers))
-	for _, p := range providers {
-		apps = append(apps, p.GetName())
-		// The platform refers to every input, so an app registered before the inputs existed
-		// gets them, empty: the cluster's domain and no tunnel.
-		values, _, _ := unstructured.NestedMap(p.Object, "spec", "defaultValues")
-		_, hasDomain := values["domain"]
-		_, hasTunnel := values["tunnel"]
-		if hasDomain && hasTunnel {
-			continue
-		}
-		state := providerState(p)
-		if err := c.applyReport(ctx, rep, AppProvider(AppOptions{
-			Name: state.Name, Artifact: state.Artifact, Insecure: state.Insecure,
-		})); err != nil {
-			return err
-		}
+	if err := c.applyReport(ctx, rep, anonymous); err != nil {
+		return err
 	}
+
 	shared, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: sharedRegistrySecret})
 	if err != nil {
 		return err
 	}
+	inherited := ""
 	if shared != nil {
 		login, err := registryLogin(shared)
 		if err != nil {
 			return err
 		}
-		for _, app := range apps {
-			existing, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: RegistrySecretName(app)})
-			if err != nil {
-				return err
-			}
-			if existing != nil {
-				continue
-			}
-			secret, err := RegistrySecret(app, login)
+		if login != nil {
+			secret, err := RegistryConnectionSecret(SharedRegistryConnection, *login)
 			if err != nil {
 				return err
 			}
@@ -178,7 +164,40 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 				return err
 			}
 			rep.Report(progress.Applied(describe(secret), string(action), "from the login all apps used to share"))
+			inherited = SharedRegistryConnection
 		}
+	}
+
+	providers, err := c.list(ctx, providerGVK, SystemNamespace, AppLabel)
+	if err != nil {
+		return err
+	}
+	for _, p := range providers {
+		// The platform refers to every input, so an app registered before the inputs existed
+		// gets them: the shared login as its connection, the cluster's domain and no tunnel.
+		values, _, _ := unstructured.NestedMap(p.Object, "spec", "defaultValues")
+		missing := false
+		for _, key := range []string{"domain", "tunnel", "registry", "cloudflare"} {
+			if _, ok := values[key]; !ok {
+				missing = true
+			}
+		}
+		if !missing {
+			continue
+		}
+		state := providerState(p)
+		registry := state.Registry
+		if _, ok := values["registry"]; !ok {
+			registry = inherited
+		}
+		if err := c.applyReport(ctx, rep, AppProvider(AppOptions{
+			Name: state.Name, Artifact: state.Artifact, Insecure: state.Insecure,
+			Domain: state.Domain, TunnelID: state.Tunnel, Registry: registry, Cloudflare: state.Cloudflare,
+		})); err != nil {
+			return err
+		}
+	}
+	if shared != nil {
 		if err := c.deleteReport(ctx, rep, refOf(shared)); err != nil {
 			return err
 		}
@@ -194,8 +213,9 @@ func (c *client) migrateSharedCredentials(ctx context.Context, rep progress.Repo
 			return err
 		}
 		rep.Report(progress.Warning("The tunnel all apps used to share is switched off; every app now has a tunnel of its own.\n" +
-			"Expose each app again with `shelf app credentials <app> --cloudflare`. The old tunnel and the\n" +
-			"DNS records that point at it stay in Cloudflare; delete them there.\n"))
+			"Expose each app again with a Cloudflare connection (`shelf connection add cloudflare <name>`,\n" +
+			"then `shelf app credentials <app> --cloudflare <name>`). The old tunnel and the DNS records\n" +
+			"that point at it stay in Cloudflare; delete them there.\n"))
 	}
 	return c.deleteReport(ctx, rep, ref{gvk: secretGVK, namespace: SystemNamespace, name: sharedTunnelSecret})
 }

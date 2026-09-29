@@ -1,5 +1,5 @@
 // Package hostcfg holds the state shelf keeps on the machine it runs on, under ~/.shelf: who
-// may use the admin UI, which sessions are open, and the Cloudflare access of each app. The
+// may use the admin UI, which sessions are open, and the Cloudflare connections. The
 // secret backups of the apps live in the same directory but belong to internal/secrets.
 //
 // Everything here is written with mode 0600 in a directory with mode 0700, and replaced

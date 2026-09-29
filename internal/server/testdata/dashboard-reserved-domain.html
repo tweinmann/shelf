@@ -10,10 +10,14 @@
 <header class="bar">
 <a class="brand" href="/">shelf</a>
 
+<nav class="links">
+<a href="/">Apps</a>
+<a href="/connections">Connections</a>
 <form method="post" action="/logout">
 <input type="hidden" name="csrf" value="CSRF">
 <button class="link" type="submit">Log out</button>
 </form>
+</nav>
 
 </header>
 <main>
@@ -25,7 +29,7 @@
 <dt>Apps answer at</dt><dd>&lt;app&gt;.dev.local <span class="muted">unless they have a domain of their own</span></dd>
 <dt>Internet</dt>
 <dd>dev.local is a reserved name, so no address can point here; an app
-reaches the internet only with a domain of its own and Cloudflare access</dd>
+reaches the internet only with a domain of its own and a Cloudflare connection</dd>
 </dl>
 </section>
 

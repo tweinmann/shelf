@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/tweinmann/shelf/internal/cluster"
-	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/progress"
 )
@@ -48,22 +47,25 @@ func (s *Server) newAppForm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := withTimeout(r)
 	defer cancel()
 	status := s.platform.Status(ctx)
+	conns, zones := s.choices(ctx)
 	s.render(w, "new.html", http.StatusOK, newAppView{
-		base:     s.base(r, "Add an app"),
-		Status:   status,
-		Insecure: status.Settings.InsecureRegistry,
+		base:        s.base(r, "Add an app"),
+		Status:      status,
+		Connections: conns,
+		Zones:       zones,
+		Insecure:    status.Settings.InsecureRegistry,
 	})
 }
 
 // addApp registers an app from its deploy artifact.
 func (s *Server) addApp(w http.ResponseWriter, r *http.Request) {
 	form := newAppView{
-		Name:              r.PostFormValue("name"),
-		Artifact:          r.PostFormValue("artifact"),
-		Insecure:          r.PostFormValue("insecure") != "",
-		Domain:            strings.TrimSpace(r.PostFormValue("domain")),
-		RegistryUser:      strings.TrimSpace(r.PostFormValue("registry-user")),
-		CloudflareAccount: strings.TrimSpace(r.PostFormValue("cloudflare-account")),
+		Name:       r.PostFormValue("name"),
+		Artifact:   r.PostFormValue("artifact"),
+		Insecure:   r.PostFormValue("insecure") != "",
+		Domain:     strings.TrimSpace(r.PostFormValue("domain")),
+		Registry:   r.PostFormValue("registry"),
+		Cloudflare: r.PostFormValue("cloudflare"),
 	}
 	if err := ops.CheckAppName(form.Name); err != nil {
 		s.failedForm(w, r, form, err)
@@ -90,41 +92,42 @@ func (s *Server) addApp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// accessFromForm reads the credentials a form gives an app. An empty field keeps what the app
-// has, which is also why a token is never put back into a form: it would be sent again.
+// accessFromForm reads what a form chooses for an app: a domain, and a connection of each kind.
+// The choice of a connection is the whole of it, so "none" takes one away. An empty domain keeps
+// the one the app has.
 func accessFromForm(r *http.Request) (ops.Access, error) {
 	a := ops.Access{
-		Domain:           strings.TrimSpace(r.PostFormValue("domain")),
-		RemoveRegistry:   r.PostFormValue("remove-registry") != "",
-		RemoveCloudflare: r.PostFormValue("remove-cloudflare") != "",
+		Domain:     strings.TrimSpace(r.PostFormValue("domain")),
+		Registry:   r.PostFormValue("registry"),
+		Cloudflare: r.PostFormValue("cloudflare"),
 	}
-	user, token := strings.TrimSpace(r.PostFormValue("registry-user")), strings.TrimSpace(r.PostFormValue("registry-token"))
-	if user != "" || token != "" {
-		a.Registry = &cluster.RegistryAuth{Username: user, Token: token}
-	}
-	account := strings.TrimSpace(r.PostFormValue("cloudflare-account"))
-	switch token := strings.TrimSpace(r.PostFormValue("cloudflare-token")); {
-	case token != "":
-		a.Cloudflare = &hostcfg.Cloudflare{Token: token, Account: account}
-	case account != "":
-		return ops.Access{}, errors.New("a Cloudflare account needs the API token that goes with it")
-	}
+	a.RemoveRegistry, a.RemoveCloudflare = a.Registry == "", a.Cloudflare == ""
 	return a, a.Check()
 }
 
-// failedForm shows the add form again with what was typed and what is wrong with it. The tokens
-// are not part of it; they have to be typed again.
+// failedForm shows the add form again with what was typed and what is wrong with it.
 func (s *Server) failedForm(w http.ResponseWriter, r *http.Request, form newAppView, err error) {
 	ctx, cancel := withTimeout(r)
 	defer cancel()
 	form.base = s.base(r, "Add an app")
 	form.Status = s.platform.Status(ctx)
+	form.Connections, form.Zones = s.choices(ctx)
 	form.Error = err.Error()
 	s.render(w, "new.html", http.StatusBadRequest, form)
 }
 
-// setAccess changes an app's domain, registry login or Cloudflare access, and deploys it again
-// from the artifact it is registered with.
+// choices are the connections and zones a form offers. A cluster that cannot list them leaves
+// the lists empty; the operation itself says what is wrong.
+func (s *Server) choices(ctx context.Context) (ops.Connections, []string) {
+	conns, err := s.platform.Connections(ctx)
+	if err != nil {
+		return ops.Connections{}, nil
+	}
+	return conns, s.platform.Zones(ctx)
+}
+
+// setAccess changes an app's domain and connections, and deploys it again from the artifact it
+// is registered with.
 func (s *Server) setAccess(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if err := ops.CheckAppName(name); err != nil {
@@ -136,11 +139,7 @@ func (s *Server) setAccess(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	if access == (ops.Access{}) {
-		s.fail(w, r, http.StatusBadRequest, "nothing to change; fill in what the app should get")
-		return
-	}
-	s.mutate(w, r, "Change the credentials of "+name, name, func(ctx context.Context, rep progress.Reporter) error {
+	s.mutate(w, r, "Change the connections of "+name, name, func(ctx context.Context, rep progress.Reporter) error {
 		return s.platform.SetAccess(ctx, name, access, jobTimeout, rep)
 	})
 }

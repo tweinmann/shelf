@@ -44,6 +44,40 @@ type fakePlatform struct {
 	fail error
 	// access is the access the last change gave an app.
 	access ops.Access
+	// connections are what the connections page lists; saved records what was saved.
+	connections ops.Connections
+	saved       []string
+}
+
+func (f *fakePlatform) Connections(context.Context) (ops.Connections, error) {
+	return f.connections, nil
+}
+
+func (f *fakePlatform) Zones(context.Context) []string { return []string{"example.com", "shop.ch"} }
+
+func (f *fakePlatform) SaveRegistryConnection(_ context.Context, name string, auth cluster.RegistryAuth,
+	rep progress.Reporter) error {
+	f.mu.Lock()
+	f.saved = append(f.saved, "registry "+name+" "+auth.Username+" "+auth.Token)
+	f.mu.Unlock()
+	return f.change("save registry "+name, rep)
+}
+
+func (f *fakePlatform) SaveCloudflareConnection(_ context.Context, conn hostcfg.Cloudflare, rep progress.Reporter) error {
+	f.mu.Lock()
+	f.saved = append(f.saved, "cloudflare "+conn.Name+" "+conn.Token+" "+conn.Account)
+	f.mu.Unlock()
+	return f.change("save cloudflare "+conn.Name, rep)
+}
+
+func (f *fakePlatform) RemoveConnection(_ context.Context, kind, name string, rep progress.Reporter) error {
+	return f.change("remove "+kind+" "+name, rep)
+}
+
+func (f *fakePlatform) savedConnections() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.saved...)
 }
 
 func (f *fakePlatform) Secrets(_ context.Context, _ string) (map[string]string, error) {
@@ -147,7 +181,7 @@ func runningPlatform() *fakePlatform {
 					Revision: "main@" + digest,
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
-					Tunnel:   "t-1", RegistryUser: "tobi",
+					Tunnel:   "t-1", Registry: "ghcr", Cloudflare: "tobile",
 				},
 				Host:              "greeter-dev.example.com",
 				Public:            true,
@@ -182,11 +216,12 @@ func runningPlatform() *fakePlatform {
 					Stage:    "the deploy artifact",
 					Reason:   "MANIFEST_UNKNOWN: manifest unknown",
 					Domain:   "shop.ch",
-					Tunnel:   "t-2",
+					Tunnel:   "t-2", Cloudflare: "club",
 				},
-				Host:   "shop-dev.shop.ch",
-				Public: true,
-				URL:    "https://shop-dev.shop.ch/",
+				Host:              "shop-dev.shop.ch",
+				Public:            true,
+				CloudflareMissing: true,
+				URL:               "https://shop-dev.shop.ch/",
 				Components: []ops.Component{
 					{
 						Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
@@ -195,6 +230,16 @@ func runningPlatform() *fakePlatform {
 						URL:     "https://shop-dev.shop.ch/",
 					},
 				},
+			},
+		},
+		connections: ops.Connections{
+			Registry: []ops.RegistryConnection{
+				{RegistryConnection: cluster.RegistryConnection{Name: "ghcr", Username: "tobi"}, Apps: []string{"greeter"}},
+				{RegistryConnection: cluster.RegistryConnection{Name: "spare", Username: "tobi"}},
+			},
+			Cloudflare: []ops.CloudflareConnection{
+				{Name: "club", Apps: []string{"shop"}, Missing: true},
+				{Name: "tobile", Account: "acc-1", Apps: []string{"greeter"}},
 			},
 		},
 		diagnoses: map[string]cluster.Diagnosis{
@@ -360,6 +405,12 @@ func TestPages(t *testing.T) {
 		t.Parallel()
 		h, cookie := claimed(t, running)
 		golden(t, "new", get(h, "/apps/new", cookie))
+	})
+
+	t.Run("connections", func(t *testing.T) {
+		t.Parallel()
+		h, cookie := claimed(t, running)
+		golden(t, "connections", get(h, "/connections", cookie))
 	})
 
 	// An app that was just added has no values in the cluster yet, so shelf cannot say what it is
@@ -666,7 +717,7 @@ func TestAPIStatus(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 		t.Errorf("content type %q", got)
 	}
-	for _, want := range []string{`"greeter"`, `"Failed"`, `"tunnel": "t-1"`, `"registryUser": "tobi"`} {
+	for _, want := range []string{`"greeter"`, `"Failed"`, `"tunnel": "t-1"`, `"registry": "ghcr"`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("body lacks %s:\n%s", want, rec.Body)
 		}
@@ -722,7 +773,7 @@ func TestChangeApps(t *testing.T) {
 		},
 		{
 			name: "change the access", path: "/apps/greeter/access",
-			form: url.Values{"domain": {"greeter.ch"}}, wantCall: "access greeter",
+			form: url.Values{"domain": {"greeter.ch"}, "registry": {"ghcr"}}, wantCall: "access greeter",
 		},
 		{
 			name: "remove", path: "/apps/greeter/delete",
@@ -751,86 +802,140 @@ func TestChangeApps(t *testing.T) {
 	}
 }
 
-// TestAccessForms checks that the credentials typed into a form reach the operation, and that a
-// token never comes back: not on the page of a form that was refused, and not in the audit log.
+// TestAccessForms checks that the connections chosen in a form reach the operation: a name
+// chooses one, "none" takes it away.
 func TestAccessForms(t *testing.T) {
 	t.Parallel()
-	const registryToken, cloudflareToken = "ghp-not-a-real-token", "cf-not-a-real-token"
-	// full returns a new form every time: withCSRF writes into it, and the subtests run in
-	// parallel.
-	full := func() url.Values {
-		return url.Values{
-			"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
-			"domain": {"greeter.ch"}, "registry-user": {"tobi"}, "registry-token": {registryToken},
-			"cloudflare-token": {cloudflareToken}, "cloudflare-account": {"acc-1"},
-		}
-	}
-
-	t.Run("add with access", func(t *testing.T) {
-		t.Parallel()
-		platform := runningPlatform()
-		h, cookie := claimed(t, platform)
-		rec := post(h, "/apps", withCSRF(t, h, cookie, full()), cookie)
-		if rec.Code != http.StatusSeeOther {
-			t.Fatalf("status %d\n%s", rec.Code, rec.Body)
-		}
-		waitForJob(t, h, cookie, "job-1")
-		got := platform.lastAccess()
-		if got.Domain != "greeter.ch" || got.Registry == nil || got.Registry.Token != registryToken ||
-			got.Cloudflare == nil || got.Cloudflare.Token != cloudflareToken || got.Cloudflare.Account != "acc-1" {
-			t.Errorf("access %+v", got)
-		}
-	})
-
-	refused := []struct {
-		name    string
-		path    string
-		form    url.Values
-		wantErr string
+	tests := []struct {
+		name string
+		path string
+		form url.Values
+		want ops.Access
 	}{
 		{
-			name: "an invalid domain", path: "/apps",
-			form:    url.Values{"domain": {"Not A Domain"}},
-			wantErr: "the domain must be a DNS name",
+			name: "add with connections", path: "/apps",
+			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+				"domain": {"greeter.ch"}, "registry": {"ghcr"}, "cloudflare": {"tobile"}},
+			want: ops.Access{Domain: "greeter.ch", Registry: "ghcr", Cloudflare: "tobile"},
 		},
 		{
-			name: "a registry token without a user", path: "/apps",
-			form:    url.Values{"registry-user": {""}},
-			wantErr: "a registry login needs a user name and a token",
+			name: "add without", path: "/apps",
+			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+				"registry": {""}, "cloudflare": {""}},
+			want: ops.Access{RemoveRegistry: true, RemoveCloudflare: true},
 		},
 		{
-			name: "an account without a token", path: "/apps/greeter/access",
-			form:    url.Values{"cloudflare-token": {""}},
-			wantErr: "a Cloudflare account needs the API token",
-		},
-		{
-			name: "nothing to change", path: "/apps/greeter/access",
-			form:    url.Values{"domain": {""}, "registry-user": {""}, "registry-token": {""}, "cloudflare-token": {""}, "cloudflare-account": {""}},
-			wantErr: "nothing to change",
+			name: "take an app off the internet", path: "/apps/greeter/access",
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
+			want: ops.Access{Registry: "ghcr", RemoveCloudflare: true},
 		},
 	}
-	for _, tt := range refused {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			platform := runningPlatform()
 			h, cookie := claimed(t, platform)
-			form := full()
-			for k, v := range tt.form {
-				form[k] = v
+			rec := post(h, tt.path, withCSRF(t, h, cookie, tt.form), cookie)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("status %d\n%s", rec.Code, rec.Body)
 			}
-			rec := post(h, tt.path, withCSRF(t, h, cookie, form), cookie)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status %d, want 400", rec.Code)
+			waitForJob(t, h, cookie, "job-1")
+			if got := platform.lastAccess(); got != tt.want {
+				t.Errorf("access %+v, want %+v", got, tt.want)
 			}
-			body := rec.Body.String()
-			if !strings.Contains(body, tt.wantErr) {
-				t.Errorf("the page lacks %q:\n%s", tt.wantErr, body)
+		})
+	}
+
+	t.Run("an invalid domain", func(t *testing.T) {
+		t.Parallel()
+		platform := runningPlatform()
+		h, cookie := claimed(t, platform)
+		form := url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+			"domain": {"Not A Domain"}, "registry": {"ghcr"}}
+		rec := post(h, "/apps", withCSRF(t, h, cookie, form), cookie)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "the domain must be a DNS name") {
+			t.Fatalf("status %d\n%s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), `<option value="ghcr" selected>`) {
+			t.Error("the refused form lost the chosen connection")
+		}
+		if calls := platform.made(); len(calls) != 0 {
+			t.Errorf("something changed anyway: %v", calls)
+		}
+	})
+}
+
+// TestConnectionForms checks the only forms with token fields: the token reaches the operation,
+// runs as a job, and never comes back, not even on a form that was refused.
+func TestConnectionForms(t *testing.T) {
+	t.Parallel()
+	const token = "not-a-real-token"
+	tests := []struct {
+		name      string
+		path      string
+		form      url.Values
+		wantCall  string
+		wantSaved string
+		wantErr   string
+	}{
+		{
+			name: "a registry connection", path: "/connections/registry",
+			form:     url.Values{"name": {"ghcr"}, "username": {"tobi"}, "token": {token}},
+			wantCall: "save registry ghcr", wantSaved: "registry ghcr tobi " + token,
+		},
+		{
+			name: "a Cloudflare connection", path: "/connections/cloudflare",
+			form:     url.Values{"name": {"tobile"}, "token": {token}, "account": {"acc-1"}},
+			wantCall: "save cloudflare tobile", wantSaved: "cloudflare tobile " + token + " acc-1",
+		},
+		{
+			name: "remove", path: "/connections/cloudflare/tobile/delete",
+			form: url.Values{}, wantCall: "remove cloudflare tobile",
+		},
+		{
+			name: "a registry connection without a user", path: "/connections/registry",
+			form:    url.Values{"name": {"ghcr"}, "username": {""}, "token": {token}},
+			wantErr: "a registry connection needs a user name and a token",
+		},
+		{
+			name: "an invalid name", path: "/connections/cloudflare",
+			form:    url.Values{"name": {"To_bile"}, "token": {token}, "account": {"acc-1"}},
+			wantErr: "must be a DNS label",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			platform := runningPlatform()
+			h, cookie := claimed(t, platform)
+			rec := post(h, tt.path, withCSRF(t, h, cookie, tt.form), cookie)
+			if tt.wantErr != "" {
+				body := rec.Body.String()
+				if rec.Code != http.StatusBadRequest || !strings.Contains(body, tt.wantErr) {
+					t.Fatalf("status %d, want 400 with %q\n%s", rec.Code, tt.wantErr, body)
+				}
+				if strings.Contains(body, token) {
+					t.Errorf("the token was sent back:\n%s", body)
+				}
+				if calls := platform.made(); len(calls) != 0 {
+					t.Errorf("something changed anyway: %v", calls)
+				}
+				return
 			}
-			if strings.Contains(body, registryToken) || strings.Contains(body, cloudflareToken) {
-				t.Errorf("a token was sent back:\n%s", body)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("status %d\n%s", rec.Code, rec.Body)
 			}
-			if calls := platform.made(); len(calls) != 0 {
-				t.Errorf("something changed anyway: %v", calls)
+			waitForJob(t, h, cookie, "job-1")
+			if calls := platform.made(); len(calls) != 1 || calls[0] != tt.wantCall {
+				t.Errorf("calls %v, want %q", calls, tt.wantCall)
+			}
+			if tt.wantSaved != "" {
+				if saved := platform.savedConnections(); len(saved) != 1 || saved[0] != tt.wantSaved {
+					t.Errorf("saved %v, want %q", saved, tt.wantSaved)
+				}
+			}
+			if job := get(h, "/jobs/job-1", cookie).Body.String(); strings.Contains(job, token) {
+				t.Errorf("the token is on the job page:\n%s", job)
 			}
 		})
 	}
@@ -843,12 +948,15 @@ func TestChangesNeedTheFormToken(t *testing.T) {
 	platform := runningPlatform()
 	h, cookie := claimed(t, platform)
 	paths := map[string]url.Values{
-		"/apps":                  {"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"}},
-		"/apps/greeter/deploy":   {"artifact": {"oci://ghcr.io/o/greeter:main"}},
-		"/apps/greeter/redeploy": {},
-		"/apps/greeter/access":   {"domain": {"greeter.ch"}},
-		"/apps/greeter/delete":   {"confirm": {"greeter"}},
-		"/apps/greeter/secrets":  {"password": {password}},
+		"/apps":                             {"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"}},
+		"/apps/greeter/deploy":              {"artifact": {"oci://ghcr.io/o/greeter:main"}},
+		"/apps/greeter/redeploy":            {},
+		"/apps/greeter/access":              {"domain": {"greeter.ch"}},
+		"/connections/registry":             {"name": {"ghcr"}, "username": {"tobi"}, "token": {"t"}},
+		"/connections/cloudflare":           {"name": {"tobile"}, "token": {"t"}},
+		"/connections/registry/ghcr/delete": {},
+		"/apps/greeter/delete":              {"confirm": {"greeter"}},
+		"/apps/greeter/secrets":             {"password": {password}},
 	}
 	for path, form := range paths {
 		form.Set("csrf", "not-the-token")

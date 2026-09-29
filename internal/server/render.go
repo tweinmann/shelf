@@ -24,7 +24,7 @@ var (
 
 // pageNames are the templates that go with the layout, one file each.
 var pageNames = []string{
-	"dashboard.html", "app.html", "new.html", "job.html", "busy.html",
+	"dashboard.html", "app.html", "new.html", "connections.html", "job.html", "busy.html",
 	"login.html", "setup.html", "error.html",
 }
 
@@ -166,21 +166,27 @@ type appView struct {
 	Secrets map[string]string
 	// SecretError is why the values are not shown.
 	SecretError string
+	// Connections and Zones are what the access form offers.
+	Connections ops.Connections
+	Zones       []string
 	Running     *Job
 }
 
-// newAppView is the form that registers an app. It never carries a token: a form that failed
-// shows everything else that was typed, and asks for the tokens again.
+// newAppView is the form that registers an app. It offers the connections to choose from; the
+// tokens behind them are defined on the connections page only.
 type newAppView struct {
 	base
-	Status            ops.Status
-	Name              string
-	Artifact          string
-	Insecure          bool
-	Domain            string
-	RegistryUser      string
-	CloudflareAccount string
-	Error             string
+	Status      ops.Status
+	Connections ops.Connections
+	// Zones are the domains the Cloudflare connections can serve, as suggestions.
+	Zones      []string
+	Name       string
+	Artifact   string
+	Insecure   bool
+	Domain     string
+	Registry   string
+	Cloudflare string
+	Error      string
 }
 
 // jobView is the page that watches one change.

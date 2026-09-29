@@ -15,6 +15,7 @@ import (
 // CloudflareAPI is the part of the Cloudflare API shelf uses.
 type CloudflareAPI interface {
 	VerifyToken(ctx context.Context) error
+	Zones(ctx context.Context) ([]cloudflare.Zone, error)
 	ZoneFor(ctx context.Context, name string) (*cloudflare.Zone, error)
 	EnsureRecord(ctx context.Context, zone, name, target string) (cloudflare.Action, error)
 	DeleteRecord(ctx context.Context, zone, name string) (bool, error)
@@ -41,13 +42,13 @@ type exposure struct {
 	// tunnelName is what the app's tunnel is called, before the change and after it.
 	tunnelName string
 
-	// Before the change: the tunnel the cluster runs, the name that points at it, and the access
-	// that made it, which is nil when this machine does not hold it.
+	// Before the change: the tunnel the cluster runs, the name that points at it, and the
+	// Cloudflare connection that made it, which is nil when this machine does not hold it.
 	oldTunnel string
 	oldHost   string
 	oldAccess *hostcfg.Cloudflare
 
-	// After the change. Without access the app is not exposed, unless keep is set.
+	// After the change. Without a connection the app is not exposed, unless keep is set.
 	host   string
 	access *hostcfg.Cloudflare
 	api    CloudflareAPI
@@ -56,8 +57,8 @@ type exposure struct {
 	// credentials is the credentials.json of a tunnel created for this change, nil when the
 	// cluster keeps the one it has.
 	credentials []byte
-	// keep means the app is exposed, but this machine does not hold the access: the tunnel stays
-	// as it is, and no record is touched.
+	// keep means the app is exposed, but this machine does not hold its connection: the tunnel
+	// stays as it is, and no record is touched.
 	keep bool
 	// replaced is a tunnel that was deleted while planning, so finish does not try again.
 	replaced string
@@ -74,11 +75,12 @@ func (e *exposure) tunnelID() string {
 	return ""
 }
 
-// planExposure verifies a new Cloudflare access, keeps it, and finds or creates the app's tunnel
-// in that account. It changes nothing in the cluster.
+// planExposure finds or creates the app's tunnel in the account of the Cloudflare connection the
+// app is exposed through after the change; an empty connection means it is not exposed. It
+// changes nothing in the cluster.
 func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Settings,
-	current *cluster.AppConfig, domain string, access Access, rep progress.Reporter) (*exposure, error) {
-	stored, err := o.Env.Access.Cloudflare(name)
+	current *cluster.AppConfig, domain, connection string, rep progress.Reporter) (*exposure, error) {
+	old, err := o.Env.Connections.Cloudflare(current.Cloudflare)
 	if err != nil {
 		return nil, err
 	}
@@ -87,24 +89,26 @@ func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Se
 		tunnelName: TunnelName(name, settings.HostSuffix),
 		oldTunnel:  current.TunnelID,
 		oldHost:    AppHost(name, settings.HostSuffix, cmp.Or(current.Domain, settings.Domain)),
-		oldAccess:  stored,
+		oldAccess:  old,
 		host:       AppHost(name, settings.HostSuffix, domain),
 	}
-	switch {
-	case access.RemoveCloudflare:
+	if connection == "" {
 		return e, nil
-	case access.Cloudflare != nil:
-		e.access = access.Cloudflare
-	case stored != nil:
-		e.access = stored
-	case current.TunnelID != "":
-		e.keep = true
-		rep.Report(progress.Warning(fmt.Sprintf("%s is exposed, but this machine does not hold its Cloudflare access; its tunnel\n"+
-			"and the record of %s were left as they are. Give the access again with\n"+
-			"`shelf app credentials %s --cloudflare` to change them.\n", name, e.host, name)))
-		return e, nil
-	default:
-		return e, nil
+	}
+	if connection == current.Cloudflare {
+		e.access = old
+	} else if e.access, err = o.Env.Connections.Cloudflare(connection); err != nil {
+		return nil, err
+	}
+	if e.access == nil {
+		if connection == current.Cloudflare && current.TunnelID != "" {
+			e.keep = true
+			rep.Report(progress.Warning(fmt.Sprintf("%s is exposed through the Cloudflare connection %s, which this machine does not\n"+
+				"hold; its tunnel and the record of %s were left as they are. Define the connection\n"+
+				"here with `shelf connection add cloudflare %s` to change them.\n", name, connection, e.host, connection)))
+			return e, nil
+		}
+		return nil, missingCloudflare(connection)
 	}
 
 	if !PublicDomain(domain) {
@@ -112,25 +116,6 @@ func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Se
 			name, domain)
 	}
 	e.api = o.NewCloudflare(e.access.Token)
-	if access.Cloudflare != nil {
-		if err := e.api.VerifyToken(ctx); err != nil {
-			return nil, fmt.Errorf("the Cloudflare token was refused: %w", err)
-		}
-		given := *access.Cloudflare
-		if given.Account == "" {
-			if given.Account, err = e.api.AccountID(ctx); err != nil {
-				return nil, err
-			}
-		}
-		// Kept before anything is created in the account, so that whatever this change leaves
-		// behind can be cleaned up with it.
-		if err := o.Env.Access.SaveCloudflare(name, given); err != nil {
-			return nil, fmt.Errorf("storing the Cloudflare access: %w", err)
-		}
-		e.access = &given
-		rep.Report(progress.Info("Cloudflare access: %s", o.Env.Access.Path(name)))
-	}
-
 	zone, err := e.api.ZoneFor(ctx, domain)
 	if err != nil {
 		return nil, err
@@ -191,9 +176,6 @@ func (o *Ops) finish(ctx context.Context, e *exposure, rep progress.Reporter) er
 			return err
 		}
 	}
-	if e.access == nil {
-		return o.Env.Access.DeleteCloudflare(e.app)
-	}
 	return nil
 }
 
@@ -202,8 +184,8 @@ func (o *Ops) finish(ctx context.Context, e *exposure, rep progress.Reporter) er
 func (o *Ops) withdrawRecord(ctx context.Context, app, host string, access *hostcfg.Cloudflare,
 	rep progress.Reporter) error {
 	if access == nil {
-		rep.Report(progress.Warning(fmt.Sprintf("This machine does not hold the Cloudflare access of %s, so the record of %s\n"+
-			"stays in Cloudflare; delete it there.\n", app, host)))
+		rep.Report(progress.Warning(fmt.Sprintf("This machine does not hold the Cloudflare connection of %s, so the record of\n"+
+			"%s stays in Cloudflare; delete it there.\n", app, host)))
 		return nil
 	}
 	api := o.NewCloudflare(access.Token)
@@ -226,8 +208,8 @@ func (o *Ops) withdrawRecord(ctx context.Context, app, host string, access *host
 func (o *Ops) deleteTunnel(ctx context.Context, app, name, id string, access *hostcfg.Cloudflare,
 	rep progress.Reporter) error {
 	if access == nil {
-		rep.Report(progress.Warning(fmt.Sprintf("This machine does not hold the Cloudflare access of %s, so its tunnel %s\n"+
-			"(%s) stays in Cloudflare; delete it there.\n", app, name, id)))
+		rep.Report(progress.Warning(fmt.Sprintf("This machine does not hold the Cloudflare connection of %s, so its tunnel\n"+
+			"%s (%s) stays in Cloudflare; delete it there.\n", app, name, id)))
 		return nil
 	}
 	if err := o.NewCloudflare(access.Token).DeleteTunnel(ctx, access.Account, id); err != nil {

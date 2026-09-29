@@ -20,10 +20,13 @@ type App struct {
 	Public bool `json:"public"`
 	// URL is where a browser reaches the app, empty until the app is exposed.
 	URL string `json:"url,omitempty"`
-	// CloudflareAccount is the account the app is exposed through, filled by App but not by
-	// Apps, and only when this machine holds the app's Cloudflare access. The token never
-	// leaves the file it is kept in.
+	// CloudflareAccount is the account of the app's Cloudflare connection, filled by App but not
+	// by Apps, and only when this machine holds the connection. The token never leaves the file
+	// it is kept in.
 	CloudflareAccount string `json:"cloudflareAccount,omitempty"`
+	// CloudflareMissing means the app has a Cloudflare connection this machine does not hold,
+	// so its record and tunnel cannot be changed from here. Filled by App.
+	CloudflareMissing bool `json:"cloudflareMissing,omitempty"`
 	// Components is what the app is made of, filled by App but not by Apps: a list of apps
 	// does not need it, and it costs a read per app.
 	Components []Component `json:"components,omitempty"`
@@ -114,13 +117,14 @@ func (o *Ops) App(ctx context.Context, name string) (App, error) {
 		if err != nil {
 			return App{}, err
 		}
-		access, err := o.Env.Access.Cloudflare(name)
+		conn, err := o.Env.Connections.Cloudflare(a.Cloudflare)
 		if err != nil {
 			return App{}, err
 		}
-		if access != nil {
-			a.CloudflareAccount = access.Account
+		if conn != nil {
+			a.CloudflareAccount = conn.Account
 		}
+		a.CloudflareMissing = a.Cloudflare != "" && conn == nil
 		a.Components = components(list, a.Host, a.URL != "")
 		return a, nil
 	}

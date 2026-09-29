@@ -153,7 +153,7 @@ func TestInitClusterSettings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
-			// A registry login belongs to an app now; one left in the shell is not read.
+			// A registry login is a connection now; one left in the shell is not read.
 			h.env[envRegistryUser], h.env[envRegistryToken] = "tobi", "secret-token"
 			stdout, stderr, code := h.run(t, append(append([]string{}, base...), tt.args...)...)
 			if strings.Contains(stdout+stderr, "secret-token") {

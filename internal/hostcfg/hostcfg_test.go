@@ -150,58 +150,70 @@ func TestNewTokenIsRandom(t *testing.T) {
 	}
 }
 
-func TestCloudflareAccess(t *testing.T) {
+func TestCloudflareConnections(t *testing.T) {
 	t.Parallel()
-	access := hostcfg.AppAccess{Dir: filepath.Join(t.TempDir(), "apps")}
-	got, err := access.Cloudflare("greeter")
+	conns := hostcfg.Connections{Dir: filepath.Join(t.TempDir(), "connections")}
+	got, err := conns.Cloudflare("tobile")
 	if err != nil || got != nil {
-		t.Fatalf("an app without access: %+v, %v", got, err)
+		t.Fatalf("a missing connection: %+v, %v", got, err)
 	}
-	want := hostcfg.Cloudflare{Token: "not-a-real-token", Account: "acc-1"}
-	if err := access.SaveCloudflare("greeter", want); err != nil {
-		t.Fatal(err)
+	if list, err := conns.CloudflareConnections(); err != nil || len(list) != 0 {
+		t.Fatalf("no connections yet: %v, %v", list, err)
 	}
-	got, err = access.Cloudflare("greeter")
+	want := hostcfg.Cloudflare{Name: "tobile", Token: "not-a-real-token", Account: "acc-1"}
+	other := hostcfg.Cloudflare{Name: "club", Token: "not-a-real-token-either", Account: "acc-2"}
+	for _, c := range []hostcfg.Cloudflare{want, other} {
+		if err := conns.SaveCloudflare(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err = conns.Cloudflare("tobile")
 	if err != nil || got == nil || *got != want {
 		t.Fatalf("read back %+v, %v", got, err)
 	}
-	info, err := os.Stat(access.Path("greeter"))
+	list, err := conns.CloudflareConnections()
+	if err != nil || len(list) != 2 || list[0].Name != "club" || list[1].Name != "tobile" {
+		t.Fatalf("list %+v, %v", list, err)
+	}
+	info, err := os.Stat(conns.CloudflarePath("tobile"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("file mode %v", info.Mode().Perm())
 	}
-	dir, err := os.Stat(filepath.Dir(access.Path("greeter")))
+	for _, dir := range []string{conns.Dir, filepath.Dir(conns.CloudflarePath("tobile"))} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o700 {
+			t.Errorf("%s: mode %v", dir, info.Mode().Perm())
+		}
+	}
+
+	// A file renamed by hand is refused rather than used for the wrong account.
+	data, err := os.ReadFile(conns.CloudflarePath("tobile"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dir.Mode().Perm() != 0o700 {
-		t.Errorf("directory mode %v", dir.Mode().Perm())
+	if err := os.WriteFile(conns.CloudflarePath("copy"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conns.Cloudflare("copy"); err == nil || !strings.Contains(err.Error(), `holds the connection "tobile"`) {
+		t.Errorf("a renamed file: %v", err)
+	}
+	if err := os.Remove(conns.CloudflarePath("copy")); err != nil {
+		t.Fatal(err)
 	}
 
-	// A file copied from another app is refused rather than used for the wrong zone.
-	if err := os.MkdirAll(filepath.Dir(access.Path("shop")), 0o700); err != nil {
-		t.Fatal(err)
+	if found, err := conns.DeleteCloudflare("tobile"); err != nil || !found {
+		t.Fatalf("delete: %v, %v", found, err)
 	}
-	data, err := os.ReadFile(access.Path("greeter"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(access.Path("shop"), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := access.Cloudflare("shop"); err == nil || !strings.Contains(err.Error(), `belongs to app "greeter"`) {
-		t.Errorf("a file of another app: %v", err)
-	}
-
-	if err := access.DeleteCloudflare("greeter"); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := access.Cloudflare("greeter"); err != nil || got != nil {
+	if got, err := conns.Cloudflare("tobile"); err != nil || got != nil {
 		t.Errorf("after delete: %+v, %v", got, err)
 	}
-	if err := access.DeleteCloudflare("greeter"); err != nil {
-		t.Errorf("deleting twice: %v", err)
+	if found, err := conns.DeleteCloudflare("tobile"); err != nil || found {
+		t.Errorf("deleting twice: %v, %v", found, err)
 	}
 }

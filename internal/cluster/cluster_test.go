@@ -207,11 +207,11 @@ func TestPlatformObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	objs := ConfigObjects(Settings{Domain: "dev.local", Chart: chart, InsecureRegistry: true})
-	withLogin, err := RegistrySecret("hello", &RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
+	withLogin, err := RegistryConnectionSecret("ghcr", RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	withoutLogin, err := RegistrySecret("empty", nil)
+	withoutLogin, err := AnonymousRegistrySecret()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,8 @@ func TestPlatformObjects(t *testing.T) {
 		AppSecret("hello", map[string]string{"db-password": "not-a-real-password"}),
 		AppSecret("empty", nil),
 		TunnelSecret("hello", []byte(`{"TunnelID":"t-1","TunnelSecret":"not-a-real-secret"}`)),
-		AppProvider(AppOptions{Name: "hello", Artifact: app, Domain: "example.com", TunnelID: "t-1"}),
+		AppProvider(AppOptions{Name: "hello", Artifact: app, Domain: "example.com", TunnelID: "t-1",
+			Registry: "ghcr", Cloudflare: "tobile"}),
 		AppProvider(AppOptions{Name: "empty", Artifact: app}))
 
 	var out []byte
@@ -267,7 +268,7 @@ func TestFailOnAuthError(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error %v, want error %v", err, tt.wantErr)
 			}
-			if err != nil && !strings.Contains(err.Error(), "shelf app credentials hello --registry-login") {
+			if err != nil && !strings.Contains(err.Error(), "shelf app credentials hello --registry <connection>") {
 				t.Errorf("the error does not say what to do: %v", err)
 			}
 		})

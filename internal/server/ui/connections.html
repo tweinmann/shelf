@@ -1,0 +1,90 @@
+{{define "content"}}
+<nav class="crumbs"><a href="/">Apps</a> / connections</nav>
+<h1>Connections</h1>
+<p class="muted">A connection is a login you define once and choose for any number of apps. A new
+token for a connection reaches every app that uses it. Tokens are never shown again.</p>
+
+{{if .Running}}
+<p class="notice">A change is running: <a href="/jobs/{{.Running.ID}}">{{.Running.Title}}</a>.</p>
+{{end}}
+{{if and .Error (not .Kind)}}<section class="card problem"><pre>{{.Error}}</pre></section>{{end}}
+
+<section class="card">
+<h2>Container registries</h2>
+{{if .Connections.Registry}}
+<ul class="apps">
+{{range .Connections.Registry}}
+<li>
+<div class="app-head"><span class="name">{{.Name}}</span>
+<form method="post" action="/connections/registry/{{.Name}}/delete" class="inline">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<button type="submit" class="secondary">Remove</button>
+</form></div>
+<dl class="facts">
+<dt>Login</dt><dd>{{.Username}}@ghcr.io</dd>
+<dt>Used by</dt><dd>{{range $i, $a := .Apps}}{{if $i}}, {{end}}<a href="/apps/{{$a}}">{{$a}}</a>{{else}}<span class="muted">no app</span>{{end}}</dd>
+</dl>
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="empty">No registry connections yet. Apps without one pull without a login.</p>
+{{end}}
+<form method="post" action="/connections/registry">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<fieldset>
+<legend>Define a registry connection, or give one a new token</legend>
+{{if eq .Kind "registry"}}<p class="problem-line">{{.Error}}</p>{{end}}
+<label for="registry-name">Name</label>
+<input id="registry-name" name="name" value="{{.Registry.Name}}" placeholder="ghcr" autocomplete="off" required>
+<label for="registry-username">GitHub user</label>
+<input id="registry-username" name="username" value="{{.Registry.Username}}" autocomplete="off" required>
+<label for="registry-token">Token</label>
+<input id="registry-token" name="token" type="password" autocomplete="new-password" required>
+<p>A classic token with read:packages, for private deploy artifacts and images on ghcr.io. It is
+kept in the cluster, which pulls with it.</p>
+<button type="submit">Save</button>
+</fieldset>
+</form>
+</section>
+
+<section class="card">
+<h2>Cloudflare</h2>
+{{if .Connections.Cloudflare}}
+<ul class="apps">
+{{range .Connections.Cloudflare}}
+<li>
+<div class="app-head"><span class="name">{{.Name}}</span>
+{{if not .Missing}}<form method="post" action="/connections/cloudflare/{{.Name}}/delete" class="inline">
+<input type="hidden" name="csrf" value="{{$.CSRF}}">
+<button type="submit" class="secondary">Remove</button>
+</form>{{end}}</div>
+<dl class="facts">
+<dt>Account</dt><dd>{{if .Missing}}<span class="muted">this machine does not hold this connection; define it again under its name</span>{{else}}{{.Account}}{{end}}</dd>
+<dt>Used by</dt><dd>{{range $i, $a := .Apps}}{{if $i}}, {{end}}<a href="/apps/{{$a}}">{{$a}}</a>{{else}}<span class="muted">no app</span>{{end}}</dd>
+</dl>
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="empty">No Cloudflare connections yet. Apps without one answer inside the cluster only.</p>
+{{end}}
+<form method="post" action="/connections/cloudflare">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<fieldset>
+<legend>Define a Cloudflare connection, or give one a new token</legend>
+{{if eq .Kind "cloudflare"}}<p class="problem-line">{{.Error}}</p>{{end}}
+<label for="cloudflare-name">Name</label>
+<input id="cloudflare-name" name="name" value="{{.Cloudflare.Name}}" placeholder="tobile" autocomplete="off" required>
+<label for="cloudflare-token">API token</label>
+<input id="cloudflare-token" name="token" type="password" autocomplete="new-password" required>
+<label for="cloudflare-account">Account ID</label>
+<input id="cloudflare-account" name="account" value="{{.Cloudflare.Account}}" autocomplete="off">
+<p>The token needs Cloudflare Tunnel:Edit and DNS:Edit for the zones of the apps; the account is
+only needed when it sees several. shelf checks the token before keeping it, on this machine and
+never in the cluster.</p>
+<button type="submit">Save</button>
+</fieldset>
+</form>
+</section>
+{{end}}

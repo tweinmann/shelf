@@ -51,8 +51,11 @@ type AppOptions struct {
 	Insecure bool
 	// Domain is the app's own domain; empty means the domain of the cluster.
 	Domain string
-	// Registry is the app's login for RegistryHost; nil stores none.
-	Registry *RegistryAuth
+	// Registry is the registry connection the app pulls with; empty means without a login.
+	Registry string
+	// Cloudflare is the Cloudflare connection the app is exposed through. The cluster only keeps
+	// its name; the token stays on the machine that runs shelf.
+	Cloudflare string
 	// TunnelID is the app's Cloudflare tunnel; empty means the app is not exposed, and the
 	// platform stops its cloudflared.
 	TunnelID string
@@ -100,12 +103,14 @@ func AppProvider(o AppOptions) *unstructured.Unstructured {
 		"spec": map[string]any{
 			"type": "Static",
 			"defaultValues": map[string]any{
-				"name":     o.Name,
-				"url":      o.Artifact.URL,
-				"tag":      o.Artifact.Tag,
-				"insecure": o.Insecure,
-				"domain":   o.Domain,
-				"tunnel":   o.TunnelID,
+				"name":       o.Name,
+				"url":        o.Artifact.URL,
+				"tag":        o.Artifact.Tag,
+				"insecure":   o.Insecure,
+				"domain":     o.Domain,
+				"tunnel":     o.TunnelID,
+				"registry":   o.Registry,
+				"cloudflare": o.Cloudflare,
 			},
 		},
 	}}
@@ -136,7 +141,7 @@ func AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]s
 	return values, nil
 }
 
-// AddApp stores the app's secrets, its registry login, its tunnel and its provider, then waits
+// AddApp stores the app's secrets, its tunnel and its provider, then waits
 // until Flux has deployed the current artifact and the HelmRelease is ready, and until the app's
 // cloudflared runs — or, for an app that is no longer exposed, until it is gone. Running it again
 // updates all of it and waits again.
@@ -149,11 +154,7 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 	}
 	rep := progress.OrDiscard(o.Report)
 
-	registry, err := RegistrySecret(o.Name, o.Registry)
-	if err != nil {
-		return err
-	}
-	objs := []*unstructured.Unstructured{AppSecret(o.Name, o.Secrets), registry}
+	objs := []*unstructured.Unstructured{AppSecret(o.Name, o.Secrets)}
 	if o.TunnelCredentials != nil {
 		objs = append(objs, TunnelSecret(o.Name, o.TunnelCredentials))
 	}
@@ -182,8 +183,10 @@ type AppConfig struct {
 	Insecure bool
 	// Domain is the app's own domain, empty when it uses the cluster's.
 	Domain string
-	// Registry is the app's registry login, nil when it has none.
-	Registry *RegistryAuth
+	// Registry is the app's registry connection, empty when it pulls without a login.
+	Registry string
+	// Cloudflare is the app's Cloudflare connection, empty when it is not exposed.
+	Cloudflare string
 	// TunnelID is the app's Cloudflare tunnel, empty when it is not exposed.
 	TunnelID string
 	// TunnelCredentials is the credentials.json the cluster holds for that tunnel.
@@ -207,16 +210,9 @@ func ReadAppConfig(ctx context.Context, cfg *rest.Config, app string) (*AppConfi
 	config.Insecure, _ = values["insecure"].(bool)
 	config.Domain, _ = values["domain"].(string)
 	config.TunnelID, _ = values["tunnel"].(string)
+	config.Registry, _ = values["registry"].(string)
+	config.Cloudflare, _ = values["cloudflare"].(string)
 
-	registry, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: RegistrySecretName(app)})
-	if err != nil {
-		return nil, err
-	}
-	if registry != nil {
-		if config.Registry, err = registryLogin(registry); err != nil {
-			return nil, err
-		}
-	}
 	tunnel, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: TunnelSecretName(app)})
 	if err != nil {
 		return nil, err
@@ -349,7 +345,7 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 		return found, err
 	}
 
-	for _, name := range []string{AppSecretName(app), RegistrySecretName(app), TunnelSecretName(app)} {
+	for _, name := range []string{AppSecretName(app), TunnelSecretName(app)} {
 		secret := ref{gvk: secretGVK, namespace: SystemNamespace, name: name}
 		deleted, err = c.delete(ctx, secret)
 		if err != nil {
@@ -364,10 +360,10 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 }
 
 // registryHint says what to do when the registry refuses to hand out an app's deploy artifact.
-// The app may have no login at all, which a private package refuses just the same.
+// The app may have no registry connection at all, which a private package refuses just the same.
 func registryHint(app string) string {
-	return "give the app a login that may read it with `shelf app credentials " + app +
-		" --registry-login`; it is kept in the Secret " + SystemNamespace + "/" + RegistrySecretName(app)
+	return "give the app a registry connection that may read it (`shelf app credentials " + app +
+		" --registry <connection>`), or a new token to the one it has (`shelf connection add registry <connection>`)"
 }
 
 // deleteReport deletes an object and reports it, if it existed.

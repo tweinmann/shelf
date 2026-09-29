@@ -169,20 +169,21 @@ func TestAppRm(t *testing.T) {
 	}
 }
 
-// TestAppAddWithoutCloudflare checks that an app without Cloudflare access runs without being
-// published, even under a public domain: exposure belongs to the app, not to the cluster.
+// TestAppAddWithoutCloudflare checks that an app without a Cloudflare connection runs without
+// being published, even under a public domain and with a connection at hand: exposure is chosen
+// per app, not given to the cluster.
 func TestAppAddWithoutCloudflare(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t).public()
 	h.app = appWithSecrets("greeter")
-	h.env[envCloudflareToken] = "cf-secret-token"
+	h.defineCloudflare(t, "tobile", "cf-secret-token", "")
 
 	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
 	if len(h.api.records)+len(h.api.created) != 0 {
-		t.Errorf("records %v, tunnels %v; a token in the shell is not used without --cloudflare",
+		t.Errorf("records %v, tunnels %v; a connection is only used when it is chosen",
 			h.api.records, h.api.created)
 	}
-	if added := h.lastAdded(t); added.TunnelID != "" || added.Registry != nil {
+	if added := h.lastAdded(t); added.TunnelID != "" || added.Registry != "" {
 		t.Errorf("options %+v", added)
 	}
 }
@@ -194,7 +195,7 @@ func TestAppStatusComponents(t *testing.T) {
 	t.Parallel()
 	ready := cluster.AppState{Name: "hello", Phase: cluster.PhaseReady}
 	exposed := ready
-	exposed.Tunnel = "t-1"
+	exposed.Tunnel, exposed.Cloudflare = "t-1", "tobile"
 	components := []cluster.Component{
 		{Name: "check", Phase: cluster.PhaseWorking},
 		{Name: "db", Phase: cluster.PhaseReady, Ports: []cluster.Port{{Name: "main", Number: 5432}}},
@@ -219,7 +220,7 @@ func TestAppStatusComponents(t *testing.T) {
 			"    web    Ready    hello-dev.dev.local/ (inside the cluster only)",
 		}},
 		"a domain of its own": {local: true, own: true, exposed: true, want: []string{
-			"  exposed   through tunnel t-1",
+			"  exposed   through connection tobile, which this machine does not hold",
 			"    web    Ready    https://hello-dev.shop.ch/",
 		}},
 	}

@@ -25,8 +25,8 @@ kind: Secret
 metadata:
   labels:
     reconcile.fluxcd.io/watch: Enabled
-    shelf.dev/app: hello
-  name: registry-hello
+    shelf.dev/connection: registry
+  name: connection-registry-ghcr
   namespace: shelf-system
 type: kubernetes.io/dockerconfigjson
 ---
@@ -37,8 +37,7 @@ kind: Secret
 metadata:
   labels:
     reconcile.fluxcd.io/watch: Enabled
-    shelf.dev/app: empty
-  name: registry-empty
+  name: registry-anonymous
   namespace: shelf-system
 type: kubernetes.io/dockerconfigjson
 ---
@@ -86,9 +85,11 @@ metadata:
   namespace: shelf-system
 spec:
   defaultValues:
+    cloudflare: tobile
     domain: example.com
     insecure: false
     name: hello
+    registry: ghcr
     tag: main
     tunnel: t-1
     url: oci://ghcr.io/tweinmann/hello-deploy
@@ -103,9 +104,11 @@ metadata:
   namespace: shelf-system
 spec:
   defaultValues:
+    cloudflare: ""
     domain: ""
     insecure: false
     name: empty
+    registry: ""
     tag: main
     tunnel: ""
     url: oci://ghcr.io/tweinmann/hello-deploy

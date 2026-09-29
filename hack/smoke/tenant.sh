@@ -4,8 +4,8 @@
 #
 # Usage: hack/smoke/tenant.sh <app> oci://ghcr.io/<owner>/<app>:main
 # GHCR_USERNAME and GHCR_TOKEN (classic PAT, read:packages) are read from the environment, or
-# prompted for. shelf app add --registry-login stores them as the app's own login, which is also
-# what shelf reads the artifact with.
+# prompted for. They become the registry connection "tenant", which the app pulls with and which
+# is also what shelf reads the artifact with.
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
@@ -55,11 +55,17 @@ shelf init cluster --yes --domain dev.local --insecure-registry \
 export DOCKER_CONFIG="$work/docker"
 mkdir -p "$DOCKER_CONFIG"
 
-step "shelf app add --registry-login"
-shelf app add "$app" "$artifact" --registry-login | tee "$work/add.txt"
-grep -q "^registry login: $GHCR_USERNAME for ghcr.io$" "$work/add.txt" || die "the login was not stored"
-grep -qF "$GHCR_TOKEN" "$work/add.txt" && die "the token appears in the output"
-kubectl -n shelf-system get secret "registry-$app" >/dev/null || die "the app has no login of its own"
+step "shelf connection add registry tenant, then shelf app add --registry tenant"
+shelf connection add registry tenant | tee "$work/connection.txt"
+shelf app add "$app" "$artifact" --registry tenant | tee "$work/add.txt"
+grep -q "^registry connection: tenant$" "$work/add.txt" || die "the app did not get the connection"
+grep -qF "$GHCR_TOKEN" "$work/connection.txt" "$work/add.txt" && die "the token appears in the output"
+kubectl -n shelf-system get secret connection-registry-tenant >/dev/null || die "the connection is not in the cluster"
+
+step "a new login for the connection keeps the app pulling"
+shelf connection add registry tenant | grep -q "^$app pull with it from now on$" \
+  || die "the connection does not know it is used by $app"
+shelf app redeploy "$app" >/dev/null || die "the app no longer pulls after the login was saved again"
 
 kubectl -n traefik port-forward svc/traefik 18083:80 >/dev/null 2>&1 &
 pf_pid=$!

@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +48,9 @@ type fakeCluster struct {
 	stored map[string]string
 	// configs are the apps as they are registered, by name. AddApp writes them, as the real
 	// cluster does, so that a second command sees what the first one stored.
-	configs    map[string]*cluster.AppConfig
+	configs map[string]*cluster.AppConfig
+	// registries are the registry connections, by name.
+	registries map[string]cluster.RegistryAuth
 	apps       []string
 	states     []cluster.AppState
 	components []cluster.Component
@@ -75,12 +79,18 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	}
 	config := &cluster.AppConfig{
 		Artifact: o.Artifact, Insecure: o.Insecure, Domain: o.Domain, Registry: o.Registry,
-		TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials,
+		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials,
 	}
 	if previous := f.configs[o.Name]; previous != nil && o.TunnelCredentials == nil && o.TunnelID != "" {
 		config.TunnelCredentials = previous.TunnelCredentials
 	}
 	f.configs[o.Name] = config
+	// The states follow what is registered, as they do in a cluster.
+	f.states = slices.DeleteFunc(f.states, func(s cluster.AppState) bool { return s.Name == o.Name })
+	f.states = append(f.states, cluster.AppState{
+		Name: o.Name, Artifact: o.Artifact, Domain: o.Domain, Tunnel: o.TunnelID,
+		Registry: o.Registry, Cloudflare: o.Cloudflare,
+	})
 	return nil
 }
 
@@ -88,6 +98,7 @@ func (f *fakeCluster) RemoveApp(_ context.Context, _ *rest.Config, app string, _
 	_ progress.Reporter) (bool, error) {
 	f.removed = append(f.removed, app)
 	delete(f.configs, app)
+	f.states = slices.DeleteFunc(f.states, func(s cluster.AppState) bool { return s.Name == app })
 	return f.found, nil
 }
 
@@ -123,6 +134,40 @@ func (f *fakeCluster) AppConfig(_ context.Context, _ *rest.Config, app string) (
 	return f.configs[app], nil
 }
 
+func (f *fakeCluster) RegistryConnections(context.Context, *rest.Config) ([]cluster.RegistryConnection, error) {
+	var out []cluster.RegistryConnection
+	for _, name := range slices.Sorted(maps.Keys(f.registries)) {
+		out = append(out, cluster.RegistryConnection{Name: name, Username: f.registries[name].Username})
+	}
+	return out, nil
+}
+
+func (f *fakeCluster) RegistryConnection(_ context.Context, _ *rest.Config, name string) (*cluster.RegistryAuth, error) {
+	auth, ok := f.registries[name]
+	if !ok {
+		return nil, nil
+	}
+	return &auth, nil
+}
+
+func (f *fakeCluster) SaveRegistryConnection(_ context.Context, _ *rest.Config, name string,
+	auth cluster.RegistryAuth, rep progress.Reporter) error {
+	if f.registries == nil {
+		f.registries = map[string]cluster.RegistryAuth{}
+	}
+	f.registries[name] = auth
+	rep.Report(progress.Applied("Secret shelf-system/"+cluster.RegistryConnectionSecretName(name), "configured",
+		"for "+auth.Username+"@ghcr.io"))
+	return nil
+}
+
+func (f *fakeCluster) DeleteRegistryConnection(_ context.Context, _ *rest.Config, name string,
+	_ progress.Reporter) (bool, error) {
+	_, ok := f.registries[name]
+	delete(f.registries, name)
+	return ok, nil
+}
+
 // harness runs commands against fakes. Everything a command reads from the outside world is a
 // field here, so a test changes it without touching the process: no environment variables, no
 // package-level variables, and therefore no reason not to run in parallel.
@@ -130,7 +175,7 @@ type harness struct {
 	kubeconfig string
 	env        map[string]string
 	backup     secrets.Backup
-	access     hostcfg.AppAccess
+	conns      hostcfg.Connections
 	version    string
 
 	cluster *fakeCluster
@@ -156,7 +201,7 @@ func newHarness(t *testing.T) *harness {
 		kubeconfig: kubeconfig,
 		env:        map[string]string{"SHELF_HOME": home},
 		backup:     secrets.Backup{Dir: filepath.Join(home, "apps")},
-		access:     hostcfg.AppAccess{Dir: filepath.Join(home, "apps")},
+		conns:      hostcfg.Connections{Dir: filepath.Join(home, hostcfg.ConnectionsDir)},
 		version:    "v0.0.0-test",
 		cluster:    &fakeCluster{},
 		api:        &fakeCloudflare{accounts: []string{"acc-1"}},

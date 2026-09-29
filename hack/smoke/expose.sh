@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Checks the Phase 8b acceptance for Cloudflare: an app that already runs gets a tunnel of its own
-# in the Cloudflare account it is given, becomes reachable over HTTPS under a domain of its own,
-# and is taken off the internet again without leaving its record or its tunnel behind.
+# Checks the Phase 8b acceptance for Cloudflare: an app that already runs is given the Cloudflare
+# connection "smoke", gets a tunnel of its own in that connection's account, becomes reachable
+# over HTTPS under a domain of its own, and is taken off the internet again without leaving its
+# record or its tunnel behind.
 #
 # Usage: hack/smoke/expose.sh <app> <domain>   (the app must already be deployed, e.g. greeter)
 # The domain has to be a Cloudflare zone of the account. CF_API_TOKEN is read from the
@@ -82,15 +83,16 @@ if [[ -n "$shared" ]]; then
   echo "deleted the old tunnel shelf$suffix ($shared)"
 fi
 
-step "build shelf and give $app its Cloudflare access"
+step "build shelf, define the connection smoke and expose $app through it"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 export SHELF_HOME="${SHELF_HOME:-$HOME/.shelf}"
+"$work/shelf" connection add cloudflare smoke | tee "$work/connection.txt"
+connection="$SHELF_HOME/connections/cloudflare/smoke.yaml"
+[[ "$(stat -c %a "$connection")" == 600 ]] || die "$connection is not 0600"
 start=$SECONDS
-"$work/shelf" app credentials "$app" --cloudflare --domain "$domain" | tee "$work/expose.txt"
+"$work/shelf" app credentials "$app" --cloudflare smoke --domain "$domain" | tee "$work/expose.txt"
 echo "expose: $((SECONDS - start)) s"
-grep -qF "$CF_API_TOKEN" "$work/expose.txt" && die "the token appears in the output"
-access="$SHELF_HOME/apps/$app/cloudflare.yaml"
-[[ "$(stat -c %a "$access")" == 600 ]] || die "$access is not 0600"
+grep -qF "$CF_API_TOKEN" "$work/connection.txt" "$work/expose.txt" && die "the token appears in the output"
 kubectl get secrets -A -o json | grep -qF "$CF_API_TOKEN" && die "the token is in the cluster"
 
 step "the app has its own tunnel and its own cloudflared"
@@ -132,7 +134,8 @@ step "off the internet again: record, tunnel and cloudflared are gone"
 [[ -z "$(record)" ]] || die "the record of $host is still there"
 [[ -z "$(find_tunnel "$tunnel_name")" ]] || die "tunnel $tunnel_name is still there"
 kubectl -n "$app" get deploy cloudflared >/dev/null 2>&1 && die "cloudflared still runs"
-[[ -f "$access" ]] && die "$access is still there"
+"$work/shelf" connection rm cloudflare smoke
+[[ -f "$connection" ]] && die "$connection is still there"
 
-echo "PASS: own tunnel in its own account, record published and corrected, HTTPS as $host," \
+echo "PASS: own tunnel in the connection's account, record published and corrected, HTTPS as $host," \
   "and nothing left behind when taken off"

@@ -2,13 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/tweinmann/shelf/internal/cluster"
-	"github.com/tweinmann/shelf/internal/hostcfg"
 	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/progress"
 )
@@ -25,47 +23,29 @@ func newAppCmd(o Options) *cobra.Command {
 	return cmd
 }
 
-// Environment variables with the credentials of an app. A token is never taken from a flag, so
-// it does not show up in process listings or shell history; and it is only read when a flag
-// asks for it, so a variable left in the shell does not end up in every app added from it.
-const (
-	envRegistryUser      = "GHCR_USERNAME"
-	envRegistryToken     = "GHCR_TOKEN"
-	envCloudflareToken   = "CF_API_TOKEN"
-	envCloudflareAccount = "CF_ACCOUNT_ID"
-)
+// accessHelp explains what an app can be given, for every command that takes it.
+const accessHelp = `--registry names the registry connection the app pulls its deploy artifact and its images
+with; without one, it reads the registry anonymously. --cloudflare names the Cloudflare
+connection it is exposed through: it gets a tunnel of its own in that connection's account, and
+its domain has to be a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.`
 
-// accessHelp explains where the credentials of an app come from, for every command that takes
-// them.
-const accessHelp = `--registry-login stores ` + envRegistryUser + ` and ` + envRegistryToken + ` (a classic PAT with
-read:packages) as the app's login for ghcr.io: its deploy artifact and its images are pulled with
-it, and nothing else uses it. Without one, the app reads the registry anonymously.
-
---cloudflare exposes the app through a Cloudflare tunnel of its own, in the account of
-` + envCloudflareToken + ` (or ` + envCloudflareAccount + `, when the token sees several). The token needs Account:Cloudflare
-Tunnel:Edit, and Zone:DNS:Edit for the app's domain, which has to be a Cloudflare zone of that
-account. The token is kept in $SHELF_HOME/apps/<name>/cloudflare.yaml on this machine and never
-goes into the cluster, so only this machine can move or remove the app's record and tunnel.`
-
-// accessFlags are the credentials an app can be given.
+// accessFlags choose what an app reaches its registry and the internet with.
 type accessFlags struct {
 	domain       string
-	registry     bool
+	registry     string
 	noRegistry   bool
-	cloudflare   bool
+	cloudflare   string
 	noCloudflare bool
 }
 
-// register adds the flags; removable adds the ones that take a credential away again.
+// register adds the flags; removable adds the ones that take a connection away again.
 func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 	fs.StringVar(&f.domain, "domain", "",
 		"a domain of the app's own: it answers at <name><host-suffix>.<domain> (default: the cluster's)")
-	fs.BoolVar(&f.registry, "registry-login", false,
-		"store "+envRegistryUser+" and "+envRegistryToken+" as the app's login for "+cluster.RegistryHost)
-	fs.BoolVar(&f.cloudflare, "cloudflare", false,
-		"expose the app through its own tunnel, with "+envCloudflareToken+" and "+envCloudflareAccount)
+	fs.StringVar(&f.registry, "registry", "", "the registry connection the app pulls with")
+	fs.StringVar(&f.cloudflare, "cloudflare", "", "the Cloudflare connection the app is exposed through")
 	if removable {
-		fs.BoolVar(&f.noRegistry, "no-registry-login", false, "drop the app's registry login")
+		fs.BoolVar(&f.noRegistry, "no-registry", false, "pull without a login")
 		fs.BoolVar(&f.noCloudflare, "no-cloudflare", false,
 			"take the app off the internet: delete its record and its tunnel")
 	}
@@ -73,29 +53,16 @@ func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 
 // changes reports whether any flag asks for a change.
 func (f *accessFlags) changes() bool {
-	return f.domain != "" || f.registry || f.noRegistry || f.cloudflare || f.noCloudflare
+	return f.domain != "" || f.registry != "" || f.noRegistry || f.cloudflare != "" || f.noCloudflare
 }
 
-// access reads the credentials the flags ask for from the environment.
-func (f *accessFlags) access(o Options) (ops.Access, error) {
+func (f *accessFlags) access() (ops.Access, error) {
 	a := ops.Access{
 		Domain:           f.domain,
+		Registry:         f.registry,
 		RemoveRegistry:   f.noRegistry,
+		Cloudflare:       f.cloudflare,
 		RemoveCloudflare: f.noCloudflare,
-	}
-	if f.registry {
-		user, token := o.getenv(envRegistryUser), o.getenv(envRegistryToken)
-		if user == "" || token == "" {
-			return ops.Access{}, fmt.Errorf("--registry-login needs %s and %s", envRegistryUser, envRegistryToken)
-		}
-		a.Registry = &cluster.RegistryAuth{Username: user, Token: token}
-	}
-	if f.cloudflare {
-		token := strings.TrimSpace(o.getenv(envCloudflareToken))
-		if token == "" {
-			return ops.Access{}, fmt.Errorf("--cloudflare needs %s", envCloudflareToken)
-		}
-		a.Cloudflare = &hostcfg.Cloudflare{Token: token, Account: strings.TrimSpace(o.getenv(envCloudflareAccount))}
 	}
 	return a, a.Check()
 }
@@ -116,7 +83,7 @@ shelf reads the artifact, generates the secrets the app declares and stores them
 and in a backup file on this machine (` + "$SHELF_HOME/apps/<name>/secrets.yaml, default ~/.shelf" + `).
 If the cluster was rebuilt, the backup restores the old values. Running add again updates the
 artifact reference, generates secrets that were added to app.yaml since, and keeps all existing
-values, and the app's credentials unless they are given again.
+values, and the app's domain and connections unless others are given.
 
 ` + accessHelp,
 		Args: cobra.ExactArgs(2),
@@ -129,7 +96,7 @@ values, and the app's credentials unless they are given again.
 			if err != nil {
 				return err
 			}
-			given, err := access.access(o)
+			given, err := access.access()
 			if err != nil {
 				return err
 			}
@@ -163,12 +130,12 @@ func newAppCredentialsCmd(o Options) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "credentials <name>",
-		Short: "Change an app's registry login, its domain or its Cloudflare access",
+		Short: "Change an app's domain or the connections it uses",
 		Long: `Change how an app reaches its registry and the internet, and nothing else: the app is
 deployed again from the artifact it is registered with. What is not given stays as it is.
 
-Moving the app to another domain or another Cloudflare account deletes its record and its tunnel
-there, and --no-cloudflare takes it off the internet.
+Moving the app to another domain or another Cloudflare connection deletes its record, and its
+tunnel if the account changes; --no-cloudflare takes it off the internet.
 
 ` + accessHelp,
 		Args: cobra.ExactArgs(1),
@@ -178,10 +145,10 @@ there, and --no-cloudflare takes it off the internet.
 				return err
 			}
 			if !access.changes() {
-				return fmt.Errorf("nothing to change; pass --domain, --registry-login, --cloudflare, " +
-					"--no-registry-login or --no-cloudflare")
+				return fmt.Errorf("nothing to change; pass --domain, --registry, --cloudflare, " +
+					"--no-registry or --no-cloudflare")
 			}
-			given, err := access.access(o)
+			given, err := access.access()
 			if err != nil {
 				return err
 			}

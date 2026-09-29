@@ -81,9 +81,10 @@ type AppState struct {
 	Domain string `json:"domain,omitempty"`
 	// Tunnel is the app's Cloudflare tunnel, empty when the app is not exposed.
 	Tunnel string `json:"tunnel,omitempty"`
-	// RegistryUser is who the app's registry login belongs to, empty without a login. The
-	// token is never part of the state.
-	RegistryUser string `json:"registryUser,omitempty"`
+	// Registry is the app's registry connection, empty when it pulls without a login.
+	Registry string `json:"registry,omitempty"`
+	// Cloudflare is the app's Cloudflare connection, empty when it is not exposed.
+	Cloudflare string `json:"cloudflare,omitempty"`
 	// Revision is the deploy artifact that is applied, e.g. main@sha256:1f4e….
 	Revision string `json:"revision,omitempty"`
 	// Deployed is when the release last changed.
@@ -98,7 +99,6 @@ type AppState struct {
 // appObjects are the objects that carry one app.
 type appObjects struct {
 	provider      *unstructured.Unstructured
-	registry      *unstructured.Unstructured
 	source        *unstructured.Unstructured
 	kustomization *unstructured.Unstructured
 	chart         *unstructured.Unstructured
@@ -152,15 +152,6 @@ func (c *client) appObjects(ctx context.Context) (map[string]*appObjects, error)
 	apps := map[string]*appObjects{}
 	for _, p := range providers {
 		apps[p.GetName()] = &appObjects{provider: p}
-	}
-	secrets, err := c.list(ctx, secretGVK, SystemNamespace, AppLabel)
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range secrets {
-		if app, ok := apps[s.GetLabels()[AppLabel]]; ok && s.GetName() == RegistrySecretName(s.GetLabels()[AppLabel]) {
-			app.registry = s
-		}
 	}
 	sources, err := c.list(ctx, ociRepositoryGVK, "", "")
 	if err != nil {
@@ -238,18 +229,14 @@ func providerState(provider *unstructured.Unstructured) AppState {
 	state.Insecure, _ = values["insecure"].(bool)
 	state.Domain, _ = values["domain"].(string)
 	state.Tunnel, _ = values["tunnel"].(string)
+	state.Registry, _ = values["registry"].(string)
+	state.Cloudflare, _ = values["cloudflare"].(string)
 	return state
 }
 
 func appState(name string, o *appObjects) AppState {
 	state := providerState(o.provider)
 	state.Name = name
-	if o.registry != nil {
-		// A Secret that cannot be read shows as no login; the diagnosis says what fails.
-		if login, err := registryLogin(o.registry); err == nil && login != nil {
-			state.RegistryUser = login.Username
-		}
-	}
 	if o.source != nil {
 		state.Revision, _, _ = unstructured.NestedString(o.source.Object, "status", "artifact", "revision")
 	}

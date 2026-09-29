@@ -19,7 +19,7 @@ const (
 	// ConfigName is the ConfigMap in FluxNamespace whose keys Flux substitutes into the
 	// platform manifests.
 	ConfigName = "shelf-config"
-	// RegistryHost is the registry an app's login is for.
+	// RegistryHost is the registry a registry connection is for.
 	RegistryHost = "ghcr.io"
 	// WatchLabel makes the platform ResourceSet copy a Secret into the app namespaces as soon
 	// as it changes, instead of at its next interval.
@@ -96,10 +96,6 @@ func ParseSettings(data map[string]string) Settings {
 	}
 }
 
-// RegistrySecretName is the Secret in SystemNamespace with an app's registry login. The platform
-// copies it into the app namespace, where the deploy artifact and the images are pulled with it.
-func RegistrySecretName(app string) string { return "registry-" + app }
-
 // registryLogin reads the login back out of a registry Secret, or nil when it holds none.
 func registryLogin(obj *unstructured.Unstructured) (*RegistryAuth, error) {
 	encoded, found, err := unstructured.NestedString(obj.Object, "data", ".dockerconfigjson")
@@ -121,35 +117,4 @@ func registryLogin(obj *unstructured.Unstructured) (*RegistryAuth, error) {
 		return nil, nil
 	}
 	return &RegistryAuth{Username: entry.Username, Token: entry.Password}, nil
-}
-
-// RegistrySecret returns an app's registry login. Without auth it holds no login, which still
-// lets an app with public images and a public deploy artifact run; it exists either way, because
-// the platform copies it into the app namespace and the pulls refer to it.
-func RegistrySecret(app string, auth *RegistryAuth) (*unstructured.Unstructured, error) {
-	auths := map[string]any{}
-	if auth != nil {
-		auths[RegistryHost] = map[string]string{
-			"username": auth.Username,
-			"password": auth.Token,
-			"auth":     base64.StdEncoding.EncodeToString([]byte(auth.Username + ":" + auth.Token)),
-		}
-	}
-	config, err := json.Marshal(map[string]any{"auths": auths})
-	if err != nil {
-		return nil, err
-	}
-	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Secret",
-		"metadata": map[string]any{
-			"name":      RegistrySecretName(app),
-			"namespace": SystemNamespace,
-			"labels":    map[string]any{AppLabel: app, WatchLabel: "Enabled"},
-		},
-		"type": "kubernetes.io/dockerconfigjson",
-		"data": map[string]any{
-			".dockerconfigjson": base64.StdEncoding.EncodeToString(config),
-		},
-	}}, nil
 }

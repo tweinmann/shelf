@@ -10,10 +10,14 @@
 <header class="bar">
 <a class="brand" href="/">shelf</a>
 {{if .Authenticated}}
+<nav class="links">
+<a href="/">Apps</a>
+<a href="/connections">Connections</a>
 <form method="post" action="/logout">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <button class="link" type="submit">Log out</button>
 </form>
+</nav>
 {{end}}
 </header>
 <main>

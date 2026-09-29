@@ -108,7 +108,7 @@ func newInitClusterCmd(o Options) *cobra.Command {
 Flux then installs the platform (Traefik and the app machinery) from the platform artifact.
 
 The domain is where the apps answer unless they have a domain of their own. Registry logins and
-Cloudflare access belong to each app; ` + "`shelf app add`" + ` and ` + "`shelf app credentials`" + ` set them.
+Cloudflare tokens are connections (` + "`shelf connection`" + `), which each app chooses for itself.
 
 The command shows the target cluster and asks for confirmation, because it installs
 cluster-wide objects. It is idempotent; running it again updates what changed.`,

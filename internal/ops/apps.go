@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -19,9 +18,9 @@ import (
 )
 
 // pullAuth is the login for reading a deploy artifact from here. An explicit one wins. Otherwise
-// the app's own login is used, because it is what the cluster pulls the artifact with, and it
-// spares the machine running shelf a Docker config it may not have. It is only offered to the
-// registry it is for; a nil result leaves the Docker config to answer.
+// the login of the app's registry connection is used, because it is what the cluster pulls the
+// artifact with, and it spares the machine running shelf a Docker config it may not have. It is
+// only offered to the registry it is for; a nil result leaves the Docker config to answer.
 func (o *Ops) pullAuth(artifact cluster.Artifact, login *cluster.RegistryAuth) authn.Authenticator {
 	if o.Env.Pull != nil {
 		return o.Env.Pull
@@ -32,45 +31,44 @@ func (o *Ops) pullAuth(artifact cluster.Artifact, login *cluster.RegistryAuth) a
 	return authn.FromConfig(authn.AuthConfig{Username: login.Username, Password: login.Token})
 }
 
-// Access is how an app reaches its registry and the internet. Every field is optional: what is
-// not given stays as the app has it.
+// Access is how an app reaches its registry and the internet: a domain and the connections it
+// uses, by name. Every field is optional: what is not given stays as the app has it.
 type Access struct {
 	// Domain gives the app a domain of its own instead of the cluster's.
 	Domain string
-	// Registry is the app's login for ghcr.io, for its deploy artifact and its images.
-	Registry *cluster.RegistryAuth
-	// RemoveRegistry drops the login; the app then reads its registry without one.
+	// Registry is the registry connection the app pulls its deploy artifact and its images with.
+	Registry string
+	// RemoveRegistry drops the registry connection; the app then pulls without a login.
 	RemoveRegistry bool
-	// Cloudflare exposes the app through a tunnel of its own in that account. The token needs
-	// Account:Cloudflare Tunnel:Edit, and Zone:DNS:Edit for the app's zone. An empty account
-	// means the only one the token sees.
-	Cloudflare *hostcfg.Cloudflare
+	// Cloudflare is the Cloudflare connection the app is exposed through, with a tunnel of its
+	// own in that connection's account.
+	Cloudflare string
 	// RemoveCloudflare takes the app off the internet: its record and its tunnel are deleted.
 	RemoveCloudflare bool
 }
 
-// Check rejects access that contradicts itself or cannot work. The messages carry no field
-// name, so a caller can put its own in front.
+// Check rejects access that contradicts itself. The messages carry no field name, so a caller
+// can put its own in front.
 func (a Access) Check() error {
 	if a.Domain != "" {
 		if err := CheckDomain(a.Domain); err != nil {
 			return fmt.Errorf("the domain %w", err)
 		}
 	}
-	if a.Registry != nil {
+	if a.Registry != "" {
 		if a.RemoveRegistry {
-			return errors.New("a registry login cannot be given and removed at once")
+			return errors.New("a registry connection cannot be given and removed at once")
 		}
-		if a.Registry.Username == "" || a.Registry.Token == "" {
-			return errors.New("a registry login needs a user name and a token")
+		if err := CheckConnectionName(a.Registry); err != nil {
+			return err
 		}
 	}
-	if a.Cloudflare != nil {
+	if a.Cloudflare != "" {
 		if a.RemoveCloudflare {
-			return errors.New("Cloudflare access cannot be given and removed at once")
+			return errors.New("a Cloudflare connection cannot be given and removed at once")
 		}
-		if strings.TrimSpace(a.Cloudflare.Token) == "" {
-			return errors.New("Cloudflare access needs an API token")
+		if err := CheckConnectionName(a.Cloudflare); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -89,7 +87,7 @@ type AddOptions struct {
 
 // AddApp registers an app and waits until it runs: it reads the deploy artifact, works out the
 // app's secret values, writes them to the backup and to the cluster, and exposes the app through
-// its own tunnel if it has Cloudflare access. Running it again updates the artifact reference,
+// its own tunnel if it has a Cloudflare connection. Running it again updates the artifact reference,
 // keeps every value that exists, generates the ones that were added to app.yaml since, and
 // keeps the app's access except where it is changed.
 func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Reporter) error {
@@ -104,17 +102,43 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	if current == nil {
 		current = &cluster.AppConfig{}
 	}
-	registry := current.Registry
+	registry, cloudflare := current.Registry, current.Cloudflare
 	switch {
 	case opts.Access.RemoveRegistry:
-		registry = nil
-		rep.Report(progress.Info("registry login: none"))
-	case opts.Access.Registry != nil:
+		registry = ""
+		rep.Report(progress.Info("registry connection: none"))
+	case opts.Access.Registry != "":
 		registry = opts.Access.Registry
-		rep.Report(progress.Info("registry login: %s for %s", registry.Username, cluster.RegistryHost))
+		rep.Report(progress.Info("registry connection: %s", registry))
+	}
+	switch {
+	case opts.Access.RemoveCloudflare:
+		cloudflare = ""
+		rep.Report(progress.Info("Cloudflare connection: none"))
+	case opts.Access.Cloudflare != "":
+		cloudflare = opts.Access.Cloudflare
+		rep.Report(progress.Info("Cloudflare connection: %s", cloudflare))
+	}
+	if opts.Access.Cloudflare != "" && opts.Access.Cloudflare != current.Cloudflare {
+		conn, err := o.Env.Connections.Cloudflare(opts.Access.Cloudflare)
+		if err != nil {
+			return err
+		}
+		if conn == nil {
+			return missingCloudflare(opts.Access.Cloudflare)
+		}
+	}
+	var login *cluster.RegistryAuth
+	if registry != "" {
+		if login, err = o.Cluster.RegistryConnection(ctx, o.config(), registry); err != nil {
+			return err
+		}
+		if login == nil {
+			return missingRegistry(registry)
+		}
 	}
 
-	app, err := o.Fetch(ctx, opts.Artifact.Reference(), o.pullAuth(opts.Artifact, registry), opts.Insecure)
+	app, err := o.Fetch(ctx, opts.Artifact.Reference(), o.pullAuth(opts.Artifact, login), opts.Insecure)
 	if err != nil {
 		return err
 	}
@@ -149,7 +173,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	}
 	domain := cmp.Or(opts.Access.Domain, current.Domain)
 	exposure, err := o.planExposure(ctx, opts.Name, settings, current, cmp.Or(domain, settings.Domain),
-		opts.Access, rep)
+		cloudflare, rep)
 	if err != nil {
 		return err
 	}
@@ -159,6 +183,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		Insecure:          opts.Insecure,
 		Domain:            domain,
 		Registry:          registry,
+		Cloudflare:        cloudflare,
 		TunnelID:          exposure.tunnelID(),
 		TunnelCredentials: exposure.credentials,
 		Secrets:           values,
@@ -218,9 +243,11 @@ func (o *Ops) RemoveApp(ctx context.Context, name string, timeout time.Duration,
 	if err != nil {
 		return err
 	}
-	access, err := o.Env.Access.Cloudflare(name)
-	if err != nil {
-		return err
+	var access *hostcfg.Cloudflare
+	if current != nil {
+		if access, err = o.Env.Connections.Cloudflare(current.Cloudflare); err != nil {
+			return err
+		}
 	}
 	found, err := o.Cluster.RemoveApp(ctx, o.config(), name, timeout, rep)
 	if err != nil {
@@ -236,9 +263,6 @@ func (o *Ops) RemoveApp(ctx context.Context, name string, timeout time.Duration,
 			access, rep); err != nil {
 			return err
 		}
-	}
-	if err := o.Env.Access.DeleteCloudflare(name); err != nil {
-		return err
 	}
 	if !found {
 		return fmt.Errorf("app %s does not exist", name)

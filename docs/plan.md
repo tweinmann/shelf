@@ -96,7 +96,7 @@ Decided in Phase 4 (2026-09-17):
 |---|---|
 | Example tenant | **Separate repo `tweinmann/shelf-hello`**, using `tweinmann/shelf/.github/workflows/build.yml@main` and building its own image, exactly like a real tenant. Its files are kept in `examples/tenant/`. |
 | shelf visibility | **The shelf repo becomes public**, so other repos can call the reusable workflow and `go install` shelf without a token. |
-| GHCR credential | **One classic PAT for the platform.** `shelf init cluster` stores it in `shelf-system`; the ResourceSet copies it into every app namespace (`copyFrom`) for images and the deploy artifact. *Revised in Phase 8b: one login per app.* |
+| GHCR credential | **One classic PAT for the platform.** `shelf init cluster` stores it in `shelf-system`; the ResourceSet copies it into every app namespace (`copyFrom`) for images and the deploy artifact. *Revised in Phase 8b: registry connections, chosen per app.* |
 | shelf in tenant CI | **Built from source** (`go install …@<ref>`) in the reusable workflow; release binaries come later. |
 | Webhook receiver | **Moved to Phase 5**, where the tunnel makes it reachable and testable. Phase 4 relies on `OCIRepository` polling every minute. |
 
@@ -114,8 +114,8 @@ Decided in Phase 5 (2026-09-18):
 | Question | Decision |
 |---|---|
 | Host names | **`<app><host-suffix>.<domain>`**, with the suffix set per cluster (`-dev` in development, empty on the mini). Cloudflare's free Universal SSL covers `domain.tld` and `*.domain.tld`, but not `*.dev.domain.tld`, so a second level would need a paid certificate. The suffix keeps every host one level deep and lets both clusters share one zone. |
-| DNS records | **shelf writes them itself** through the Cloudflare API: `shelf app add` publishes `<app><suffix>.<domain>` as a proxied CNAME to the tunnel, `shelf app rm` removes it, and `shelf init expose` publishes the apps that already run. external-dns was installed first and then dropped: a host name belongs to exactly one app, and apps only come and go through shelf, so the generic watcher solved a problem shelf does not have — at the price of a token with DNS rights living in the cluster. Now that token stays on the operator's machine. The cost is drift when an app is removed past shelf; `shelf init expose` reconciles again. *Phase 8b keeps the rule and makes the token one per app, in `~/.shelf/apps/<app>/cloudflare.yaml`; the next `shelf app add` of an app reconciles its record.* |
-| Tunnel | **Locally managed, created through the API** by `shelf init expose`, named `shelf<host-suffix>`. shelf generates the tunnel secret, keeps the credentials in the cluster, and never stores them elsewhere. A tunnel that exists without credentials in the cluster is replaced after asking, because Cloudflare hands out the secret only once. *Revised in Phase 8b: one tunnel per app, `shelf<host-suffix>-<app>`, in the app's own Cloudflare account; `shelf init expose` is gone.* |
+| DNS records | **shelf writes them itself** through the Cloudflare API: `shelf app add` publishes `<app><suffix>.<domain>` as a proxied CNAME to the tunnel, `shelf app rm` removes it, and `shelf init expose` publishes the apps that already run. external-dns was installed first and then dropped: a host name belongs to exactly one app, and apps only come and go through shelf, so the generic watcher solved a problem shelf does not have — at the price of a token with DNS rights living in the cluster. Now that token stays on the operator's machine. The cost is drift when an app is removed past shelf; `shelf init expose` reconciles again. *Phase 8b keeps the rule: the token is a Cloudflare connection in `~/.shelf/connections/cloudflare/`, chosen per app; the next `shelf app add` of an app reconciles its record.* |
+| Tunnel | **Locally managed, created through the API** by `shelf init expose`, named `shelf<host-suffix>`. shelf generates the tunnel secret, keeps the credentials in the cluster, and never stores them elsewhere. A tunnel that exists without credentials in the cluster is replaced after asking, because Cloudflare hands out the secret only once. *Revised in Phase 8b: one tunnel per app, `shelf<host-suffix>-<app>`, in the account of the app's Cloudflare connection; `shelf init expose` is gone.* |
 | Exposure is optional | The platform carries cloudflared in a **ResourceSet that stays empty** until `shelf init expose` creates its input provider, so a cluster runs unexposed until it is exposed. *Revised in Phase 8b: exposure is per app; the ResourceSet `apps` runs cloudflared in the namespace of an app that has a tunnel.* |
 | Webhook receiver | **Dropped, not moved again.** Polling reaches the app in about 80 s end to end; a receiver would need a public endpoint with a token and two secrets in every tenant repository, which is the knowledge Phase 4b removed. |
 | Test DNS isolation | **One zone for both clusters**, separated by the host suffix (`greeter-dev.<domain>` next to `greeter.<domain>`). The open question was whether a shared zone is safe; with external-dns it would have needed `--txt-owner-id` and `--domain-filter` per cluster, because each instance deletes records it considers orphaned. shelf only ever touches the record of the app it is working on, so a shared zone needs nothing else — and one zone keeps the free certificate, which covers `*.<domain>` but not a second level. |
@@ -146,8 +146,8 @@ What this changes about decisions taken earlier:
   the UI and a line on the wizard's last screen saying to copy `~/.shelf` somewhere else.
   `SHELF_HOME` already allows moving the whole tree to an encrypted volume.
 - **The Cloudflare and GHCR tokens now live on the mini**, as 0600 files under a 0700 directory.
-  (Phase 8b: one Cloudflare token per app, in `~/.shelf/apps/<app>/cloudflare.yaml`; the GHCR
-  login is per app too and lives in the cluster, where the pulls need it.)
+  (Phase 8b: the Cloudflare tokens are connections in `~/.shelf/connections/cloudflare/`; the GHCR
+  logins are connections too, and live in the cluster, where the pulls need them.)
   The Phase 5 decision — no token with DNS rights inside the cluster — holds unchanged: the token
   is a file on the host, not a Kubernetes Secret, and no shipped workload can reach the API server
   or the host filesystem. What changes is the separation. The tokens used to sit on the MacBook
@@ -165,16 +165,19 @@ What this changes about decisions taken earlier:
   in the cluster: platform objects belong to Flux and are reverted when edited by hand, the input
   providers belong to shelf, everything else belongs to the user.
 
-Decided in Phase 8b (2026-09-28), when credentials moved from the platform to the apps:
+Decided in Phase 8b (2026-09-28, revised 2026-09-29), when credentials moved from the platform to
+connections the apps choose:
 
 | Question | Decision |
 |---|---|
-| Scope | **Per app only.** The shared PAT, `shelf init expose` and the shared tunnel are gone. An app without a registry login reads its registry anonymously (public packages, the dev registry); an app without Cloudflare access runs inside the cluster only. This follows the guardrail "nothing is shared between apps", which the shared login and tunnel quietly broke: one tenant's token pulled every tenant's packages, and one Cloudflare account carried every app. Optional per-app credentials with a platform-wide fallback were considered and rejected for the same reason. |
-| An app in another Cloudflare account | **A tunnel of its own, and a domain of its own.** A proxied CNAME cannot point at a tunnel in another account, so an app with its own account needs its own tunnel (`shelf<host-suffix>-<app>`) and a zone in that account. cloudflared runs in the app's namespace, generated by the ResourceSet `apps` when the app's provider carries a tunnel; the host is `<app><host-suffix>.<app-domain>`. |
+| Scope | **No platform-wide credentials.** The shared PAT, `shelf init expose` and the shared tunnel are gone. Registry logins and Cloudflare tokens are **connections**: defined once, by name, and chosen per app. An app without a registry connection reads its registry anonymously (public packages, the dev registry); an app without a Cloudflare connection runs inside the cluster only. The first cut (2026-09-28) gave every app its own token directly; the maintainer asked the next day for connections, so that a token is typed once, a new one reaches every app that uses it, and the UI offers a choice instead of password fields. |
+| Isolation | **Apps share only what the user assigns to several of them: a connection.** Namespace, secret values, tunnel and cloudflared stay every app's own. The shared login and tunnel before this phase were shared by the platform, without anyone choosing it — one tenant's token pulled every tenant's packages. |
+| Registry connection | **In the cluster, `shelf-system/connection-registry-<name>`** (dockerconfigjson, label `shelf.dev/connection=registry`). The ResourceSet copies it into the namespace of every app that chooses it, and an app without one gets `shelf-system/registry-anonymous`, which holds no login, so the copy always has a source. The cluster pulls with it anyway, and a new login reaches every app at once through the watch label. shelf reads the artifact with the same login, so the machine running shelf needs no Docker config. |
+| Cloudflare connection | **Token and account, in `~/.shelf/connections/cloudflare/<name>.yaml`** (0600 in a 0700 directory, through `internal/hostcfg`), never in the cluster. The Phase 5 rule holds: nothing in the cluster needs the token, and a pod that escapes into the VM does not reach it. The price is that only the machine holding the file can expose, move or withdraw apps through it — in practice the mini. Without the file nothing fails silently: shelf leaves record and tunnel as they are and says so, and `shelf connection add cloudflare <name>` defines it again. A Secret in `shelf-system` was considered and rejected: anyone who can read that namespace would own the zones of all apps. |
+| An app in a Cloudflare account | **A tunnel of its own, and a domain chosen per app.** A proxied CNAME cannot point at a tunnel in another account, so a tunnel belongs to the account of the app's connection (`shelf<host-suffix>-<app>`), and the app's domain has to be a zone of that account. One tunnel per connection was considered and rejected: the apps would share their way to the internet, and cloudflared would have to live outside their namespaces. The admin UI offers the zones the connections can see; the host is `<app><host-suffix>.<domain>`. |
+| Rules for a connection | Defining one under an existing name gives it a new token. A Cloudflare connection **cannot move to another account** while apps use it, because their tunnels live in the old one. A connection **cannot be removed** while apps use it; the refusal names them. |
 | The cluster's domain | **Stays, as the default.** `init cluster --domain` is where an app without a domain of its own answers; the host suffix stays per cluster, so the dev cluster never takes the mini's names. `--move-hosts` now only counts the apps a change actually moves: a new suffix moves all of them, a new domain those on the cluster's. |
-| Where the Cloudflare token lives | **`~/.shelf/apps/<app>/cloudflare.yaml`** (token and account, 0600 in a 0700 directory, through `internal/hostcfg`), next to the secret backup. The Phase 5 rule holds: nothing in the cluster needs the token, and a pod that escapes into the VM does not reach it. The price is that only the machine holding the file can move or remove the app's record and tunnel — in practice the mini. Without the file nothing fails silently: shelf leaves record and tunnel as they are and says so, and `shelf app credentials <app> --cloudflare` gives the access back. A Secret in `shelf-system` was considered and rejected: anyone who can read that namespace would own the zones of all apps. |
-| Where the registry login lives | **In the cluster, `shelf-system/registry-<app>`**, copied into the app namespace as before. Flux and the kubelet need it there; it exists for every app, empty without a login, so the copy always has a source. shelf reads the artifact with the same login, so the machine running shelf still needs no Docker config. |
-| How credentials are given | **`shelf app add` and `shelf app credentials <app>`**, with `--domain`, `--registry-login` (reads `GHCR_USERNAME`/`GHCR_TOKEN`) and `--cloudflare` (reads `CF_API_TOKEN`/`CF_ACCOUNT_ID`); `credentials` also takes `--no-registry-login` and `--no-cloudflare`. The variables are only read when the flag asks, so a token left in the shell does not end up in every app. In the admin UI: optional fields on the add form and an "Access" section on the app page. An empty field keeps what the app has, and a token is never rendered, not even back into a form that was refused. |
+| How it is given | **`shelf connection add registry|cloudflare <name>`** reads `GHCR_USERNAME`/`GHCR_TOKEN` or `CF_API_TOKEN`/`CF_ACCOUNT_ID`; `shelf connection list` and `rm` go with it. `shelf app add` and `shelf app credentials` take `--registry <name>`, `--cloudflare <name>` and `--domain`, and `credentials` also `--no-registry` and `--no-cloudflare`; they read no tokens at all. In the admin UI connections are defined **only on the page `/connections`**, the one page with token fields; the add form and the app page offer them as a choice. A token is never rendered, not even back into a form that was refused. |
 | Phase | **A phase of its own, 8b**, before the Mac mini. Phase 8 is accepted as it was. |
 
 ## Validated assumptions
@@ -500,7 +503,7 @@ bin/shelf                  the real binary; /usr/local/bin/shelf is a symlink to
 config.yaml                domain, host suffix, listen address, Colima profile, autostart
 admin.yaml                 password hash, sessions, and the setup token until the claim
 apps/<app>/secrets.yaml    the secret backup, unchanged since Phase 4
-apps/<app>/cloudflare.yaml the app's Cloudflare token and account (Phase 8b)
+connections/cloudflare/    one file per Cloudflare connection: token and account (Phase 8b)
 audit.log                  one line per mutating action
 ```
 
@@ -721,11 +724,13 @@ cluster live and die together. On the mini, `~/.shelf/` is the real home directo
   [--kubeconfig …] [--yes] [--timeout 5m]` — shows the target and asks; prints what it
   created, changed or left unchanged, and how long each wait took
 - `shelf init host` / `shelf init`
-- `shelf app add <name> <oci://…:tag> [--insecure-registry] [--domain …] [--registry-login]
-  [--cloudflare]` / `shelf app rm <name>`, both with `--context`, `--kubeconfig`, `--timeout`;
-  `rm` asks unless `--yes`
-- `shelf app credentials <name> [--domain …] [--registry-login] [--cloudflare]
-  [--no-registry-login] [--no-cloudflare]` — change an app's access and nothing else (Phase 8b)
+- `shelf app add <name> <oci://…:tag> [--insecure-registry] [--domain …] [--registry <conn>]
+  [--cloudflare <conn>]` / `shelf app rm <name>`, both with `--context`, `--kubeconfig`,
+  `--timeout`; `rm` asks unless `--yes`
+- `shelf app credentials <name> [--domain …] [--registry <conn>] [--cloudflare <conn>]
+  [--no-registry] [--no-cloudflare]` — change an app's domain and connections, nothing else (Phase 8b)
+- `shelf connection add registry|cloudflare <name>` / `list` / `rm registry|cloudflare <name>` —
+  the connections apps choose; tokens from the environment only (Phase 8b)
 - `shelf app status <name>` — the diagnosis for one app: the first stage that is not healthy,
   with its message and a hint in plain language
 - `shelf doctor` — preflight plus runtime (VM, tunnel, Flux status), reporting per layer. It is
@@ -767,7 +772,7 @@ shelf/
     progress/                 typed progress events, rendered as text or streamed to a browser
     server/                   shelf serve: routes, auth, sessions, jobs (Phase 7)
       ui/                     html/template files and static assets, embedded
-    hostcfg/                  ~/.shelf: config, admin file, the apps' Cloudflare access
+    hostcfg/                  ~/.shelf: config, admin file, Cloudflare connections
     schema/                   app.yaml types, parser, ${…} syntax, JSON Schema generation
     validate/                 validation rules
     render/                   app.yaml → resolved app.yaml → ConfigMap manifest; registry lookup
@@ -1508,7 +1513,7 @@ for the login `shelf init cluster` stored there. Precedence: an explicit `Env.Pu
 the cluster's, then the Docker config. It is only offered to the registry it was stored for, so a
 ghcr.io credential is never sent to the dev registry. Whoever may register an app in a cluster can
 already read what that cluster pulls, so this hands out nothing new. (Phase 8b: the login is now
-the app's own, read from `shelf-system/registry-<app>`, with the same precedence.)
+that of the app's registry connection, with the same precedence.)
 
 **A warning is not a guard (2026-09-20).** During the Phase 6 acceptance, `just smoke-init` was
 run against the dev cluster, which was serving `greeter-dev.tobile.ch` from the Phase 5
@@ -1532,73 +1537,90 @@ Two changes, because the warning was right and its position was wrong:
 The general lesson for the admin UI: an operation that changes what every app answers under is
 not a warning, it is a question. Phase 11's wizard has to treat it that way too.
 
-### Phase 8b – Credentials per app
-Each app brings its own GitHub token and its own Cloudflare account and token. Until now every
-credential was the platform's: one PAT in `shelf-system/registry`, copied into every app, and one
-tunnel with one cloudflared, set up by `shelf init expose` with a token read from the environment
-on every call. The decisions are in the table "Decided in Phase 8b" above.
+### Phase 8b – Connections instead of platform credentials
+Registry logins and Cloudflare tokens become connections: defined once, by name, and chosen per
+app. Until now every credential was the platform's: one PAT in `shelf-system/registry`, copied
+into every app, and one tunnel with one cloudflared, set up by `shelf init expose` with a token
+read from the environment on every call. The decisions are in the table "Decided in Phase 8b"
+above.
 
 Design:
 
-- **Cluster objects per app**, all in `shelf-system` with the label `shelf.dev/app`:
-  `registry-<app>` (dockerconfigjson, empty without a login), `tunnel-<app>` (the tunnel's
-  `credentials.json`, only while the app is exposed), and the provider with two new inputs,
-  `domain` (empty: the cluster's) and `tunnel` (empty: not exposed). `cluster.ReadAppConfig`
-  reads all of it back; `AppState` carries domain, tunnel and the registry user, never a token.
-- **Platform**: the ResourceSet `apps` copies `registry-<app>` into the app namespace, renders the
-  chart's domain as `<< if inputs.domain >>…<< else >>${SHELF_DOMAIN}<< end >>`, and, through
-  `resourcesTemplate` guarded by `<<- if inputs.tunnel >>`, runs cloudflared in the app namespace
-  with `tunnel-<app>` copied in. The plan first had a second provider and ResourceSet per app for
-  that; `resourcesTemplate` keeps it in one place, and the namespace exists before anything is put
-  into it. `platform/expose` is gone.
-- **`ops`**: `AddOptions.Access` carries domain, registry login and Cloudflare access, each
-  optional, plus `RemoveRegistry` and `RemoveCloudflare`. `AddApp` merges them with what is
-  stored, works out the exposure before and after (`planExposure`: verify a new token, store it,
-  find, reuse, replace or create the app's tunnel), applies the app, and then cleans up
-  (`finish`: withdraw the old record when the name or the account changed, publish the new one,
-  delete a tunnel the app no longer uses). `SetAccess` is `AddApp` with the artifact the app is
-  registered with — one path, not two. `RemoveApp` withdraws the record and deletes the tunnel
-  after the namespace, and with it cloudflared, is gone.
-- **Order of what happens at Cloudflare.** A new token is stored before anything is created in
-  its account, so whatever a failed change leaves behind can be cleaned up with it. An old tunnel
-  is deleted only after the cluster reported that cloudflared is gone or moved, and the client
-  first closes the connections Cloudflare keeps open for a while after cloudflared exits.
-- **Migration** in `shelf init cluster`: the shared login becomes the login of every app that has
-  none, the shared login is deleted, providers from before get the two new inputs, and the shared
-  tunnel is switched off with a warning that names the command to expose each app again. The old
-  tunnel and its records stay in Cloudflare — shelf never stored the token that made them.
-- **Admin UI**: optional fieldsets on the add form, an "Access" section on the app page, and
-  `POST /apps/{name}/access` as a job like every other change. The audit line names the change,
-  not the values.
+- **Registry connections in the cluster**: `connection-registry-<name>` in `shelf-system`, with
+  `registry-anonymous` beside them for apps without one. `internal/cluster/connections.go` lists,
+  reads, saves and deletes them; the username is shown, the token never.
+- **Cloudflare connections on the host**: `hostcfg.Connections` keeps one file per connection
+  under `~/.shelf/connections/cloudflare/`, with its name inside, so a file renamed by hand is
+  refused rather than used for the wrong account.
+- **App**: the provider carries the inputs `domain`, `tunnel`, `registry` and `cloudflare`, the
+  last two being connection names; `tunnel-<app>` holds the tunnel's `credentials.json` while the
+  app is exposed. `cluster.ReadAppConfig` reads it back; `AppState` carries domain, tunnel and
+  both connection names.
+- **Platform**: the ResourceSet `apps` copies
+  `<< if inputs.registry >>connection-registry-<name><< else >>registry-anonymous<< end >>` into
+  the app namespace, renders the chart's domain the same way from `inputs.domain` or
+  `${SHELF_DOMAIN}`, and, through `resourcesTemplate` guarded by `<<- if inputs.tunnel >>`, runs
+  cloudflared in the app namespace. `platform/expose` is gone.
+- **`ops`**: `connections.go` lists connections with the apps that use them, saves them (a
+  Cloudflare token is verified and its account worked out before it is kept) and removes them,
+  refusing what the rules above forbid. `AddOptions.Access` carries a domain and connection names.
+  `AddApp` checks that the chosen connections exist before it writes anything, works out the
+  exposure before and after (`planExposure`: find, reuse, replace or create the app's tunnel in
+  the connection's account), applies the app, and then cleans up (`finish`: withdraw the old
+  record when the name or the account changed, publish the new one, delete a tunnel the app no
+  longer uses). `SetAccess` is `AddApp` with the artifact the app is registered with. `RemoveApp`
+  withdraws the record and deletes the tunnel after the namespace, and with it cloudflared, is gone.
+- **Order at Cloudflare.** An old tunnel is deleted only after the cluster reported cloudflared
+  gone or moved, and the client first closes the connections Cloudflare keeps open for a while
+  after cloudflared exits.
+- **Migration** in `shelf init cluster`: `registry-anonymous` is written, the shared login
+  becomes the registry connection `ghcr` and every app registered before gets it, providers from
+  before get the new inputs, and the shared tunnel is switched off with a warning naming how to
+  expose each app again. The old tunnel and its records stay in Cloudflare — shelf never stored
+  the token that made them.
+- **Admin UI**: the page `/connections` lists both kinds with the apps that use each and holds
+  the only token fields; saving and removing run as jobs like every other change, audited without
+  values. The add form and the app's "Access" section offer the connections as choices, and the
+  domain with the zones the Cloudflare connections see as suggestions.
 
 Steps:
 
-1. Cluster: objects per app, `ReadAppConfig`, migration, per-app host moves
-2. `hostcfg.AppAccess`, `ops` exposure, `SetAccess`, the Cloudflare connection cleanup
-3. CLI flags and `shelf app credentials`; `shelf init expose` removed
-4. Admin UI; golden files, including the add form, which had none
-5. Platform; smoke scripts: `apps.sh` checks the empty login, `tenant.sh` adds with
-   `--registry-login` and no Docker config, `expose.sh` becomes `just smoke-expose <app> <domain>`
+1. Cluster: connections, objects per app, `ReadAppConfig`, migration, per-app host moves
+2. `hostcfg.Connections`, `ops` connections and exposure, `SetAccess`, `Zones`, the Cloudflare
+   connection cleanup
+3. CLI: `shelf connection`, `--registry`/`--cloudflare`/`--domain`, `shelf app credentials`;
+   `shelf init expose` removed
+4. Admin UI: `/connections`, the choices on the add form and the app page; golden files,
+   including the add form, which had none
+5. Platform; smoke scripts: `apps.sh` checks the copy of `registry-anonymous`, `tenant.sh` adds
+   through a connection with no Docker config and saves the login again, `expose.sh` becomes
+   `just smoke-expose <app> <domain>` through a connection it removes at the end
 6. Level 2 in the dev cluster, then level 3 against Cloudflare
 
-**Acceptance:** an app added with `--registry-login` pulls a private artifact and private images
-with its own login and nothing else does; an app given Cloudflare access answers over HTTPS
-under its own domain through a tunnel in its own account, with cloudflared in its namespace;
-moving it to another domain or account and taking it off the internet leave no record and no
-tunnel behind; the Cloudflare token is in no Secret, no log line and no page; a cluster from
-before this phase is migrated by `init cluster` with its apps still pulling.
+**Acceptance:** an app with a registry connection pulls a private artifact and private images
+with it, and a new login for the connection keeps it pulling; an app with a Cloudflare connection
+answers over HTTPS under its own domain through a tunnel of its own in the connection's account,
+with cloudflared in its namespace; moving it to another domain or connection and taking it off
+the internet leave no record and no tunnel behind; a connection in use can neither be removed nor
+moved to another account; the Cloudflare token is in no Secret, no log line and no page; a
+cluster from before this phase is migrated by `init cluster` with its apps still pulling.
 
-Results so far (2026-09-28):
+Results so far (2026-09-29):
 
-- Level 1 is green (`just test`). The CLI tests cover every path of the exposure against a fake
-  Cloudflare API that keeps tunnels per account: first exposure, reuse on the next deploy, a new
-  domain in the same account (record moves, tunnel stays), a new account (new tunnel, old one
-  deleted), `--no-cloudflare`, a tunnel without credentials in the cluster (replaced), a machine
-  without the access (nothing touched, leftovers named), `app rm`. The server tests check that a
-  refused form never sends a token back.
+- Level 1 is green (`just test`). The CLI tests cover the connections (define, update, list,
+  refuse removal and an account change while in use, refuse a token Cloudflare rejects) and every
+  path of the exposure against a fake Cloudflare API that keeps tunnels per account: first
+  exposure, reuse on the next deploy, a new domain in the same account (record moves, tunnel
+  stays), a connection in another account (new tunnel, old one deleted), `--no-cloudflare`, a
+  tunnel without credentials in the cluster (replaced), a machine without the connection (nothing
+  touched, leftovers named), `app rm`. The server tests check the connection forms as jobs and
+  that no page, refused form or job log carries a token.
 - `.example` is reserved (RFC 2606), so `PublicDomain` refuses it, and the first version of the
   tests exposed apps under `shop.example` — which is exactly what shelf must not allow. The tests
-  now use real TLDs.
+  use real TLDs.
+- The templates in the ResourceSet are strings to kubeconform, so they were rendered offline with
+  `text/template`, the operator's `<< >>` delimiters and `missingkey=error`, with and without a
+  registry connection and a tunnel.
 - Not run yet: level 2 and 3. The dev cluster still serves `greeter-dev.tobile.ch` through the
   shared tunnel of Phase 5; the migration switches that off, and exposing the app again needs the
   Cloudflare token. That is the maintainer's call, not a side effect of a test.
@@ -1632,11 +1654,10 @@ cluster back with no keyboard attached; `shelf service uninstall` leaves no load
 plist behind; the `xattr` workaround for a tarball downloaded in a browser is documented.
 
 ### Phase 11 – The wizard
-Claim → host preflight → Colima → the cluster's domain → cluster as one job → the first app,
-with its registry login and its Cloudflare access (the zone picked from the Cloudflare API rather
-than typed), and the two files the tenant repository needs offered for copying, `<owner>` already
-filled in. Since Phase 8b, credentials belong to the app, so the wizard asks for them where the
-app is added, not as a step of the platform.
+Claim → host preflight → Colima → the cluster's domain → cluster as one job → the connections (a
+registry login and a Cloudflare token, each checked when it is entered) → the first app, choosing
+them and its domain (the zone picked from the Cloudflare API rather than typed), with the two
+files the tenant repository needs offered for copying, `<owner>` already filled in.
 
 **Acceptance:** someone who has never seen Kubernetes gets from the one-liner to a reachable
 `https://<app>.<domain>` without opening a terminal, given only a registry PAT, a Cloudflare token

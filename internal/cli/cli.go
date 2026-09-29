@@ -80,17 +80,16 @@ func (o Options) shelfHome() (string, error) {
 }
 
 // env collects what this machine supplies to an operation: where the secret backups and the
-// Cloudflare access of the apps are kept. The credentials an app is given come from flags that
-// read the environment, and only in the commands that take them.
+// Cloudflare connections are kept. Tokens come from the environment, and only in the commands
+// that define a connection.
 func (o Options) env() (ops.Env, error) {
 	home, err := o.shelfHome()
 	if err != nil {
 		return ops.Env{}, err
 	}
-	apps := filepath.Join(home, "apps")
 	return ops.Env{
-		Backup: secrets.Backup{Dir: apps},
-		Access: hostcfg.AppAccess{Dir: apps},
+		Backup:      secrets.Backup{Dir: filepath.Join(home, "apps")},
+		Connections: hostcfg.Connections{Dir: filepath.Join(home, hostcfg.ConnectionsDir)},
 	}, nil
 }
 
@@ -109,6 +108,7 @@ func New(o Options) *cobra.Command {
 		newSchemaCmd(),
 		newInitCmd(o),
 		newAppCmd(o),
+		newConnectionCmd(o),
 		newServeCmd(o),
 		newVersionCmd(o),
 	)

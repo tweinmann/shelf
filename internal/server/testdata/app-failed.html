@@ -10,10 +10,14 @@
 <header class="bar">
 <a class="brand" href="/">shelf</a>
 
+<nav class="links">
+<a href="/">Apps</a>
+<a href="/connections">Connections</a>
 <form method="post" action="/logout">
 <input type="hidden" name="csrf" value="CSRF">
 <button class="link" type="submit">Log out</button>
 </form>
+</nav>
 
 </header>
 <main>
@@ -89,37 +93,31 @@ you come forward again.</p>
 <h2>Access</h2>
 <dl class="facts">
 <dt>Domain</dt><dd>shop.ch</dd>
-<dt>Registry</dt><dd><span class="muted">no login</span></dd>
-<dt>Internet</dt><dd>its own tunnel <span class="muted">this machine does not hold the Cloudflare access</span></dd>
+<dt>Registry</dt><dd><span class="muted">no connection, pulls without a login</span></dd>
+<dt>Internet</dt><dd>club <span class="muted">this machine does not hold this connection</span></dd>
 </dl>
 <form method="post" action="/apps/shop/access">
 <input type="hidden" name="csrf" value="CSRF">
-<fieldset>
-<legend>Domain</legend>
+<label for="registry">Registry connection</label>
+<select id="registry" name="registry">
+<option value="">none: pull without a login</option>
+<option value="ghcr">ghcr (tobi)</option>
+<option value="spare">spare (tobi)</option>
+</select>
+<label for="cloudflare">Cloudflare connection</label>
+<select id="cloudflare" name="cloudflare">
+<option value="">none: take it off the internet</option>
+<option value="club" selected>club (not on this machine)</option>
+<option value="tobile">tobile (account acc-1)</option>
+</select>
 <label for="domain">A domain of its own</label>
-<input id="domain" name="domain" placeholder="shop.ch">
-</fieldset>
-<fieldset>
-<legend>Registry login</legend>
-<label for="registry-user">GitHub user</label>
-<input id="registry-user" name="registry-user" autocomplete="off">
-<label for="registry-token">Token</label>
-<input id="registry-token" name="registry-token" type="password" autocomplete="new-password">
-
-</fieldset>
-<fieldset>
-<legend>Internet</legend>
-<label for="cloudflare-token">Cloudflare API token</label>
-<input id="cloudflare-token" name="cloudflare-token" type="password" autocomplete="new-password">
-<label for="cloudflare-account">Cloudflare account ID</label>
-<input id="cloudflare-account" name="cloudflare-account" autocomplete="off">
-<label class="check"><input type="checkbox" name="remove-cloudflare"> Take it off the internet</label>
-</fieldset>
-<button type="submit" class="secondary">Change the access</button>
+<input id="domain" name="domain" value="shop.ch" placeholder="example.com" list="zones">
+<datalist id="zones"><option value="example.com"><option value="shop.ch"></datalist>
+<button type="submit" class="secondary">Change</button>
 </form>
-<p class="muted">Empty fields keep what the app has, and no token is shown again. A new domain or a
-new Cloudflare account moves the app's record, and its tunnel with it; the app is deployed again
-from the artifact above.</p>
+<p class="muted">The connections themselves are defined on the <a href="/connections">connections
+page</a>. A new domain or a Cloudflare connection in another account moves the app's record, and
+its tunnel with it; the app is deployed again from the artifact above.</p>
 </section>
 
 <section class="card">

@@ -43,6 +43,8 @@ func (f *fakeAPI) server() *httptest.Server {
 			f.reply(w, true, map[string]string{"status": "active"})
 		case r.URL.Path == "/accounts":
 			f.reply(w, true, f.accounts)
+		case r.URL.Path == "/zones" && r.URL.Query().Get("name") == "":
+			f.reply(w, true, f.zones)
 		case r.URL.Path == "/zones":
 			name := r.URL.Query().Get("name")
 			var found []Zone
@@ -292,6 +294,15 @@ func TestDeleteTunnel(t *testing.T) {
 	got, err := c.FindTunnel(context.Background(), "acc-1", "shelf")
 	if err != nil || got != nil {
 		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestZones(t *testing.T) {
+	api := &fakeAPI{zones: []Zone{{ID: "z-1", Name: "example.com"}, {ID: "z-2", Name: "shop.ch"}}}
+	c := newTestClient(t, api)
+	zones, err := c.Zones(context.Background())
+	if err != nil || len(zones) != 2 || zones[1].Name != "shop.ch" {
+		t.Fatalf("zones %+v, %v", zones, err)
 	}
 }
 

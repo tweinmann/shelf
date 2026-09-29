@@ -50,6 +50,8 @@ main { max-width: 52rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
   background: var(--card);
 }
 .brand { font-weight: 600; font-size: 1.1rem; text-decoration: none; color: var(--fg); }
+.links { display: flex; align-items: center; gap: 1rem; }
+.links a { color: var(--accent); }
 
 footer {
   max-width: 52rem;
@@ -131,7 +133,7 @@ pre {
 .crumbs { font-size: 0.9rem; color: var(--muted); }
 
 label { display: block; margin: 0.9rem 0 0.25rem; font-size: 0.9rem; color: var(--muted); }
-input {
+input, select {
   width: 100%;
   padding: 0.5rem 0.6rem;
   font: inherit;

@@ -35,6 +35,10 @@ func tunnelKey(account, name string) string { return account + "/" + name }
 
 func (f *fakeCloudflare) VerifyToken(context.Context) error { return f.verifyErr }
 
+func (f *fakeCloudflare) Zones(context.Context) ([]cloudflare.Zone, error) {
+	return []cloudflare.Zone{{ID: "zone-example.com", Name: "example.com"}, {ID: "zone-shop.ch", Name: "shop.ch"}}, nil
+}
+
 func (f *fakeCloudflare) AccountID(context.Context) (string, error) {
 	if len(f.accounts) != 1 {
 		return "", errors.New("set CF_ACCOUNT_ID")
@@ -88,14 +92,30 @@ func (f *fakeCloudflare) DeleteRecord(_ context.Context, zone, name string) (boo
 
 const greeterArtifact = "oci://ghcr.io/o/greeter:main"
 
-// cloudflareHarness is a cluster with a public domain and a Cloudflare token at hand.
+// cloudflareHarness is a cluster with a public domain and the Cloudflare connection "tobile" in
+// account acc-1. The token is gone from the environment once the connection exists: nothing but
+// `shelf connection add` may read it.
 func cloudflareHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t).public()
 	h.app = appWithSecrets("greeter")
 	h.cluster.found = true
-	h.env[envCloudflareToken] = "cf-secret-token"
+	h.defineCloudflare(t, "tobile", "cf-secret-token", "")
 	return h
+}
+
+func (h *harness) defineCloudflare(t *testing.T, name, token, account string) string {
+	t.Helper()
+	h.env[envCloudflareToken], h.env[envCloudflareAccount] = token, account
+	defer func() { delete(h.env, envCloudflareToken); delete(h.env, envCloudflareAccount) }()
+	return h.mustRun(t, "connection", "add", "cloudflare", name)
+}
+
+func (h *harness) defineRegistry(t *testing.T, name, user, token string) string {
+	t.Helper()
+	h.env[envRegistryUser], h.env[envRegistryToken] = user, token
+	defer func() { delete(h.env, envRegistryUser); delete(h.env, envRegistryToken) }()
+	return h.mustRun(t, "connection", "add", "registry", name)
 }
 
 // mustRun runs a command that has to succeed and returns what it printed. It fails the test if a
@@ -106,7 +126,7 @@ func (h *harness) mustRun(t *testing.T, args ...string) string {
 	if code != 0 {
 		t.Fatalf("%v: exit code %d: %s", args, code, stderr)
 	}
-	for _, token := range []string{"cf-secret-token", "cf-other-token", "ghcr-secret-token"} {
+	for _, token := range []string{"cf-secret-token", "cf-other-token", "ghcr-secret-token", "ghcr-new-token"} {
 		if strings.Contains(stdout+stderr, token) {
 			t.Fatalf("%v: a token appears in the output:\n%s%s", args, stdout, stderr)
 		}
@@ -122,17 +142,137 @@ func (h *harness) lastAdded(t *testing.T) cluster.AppOptions {
 	return h.cluster.added[len(h.cluster.added)-1]
 }
 
+func TestConnectionAddCloudflare(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	stdout := h.defineCloudflare(t, "tobile", "cf-secret-token", "")
+	if !strings.Contains(stdout, "Cloudflare connection tobile: created, account acc-1") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+	stored, err := h.conns.Cloudflare("tobile")
+	if err != nil || stored == nil || *stored != (hostcfg.Cloudflare{Name: "tobile", Token: "cf-secret-token", Account: "acc-1"}) {
+		t.Fatalf("stored %+v, %v", stored, err)
+	}
+	stdout = h.defineCloudflare(t, "tobile", "cf-other-token", "")
+	if !strings.Contains(stdout, "Cloudflare connection tobile: updated") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+	if stored, _ := h.conns.Cloudflare("tobile"); stored.Token != "cf-other-token" {
+		t.Errorf("the token was not replaced")
+	}
+}
+
+func TestConnectionAddErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		setup   func(*harness)
+		wantErr string
+	}{
+		{name: "no Cloudflare token", args: []string{"cloudflare", "tobile"}, wantErr: "needs CF_API_TOKEN"},
+		{
+			name: "token refused", args: []string{"cloudflare", "tobile"},
+			env:     map[string]string{envCloudflareToken: "cf-secret-token"},
+			setup:   func(h *harness) { h.api.verifyErr = errors.New("Invalid request headers (code 6003)") },
+			wantErr: "the Cloudflare token was refused",
+		},
+		{
+			name: "several accounts", args: []string{"cloudflare", "tobile"},
+			env:     map[string]string{envCloudflareToken: "cf-secret-token"},
+			setup:   func(h *harness) { h.api.accounts = []string{"acc-1", "acc-2"} },
+			wantErr: "CF_ACCOUNT_ID",
+		},
+		{
+			name: "invalid name", args: []string{"cloudflare", "To_bile"},
+			env:     map[string]string{envCloudflareToken: "cf-secret-token"},
+			wantErr: "must be a DNS label",
+		},
+		{
+			name: "no registry token", args: []string{"registry", "ghcr"},
+			env:     map[string]string{envRegistryUser: "tobi"},
+			wantErr: "needs GHCR_USERNAME and GHCR_TOKEN",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			for k, v := range tt.env {
+				h.env[k] = v
+			}
+			if tt.setup != nil {
+				tt.setup(h)
+			}
+			_, stderr, code := h.run(t, append([]string{"connection", "add"}, tt.args...)...)
+			if code == 0 || !strings.Contains(stderr, tt.wantErr) {
+				t.Errorf("exit code %d, stderr %q, want %q", code, stderr, tt.wantErr)
+			}
+			if list, _ := h.conns.CloudflareConnections(); len(list)+len(h.cluster.registries) != 0 {
+				t.Error("nothing may be stored")
+			}
+		})
+	}
+}
+
+// TestConnectionRules covers what may happen to a connection that apps use: a new token, yes;
+// another account or removal, no — and the refusal names the apps.
+func TestConnectionRules(t *testing.T) {
+	t.Parallel()
+	h := cloudflareHarness(t)
+	h.defineRegistry(t, "ghcr", "tobi", "ghcr-secret-token")
+	h.defineRegistry(t, "spare", "tobi", "ghcr-secret-token")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--registry", "ghcr", "--cloudflare", "tobile")
+
+	stdout := h.mustRun(t, "connection", "list")
+	for _, want := range []string{"ghcr", "tobi@ghcr.io", "used by greeter", "spare", "unused", "account acc-1"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("list lacks %q:\n%s", want, stdout)
+		}
+	}
+
+	for _, kind := range []string{"registry ghcr", "cloudflare tobile"} {
+		args := append([]string{"connection", "rm"}, strings.Fields(kind)...)
+		_, stderr, code := h.run(t, args...)
+		if code == 0 || !strings.Contains(stderr, "is used by greeter") {
+			t.Errorf("rm %s: exit code %d, stderr %q", kind, code, stderr)
+		}
+	}
+	h.env[envCloudflareToken], h.env[envCloudflareAccount] = "cf-other-token", "acc-2"
+	_, stderr, code := h.run(t, "connection", "add", "cloudflare", "tobile")
+	if code == 0 || !strings.Contains(stderr, "the tunnels of greeter live there") {
+		t.Errorf("moving a used connection to another account: exit code %d, stderr %q", code, stderr)
+	}
+	delete(h.env, envCloudflareToken)
+	delete(h.env, envCloudflareAccount)
+
+	// A new login for a used connection is fine, and says who pulls with it.
+	stdout = h.defineRegistry(t, "ghcr", "tobi", "ghcr-new-token")
+	if !strings.Contains(stdout, "greeter pull with it from now on") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+	h.mustRun(t, "connection", "rm", "registry", "spare")
+	if _, ok := h.cluster.registries["spare"]; ok {
+		t.Error("an unused connection was not removed")
+	}
+	if _, _, code := h.run(t, "connection", "rm", "registry", "spare"); code == 0 {
+		t.Error("removing a missing connection must fail")
+	}
+}
+
 func TestAppAddWithCloudflare(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
 
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare")
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
 	if !slices.Equal(h.api.created, []string{"acc-1/shelf-dev-greeter"}) {
-		t.Errorf("created %v; the tunnel is the app's own, in the token's account", h.api.created)
+		t.Errorf("created %v; the tunnel is the app's own, in the connection's account", h.api.created)
 	}
 	added := h.lastAdded(t)
-	if added.TunnelID != "tunnel-1" || !strings.Contains(string(added.TunnelCredentials), "tunnel-1") {
-		t.Errorf("the cluster got tunnel %q with %s", added.TunnelID, added.TunnelCredentials)
+	if added.Cloudflare != "tobile" || added.TunnelID != "tunnel-1" ||
+		!strings.Contains(string(added.TunnelCredentials), "tunnel-1") {
+		t.Errorf("the cluster got connection %q, tunnel %q with %s", added.Cloudflare, added.TunnelID, added.TunnelCredentials)
 	}
 	if added.Domain != "" {
 		t.Errorf("domain %q; without --domain the app keeps the cluster's", added.Domain)
@@ -142,28 +282,23 @@ func TestAppAddWithCloudflare(t *testing.T) {
 		t.Errorf("records %v, want %v", h.api.records, want)
 	}
 	for _, line := range []string{
+		"Cloudflare connection: tobile",
 		"Cloudflare tunnel shelf-dev-greeter: created",
 		"DNS greeter-dev.example.com points at tunnel-1.cfargotunnel.com: created",
-		"Cloudflare access: " + h.access.Path("greeter"),
 	} {
 		if !strings.Contains(stdout, line) {
 			t.Errorf("stdout lacks %q:\n%s", line, stdout)
 		}
 	}
-	stored, err := h.access.Cloudflare("greeter")
-	if err != nil || stored == nil || *stored != (hostcfg.Cloudflare{Token: "cf-secret-token", Account: "acc-1"}) {
-		t.Fatalf("stored access %+v, %v", stored, err)
-	}
 
-	// The next deploy needs no token in the environment: the access is on this machine, and the
-	// tunnel whose credentials the cluster holds is kept.
-	delete(h.env, envCloudflareToken)
+	// The next deploy keeps the connection, and the tunnel whose credentials the cluster holds.
 	stdout = h.mustRun(t, "app", "add", "greeter", greeterArtifact)
 	if len(h.api.created) != 1 || len(h.api.deleted) != 0 {
 		t.Errorf("created %v, deleted %v; the tunnel is reused", h.api.created, h.api.deleted)
 	}
-	if added := h.lastAdded(t); added.TunnelID != "tunnel-1" || added.TunnelCredentials != nil {
-		t.Errorf("tunnel %q with credentials %s; the stored ones are kept", added.TunnelID, added.TunnelCredentials)
+	if added := h.lastAdded(t); added.Cloudflare != "tobile" || added.TunnelID != "tunnel-1" || added.TunnelCredentials != nil {
+		t.Errorf("connection %q, tunnel %q with credentials %s; the stored ones are kept",
+			added.Cloudflare, added.TunnelID, added.TunnelCredentials)
 	}
 	if !strings.Contains(stdout, "Cloudflare tunnel shelf-dev-greeter: unchanged") {
 		t.Errorf("stdout:\n%s", stdout)
@@ -175,7 +310,7 @@ func TestAppAddWithADomainOfItsOwn(t *testing.T) {
 	h := cloudflareHarness(t)
 	h.cluster.settings = cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
 
-	_, stderr, code := h.run(t, "app", "add", "greeter", greeterArtifact, "--cloudflare")
+	_, stderr, code := h.run(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
 	if code == 0 || !strings.Contains(stderr, "dev.local, which is not a public domain") {
 		t.Fatalf("code %d, stderr %q", code, stderr)
 	}
@@ -183,7 +318,7 @@ func TestAppAddWithADomainOfItsOwn(t *testing.T) {
 		t.Fatal("nothing may be created for a name that cannot exist")
 	}
 
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "--domain", "shop.ch")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "shop.ch")
 	if added := h.lastAdded(t); added.Domain != "shop.ch" {
 		t.Errorf("domain %q", added.Domain)
 	}
@@ -198,7 +333,6 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 	tests := []struct {
 		name        string
 		args        []string
-		env         map[string]string
 		wantCreated []string
 		wantDeleted []string
 		wantRecords []string
@@ -213,9 +347,8 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			wantTunnel:  "tunnel-1",
 		},
 		{
-			name:        "another account",
-			args:        []string{"--cloudflare", "--domain", "other.ch"},
-			env:         map[string]string{envCloudflareToken: "cf-other-token", envCloudflareAccount: "acc-2"},
+			name:        "a connection in another account",
+			args:        []string{"--cloudflare", "club", "--domain", "other.ch"},
 			wantCreated: []string{"acc-2/shelf-dev-greeter"},
 			wantDeleted: []string{"tunnel-1"},
 			wantRecords: []string{"greeter-dev.other.ch -> tunnel-2.cfargotunnel.com in zone-other.ch"},
@@ -233,12 +366,9 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			h := cloudflareHarness(t)
-			h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare")
+			h.defineCloudflare(t, "club", "cf-other-token", "acc-2")
+			h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
 			h.api.created, h.api.records = nil, nil
-			delete(h.env, envCloudflareToken)
-			for k, v := range tt.env {
-				h.env[k] = v
-			}
 
 			stdout := h.mustRun(t, append([]string{"app", "credentials", "greeter"}, tt.args...)...)
 			if !slices.Equal(h.api.created, tt.wantCreated) {
@@ -257,12 +387,8 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			if added.TunnelID != tt.wantTunnel || added.Artifact.String() != greeterArtifact {
 				t.Errorf("the cluster got tunnel %q and artifact %s", added.TunnelID, added.Artifact)
 			}
-			stored, err := h.access.Cloudflare("greeter")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if (tt.wantTunnel == "") != (stored == nil) {
-				t.Errorf("stored access %+v after %s", stored, tt.name)
+			if stored, _ := h.conns.Cloudflare("tobile"); stored == nil {
+				t.Error("a connection belongs to no app; it stays when an app leaves it")
 			}
 			if !strings.Contains(stdout, "Changing the credentials of app greeter") {
 				t.Errorf("stdout:\n%s", stdout)
@@ -280,7 +406,7 @@ func TestAppAddReplacesATunnelWithoutCredentials(t *testing.T) {
 	h.api.tunnels = map[string]*cloudflare.Tunnel{
 		"acc-1/shelf-dev-greeter": {ID: "old-tunnel", Name: "shelf-dev-greeter"},
 	}
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare")
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
 	if !slices.Equal(h.api.deleted, []string{"old-tunnel"}) || len(h.api.created) != 1 {
 		t.Errorf("deleted %v, created %v", h.api.deleted, h.api.created)
 	}
@@ -289,30 +415,34 @@ func TestAppAddReplacesATunnelWithoutCredentials(t *testing.T) {
 	}
 }
 
-// TestAccessNotOnThisMachine covers an exposed app changed from a machine that does not hold its
-// Cloudflare access: nothing about the exposure may change, and what stays behind is named.
-func TestAccessNotOnThisMachine(t *testing.T) {
+// TestConnectionNotOnThisMachine covers an exposed app changed from a machine that does not hold
+// its Cloudflare connection: nothing about the exposure may change, and what stays behind is named.
+func TestConnectionNotOnThisMachine(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare")
-	if err := h.access.DeleteCloudflare("greeter"); err != nil {
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	if _, err := h.conns.DeleteCloudflare("tobile"); err != nil {
 		t.Fatal(err)
 	}
 	h.api.created, h.api.records = nil, nil
 
 	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact)
-	if added := h.lastAdded(t); added.TunnelID != "tunnel-1" {
-		t.Errorf("tunnel %q; an exposed app stays exposed", added.TunnelID)
+	if added := h.lastAdded(t); added.TunnelID != "tunnel-1" || added.Cloudflare != "tobile" {
+		t.Errorf("tunnel %q, connection %q; an exposed app stays exposed", added.TunnelID, added.Cloudflare)
 	}
 	if len(h.api.created)+len(h.api.deleted)+len(h.api.records)+len(h.api.deletedRecords) != 0 {
-		t.Errorf("Cloudflare was changed without the access: %+v", h.api)
+		t.Errorf("Cloudflare was changed without the connection: %+v", h.api)
 	}
-	if !strings.Contains(stdout, "does not hold its Cloudflare access") {
-		t.Errorf("stdout lacks the warning:\n%s", stdout)
+	if !strings.Contains(stdout, "shelf connection add cloudflare tobile") {
+		t.Errorf("stdout lacks the way back:\n%s", stdout)
+	}
+	listed := h.mustRun(t, "connection", "list")
+	if !strings.Contains(listed, "tobile") || !strings.Contains(listed, "not on this machine") {
+		t.Errorf("list:\n%s", listed)
 	}
 
 	stdout = h.mustRun(t, "app", "rm", "greeter", "--yes")
-	for _, want := range []string{"the record of greeter-dev.example.com", "tunnel shelf-dev-greeter"} {
+	for _, want := range []string{"the record of\ngreeter-dev.example.com", "tunnel\nshelf-dev-greeter"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
@@ -325,7 +455,7 @@ func TestAccessNotOnThisMachine(t *testing.T) {
 func TestAppRmWithdrawsTheExposure(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
 
 	stdout := h.mustRun(t, "app", "rm", "greeter", "--yes")
 	if !slices.Equal(h.api.deletedRecords, []string{"greeter-dev.example.com in zone-example.com"}) {
@@ -339,8 +469,11 @@ func TestAppRmWithdrawsTheExposure(t *testing.T) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
 	}
-	if _, err := os.Stat(h.access.Path("greeter")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the access of a removed app is kept: %v", err)
+	if stored, _ := h.conns.Cloudflare("tobile"); stored == nil {
+		t.Error("the connection went with the app")
+	}
+	if _, err := os.Stat(h.conns.CloudflarePath("tobile")); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -349,32 +482,17 @@ func TestAccessErrors(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
-		setup   func(*harness)
 		wantErr string
 	}{
 		{
-			name:    "no token",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare"},
-			setup:   func(h *harness) { delete(h.env, envCloudflareToken) },
-			wantErr: "--cloudflare needs CF_API_TOKEN",
+			name:    "unknown registry connection",
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--registry", "nope"},
+			wantErr: "there is no registry connection nope; define it with `shelf connection add registry nope`",
 		},
 		{
-			name:    "token refused",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare"},
-			setup:   func(h *harness) { h.api.verifyErr = errors.New("Invalid request headers (code 6003)") },
-			wantErr: "the Cloudflare token was refused",
-		},
-		{
-			name:    "several accounts",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare"},
-			setup:   func(h *harness) { h.api.accounts = []string{"acc-1", "acc-2"} },
-			wantErr: "CF_ACCOUNT_ID",
-		},
-		{
-			name:    "no registry token",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--registry-login"},
-			setup:   func(h *harness) { h.env[envRegistryUser] = "tobi" },
-			wantErr: "--registry-login needs GHCR_USERNAME and GHCR_TOKEN",
+			name:    "unknown Cloudflare connection",
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "nope"},
+			wantErr: "this machine holds no Cloudflare connection nope",
 		},
 		{
 			name:    "invalid domain",
@@ -388,7 +506,7 @@ func TestAccessErrors(t *testing.T) {
 		},
 		{
 			name:    "given and removed",
-			args:    []string{"app", "credentials", "greeter", "--cloudflare", "--no-cloudflare"},
+			args:    []string{"app", "credentials", "greeter", "--cloudflare", "tobile", "--no-cloudflare"},
 			wantErr: "given and removed at once",
 		},
 		{
@@ -401,9 +519,6 @@ func TestAccessErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			h := cloudflareHarness(t)
-			if tt.setup != nil {
-				tt.setup(h)
-			}
 			_, stderr, code := h.run(t, tt.args...)
 			if code == 0 || !strings.Contains(stderr, tt.wantErr) {
 				t.Errorf("exit code %d, stderr %q, want %q", code, stderr, tt.wantErr)
@@ -411,43 +526,53 @@ func TestAccessErrors(t *testing.T) {
 			if len(h.cluster.added) != 0 || len(h.api.created) != 0 {
 				t.Error("nothing may change")
 			}
-			if strings.Contains(stderr, "cf-secret-token") {
-				t.Error("the token appears in the error")
+			if _, err := os.Stat(h.backup.Path("greeter")); !errors.Is(err, os.ErrNotExist) {
+				t.Error("nothing may be written before the connections are known")
 			}
 		})
 	}
 }
 
-// TestAppRegistryLogin covers the app's own login: it is stored with the app, used to read the
-// deploy artifact from here as well, kept by the next deploy, and dropped on request.
-func TestAppRegistryLogin(t *testing.T) {
+// TestAppRegistryConnection covers the registry connection of an app: it is what the cluster
+// pulls with and what shelf reads the artifact with, it stays with the next deploy, a new login
+// for it is used from then on, and it can be dropped.
+func TestAppRegistryConnection(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.app = appWithSecrets("hello")
-	h.env[envRegistryUser], h.env[envRegistryToken] = "tobi", "ghcr-secret-token"
 	const private = "oci://ghcr.io/tweinmann/hello:main"
+	h.defineRegistry(t, "ghcr", "tobi", "ghcr-secret-token")
 
-	stdout := h.mustRun(t, "app", "add", "hello", private, "--registry-login")
-	login := h.lastAdded(t).Registry
-	if login == nil || login.Username != "tobi" || login.Token != "ghcr-secret-token" {
-		t.Fatalf("the cluster got login %+v", login)
+	stdout := h.mustRun(t, "app", "add", "hello", private, "--registry", "ghcr")
+	if got := h.lastAdded(t).Registry; got != "ghcr" {
+		t.Fatalf("the cluster got registry connection %q", got)
 	}
-	if !strings.Contains(stdout, "registry login: tobi for ghcr.io") {
+	if !strings.Contains(stdout, "registry connection: ghcr") {
 		t.Errorf("stdout:\n%s", stdout)
 	}
-	if h.pull == nil {
-		t.Fatal("the app's login was not used to read the artifact")
+	offered := func() (string, string) {
+		t.Helper()
+		if h.pull == nil {
+			t.Fatal("the connection's login was not used to read the artifact")
+		}
+		cfg, err := h.pull.Authorization()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg.Username, cfg.Password
 	}
-	cfg, err := h.pull.Authorization()
-	if err != nil || cfg.Username != "tobi" || cfg.Password != "ghcr-secret-token" {
-		t.Errorf("offered %+v, %v", cfg, err)
+	if user, token := offered(); user != "tobi" || token != "ghcr-secret-token" {
+		t.Errorf("offered %s with %s", user, token)
 	}
 
-	// Without the flag, the variables are not read, and the stored login is kept.
-	delete(h.env, envRegistryToken)
+	// A new login for the connection is what the next read uses; the app keeps the connection.
+	h.defineRegistry(t, "ghcr", "tobi", "ghcr-new-token")
 	h.mustRun(t, "app", "add", "hello", private)
-	if login := h.lastAdded(t).Registry; login == nil || login.Username != "tobi" {
-		t.Errorf("the login was not kept: %+v", login)
+	if got := h.lastAdded(t).Registry; got != "ghcr" {
+		t.Errorf("the connection was not kept: %q", got)
+	}
+	if _, token := offered(); token != "ghcr-new-token" {
+		t.Error("the new login was not used")
 	}
 
 	// A login is only offered to the registry it is for.
@@ -456,8 +581,8 @@ func TestAppRegistryLogin(t *testing.T) {
 		t.Error("the ghcr.io login was offered to another registry")
 	}
 
-	h.mustRun(t, "app", "credentials", "hello", "--no-registry-login")
-	if login := h.lastAdded(t).Registry; login != nil {
-		t.Errorf("the login was not dropped: %+v", login)
+	h.mustRun(t, "app", "credentials", "hello", "--no-registry")
+	if got := h.lastAdded(t).Registry; got != "" {
+		t.Errorf("the connection was not dropped: %q", got)
 	}
 }

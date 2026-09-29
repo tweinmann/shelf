@@ -37,11 +37,16 @@ type Platform interface {
 	App(ctx context.Context, name string) (ops.App, error)
 	Diagnose(ctx context.Context, name string) (cluster.Diagnosis, error)
 	Secrets(ctx context.Context, name string) (map[string]string, error)
+	Connections(ctx context.Context) (ops.Connections, error)
+	Zones(ctx context.Context) []string
 
 	AddApp(ctx context.Context, o ops.AddOptions, rep progress.Reporter) error
 	SetAccess(ctx context.Context, name string, access ops.Access, timeout time.Duration, rep progress.Reporter) error
 	RemoveApp(ctx context.Context, name string, timeout time.Duration, rep progress.Reporter) error
 	Redeploy(ctx context.Context, name string, timeout time.Duration, rep progress.Reporter) error
+	SaveRegistryConnection(ctx context.Context, name string, auth cluster.RegistryAuth, rep progress.Reporter) error
+	SaveCloudflareConnection(ctx context.Context, conn hostcfg.Cloudflare, rep progress.Reporter) error
+	RemoveConnection(ctx context.Context, kind, name string, rep progress.Reporter) error
 }
 
 // Options configure a server.
@@ -140,6 +145,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /apps/{name}/access", s.guard(http.HandlerFunc(s.setAccess)))
 	mux.Handle("POST /apps/{name}/delete", s.guard(http.HandlerFunc(s.deleteApp)))
 	mux.Handle("POST /apps/{name}/secrets", s.guard(http.HandlerFunc(s.revealSecrets)))
+	mux.Handle("GET /connections", s.guard(http.HandlerFunc(s.connectionsPage)))
+	mux.Handle("POST /connections/registry", s.guard(http.HandlerFunc(s.saveRegistryConnection)))
+	mux.Handle("POST /connections/cloudflare", s.guard(http.HandlerFunc(s.saveCloudflareConnection)))
+	mux.Handle("POST /connections/{kind}/{name}/delete", s.guard(http.HandlerFunc(s.removeConnection)))
 	mux.Handle("GET /jobs/{id}", s.guard(http.HandlerFunc(s.jobPage)))
 	mux.Handle("GET /api/jobs/{id}/events", s.guard(http.HandlerFunc(s.jobEvents)))
 	mux.Handle("GET /api/status", s.guard(http.HandlerFunc(s.apiStatus)))
