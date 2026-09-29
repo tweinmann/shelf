@@ -305,38 +305,38 @@ func TestAppAddWithCloudflare(t *testing.T) {
 	}
 }
 
-// TestAppAddQuickByDefault covers an app without a Cloudflare connection: it goes on the internet
-// through a quick tunnel, which needs neither Cloudflare nor a public domain, unless it is private.
-func TestAppAddQuickByDefault(t *testing.T) {
+// TestAppAddPrivateByDefault covers an app without a Cloudflare connection: it stays inside the
+// cluster unless it asks for a quick tunnel, which needs neither Cloudflare nor a public domain.
+func TestAppAddPrivateByDefault(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
 	h.cluster.settings = cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
 
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact)
-	if added := h.lastAdded(t); !added.Quick || added.TunnelID != "" || added.Cloudflare != "" {
-		t.Errorf("quick %t, tunnel %q, connection %q; a new app gets a quick tunnel", added.Quick, added.TunnelID, added.Cloudflare)
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
+	if added := h.lastAdded(t); added.Quick || added.TunnelID != "" || added.Cloudflare != "" {
+		t.Errorf("quick %t, tunnel %q, connection %q; a new app stays inside the cluster",
+			added.Quick, added.TunnelID, added.Cloudflare)
 	}
-	if !strings.Contains(stdout, "internet: a quick tunnel, as there is no Cloudflare connection") {
+
+	stdout := h.mustRun(t, "app", "add", "notes", greeterArtifact, "--quick")
+	if added := h.lastAdded(t); !added.Quick || added.TunnelID != "" {
+		t.Errorf("quick %t, tunnel %q; --quick gives the app a quick tunnel", added.Quick, added.TunnelID)
+	}
+	if !strings.Contains(stdout, "internet: a quick tunnel") {
 		t.Errorf("stdout:\n%s", stdout)
 	}
 	if len(h.api.created)+len(h.api.records)+len(h.api.zoneFor) != 0 {
 		t.Error("a quick tunnel needs nothing from the Cloudflare API")
 	}
 
-	// The next deploy keeps it.
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
+	// The next deploy keeps what the app has.
+	h.mustRun(t, "app", "add", "notes", greeterArtifact)
 	if added := h.lastAdded(t); !added.Quick {
 		t.Error("a deploy without flags keeps the quick tunnel")
 	}
-
-	// A private app stays private, and so does an app registered before quick tunnels existed.
-	h.mustRun(t, "app", "add", "notes", greeterArtifact, "--private")
-	if added := h.lastAdded(t); added.Quick || added.TunnelID != "" {
-		t.Errorf("quick %t, tunnel %q; --private keeps the app inside the cluster", added.Quick, added.TunnelID)
-	}
-	h.mustRun(t, "app", "add", "notes", greeterArtifact)
+	h.mustRun(t, "app", "credentials", "notes", "--private")
 	if added := h.lastAdded(t); added.Quick {
-		t.Error("a deploy without flags keeps a private app private")
+		t.Error("--private stops the quick tunnel")
 	}
 }
 
@@ -399,15 +399,14 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			wantQuick:   true,
 		},
 		{
-			name:        "without a connection, which is a quick tunnel",
-			args:        []string{"--no-cloudflare"},
-			wantDeleted: []string{"tunnel-1"},
-			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
-			wantQuick:   true,
-		},
-		{
 			name:        "off the internet",
 			args:        []string{"--private"},
+			wantDeleted: []string{"tunnel-1"},
+			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
+		},
+		{
+			name:        "without a connection, which is off the internet",
+			args:        []string{"--no-cloudflare"},
 			wantDeleted: []string{"tunnel-1"},
 			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
 		},
@@ -565,8 +564,8 @@ func TestAccessErrors(t *testing.T) {
 			wantErr: "or not at all; choose one",
 		},
 		{
-			name:    "private with a connection",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--private"},
+			name:    "a quick tunnel with a connection",
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--quick"},
 			wantErr: "or not at all; choose one",
 		},
 		{

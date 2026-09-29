@@ -57,7 +57,7 @@ mkdir -p "$DOCKER_CONFIG"
 
 step "shelf connection add registry tenant, then shelf app add --registry tenant"
 shelf connection add registry tenant | tee "$work/connection.txt"
-shelf app add "$app" "$artifact" --registry tenant --private | tee "$work/add.txt"
+shelf app add "$app" "$artifact" --registry tenant | tee "$work/add.txt"
 grep -q "^registry connection: tenant$" "$work/add.txt" || die "the app did not get the connection"
 grep -qF "$GHCR_TOKEN" "$work/connection.txt" "$work/add.txt" && die "the token appears in the output"
 kubectl -n shelf-system get secret connection-registry-tenant >/dev/null || die "the connection is not in the cluster"

@@ -84,7 +84,7 @@ digest="$(publish "$work/v1")"
 
 step "shelf app add"
 start=$SECONDS
-shelf app add "$app" "$artifact:main" --insecure-registry --private | tee "$work/add1.txt"
+shelf app add "$app" "$artifact:main" --insecure-registry | tee "$work/add1.txt"
 echo "add: $((SECONDS - start)) s"
 grep -q '^secret db-password: generated$' "$work/add1.txt" || die "the secret was not generated"
 password="$(sed -n 's/^ *db-password: //p' "$SHELF_HOME/apps/$app/secrets.yaml")"
@@ -109,7 +109,7 @@ routed() { curl -sS -H "Host: $app.dev.local" http://127.0.0.1:18082/ | grep -q 
 retry 30 routed || die "$app.dev.local does not reach web"
 
 step "the same artifact as a second app, with a host and a secret of its own"
-shelf app add "$copy" "$artifact:main" --insecure-registry --private >"$work/copy.txt"
+shelf app add "$copy" "$artifact:main" --insecure-registry >"$work/copy.txt"
 copy_password="$(sed -n 's/^ *db-password: //p' "$SHELF_HOME/apps/$copy/secrets.yaml")"
 [[ ${#copy_password} -ge 26 ]] || die "no password in the backup of $copy"
 [[ "$copy_password" != "$password" ]] || die "$copy got the secret value of $app"
@@ -135,7 +135,7 @@ retry 240 three_replicas || die "web was not scaled to 3 within 4 minutes"
 echo "rolled out after $((SECONDS - start)) s"
 
 step "shelf app add again changes nothing and keeps the secret"
-shelf app add "$app" "$artifact:main" --insecure-registry --private | tee "$work/add2.txt"
+shelf app add "$app" "$artifact:main" --insecure-registry | tee "$work/add2.txt"
 grep -q '^secret db-password: kept$' "$work/add2.txt" || die "the secret was not kept"
 grep -q "^ResourceSetInputProvider shelf-system/$app: unchanged$" "$work/add2.txt" \
   || die "the provider changed"
@@ -180,7 +180,7 @@ kubectl -n shelf-system get resourcesetinputprovider "$app" >/dev/null 2>&1 && d
 shelf app rm "$app" --yes >/dev/null 2>&1 && die "removing a missing app must fail"
 
 step "shelf app add restores the secret from the backup"
-shelf app add "$app" "$artifact:main" --insecure-registry --private | tee "$work/add3.txt"
+shelf app add "$app" "$artifact:main" --insecure-registry | tee "$work/add3.txt"
 grep -q '^secret db-password: restored from the backup$' "$work/add3.txt" || die "the secret was not restored"
 url="$(kubectl -n "$app" exec deploy/check -- printenv DATABASE_URL)"
 [[ "$url" == "postgres://app:$password@db:5432/hello" ]] || die "the restored password differs"

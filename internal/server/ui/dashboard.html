@@ -16,11 +16,11 @@
 <dt>Cluster</dt><dd>{{.Status.Context}} <span class="muted">{{.Status.Server}}</span></dd>
 <dt>Apps answer at</dt><dd>{{.Status.Hosts}} <span class="muted">unless they have a domain of their own</span></dd>
 <dt>Internet</dt>
-<dd>{{if .Status.Public}}each app through its own Cloudflare tunnel, once it has a Cloudflare connection;
-without one, through a quick tunnel at a temporary address
+<dd>{{if .Status.Public}}each app through its own Cloudflare tunnel, once it has a Cloudflare connection,
+or through a quick tunnel at a temporary address
 {{- else}}{{.Status.Settings.Domain}} is a reserved name, so no address can point here; an app
-reaches the internet through a quick tunnel at a temporary address, or with a domain of its own
-and a Cloudflare connection{{end}}</dd>
+reaches the internet with a domain of its own and a Cloudflare connection, or through a quick
+tunnel at a temporary address{{end}}</dd>
 </dl>
 </section>
 {{end}}

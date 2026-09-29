@@ -29,10 +29,10 @@ with; without one, it reads the registry anonymously. --cloudflare names the Clo
 connection it is exposed through: it gets a tunnel of its own in that connection's account, and
 its domain has to be a zone of that account. Connections are defined with ` + "`shelf connection add`" + `.
 
-Without a Cloudflare connection, an app is exposed through a quick tunnel: Cloudflare gives it a
-random https://<words>.trycloudflare.com address, which needs no account and no domain, but
-changes whenever the tunnel restarts, and is meant for trying things out. ` + "`shelf app status`" + `
-shows the current one. --private keeps the app inside the cluster instead.`
+Without a Cloudflare connection, an app answers inside the cluster only. --quick exposes it
+through a quick tunnel instead: Cloudflare gives it a random https://<words>.trycloudflare.com
+address, which needs no account and no domain, but changes whenever the tunnel restarts, and is
+meant for trying things out. ` + "`shelf app status`" + ` shows the current one.`
 
 // accessFlags choose what an app reaches its registry and the internet with.
 type accessFlags struct {
@@ -51,13 +51,13 @@ func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 		"a domain of the app's own: it answers at <name><host-suffix>.<domain> (default: the cluster's)")
 	fs.StringVar(&f.registry, "registry", "", "the registry connection the app pulls with")
 	fs.StringVar(&f.cloudflare, "cloudflare", "", "the Cloudflare connection the app is exposed through")
-	fs.BoolVar(&f.private, "private", false,
-		"keep the app off the internet, even without a Cloudflare connection; a tunnel it had is deleted")
+	fs.BoolVar(&f.quick, "quick", false,
+		"expose the app through a quick tunnel at a temporary trycloudflare.com address; a tunnel and a record it had are deleted")
 	if removable {
 		fs.BoolVar(&f.noRegistry, "no-registry", false, "pull without a login")
-		fs.BoolVar(&f.quick, "quick", false,
-			"expose the app through a quick tunnel; a tunnel and a record it had are deleted")
-		fs.BoolVar(&f.noCloudflare, "no-cloudflare", false, "the same as --quick")
+		fs.BoolVar(&f.private, "private", false,
+			"take the app off the internet: delete its record and its tunnel, or stop its quick tunnel")
+		fs.BoolVar(&f.noCloudflare, "no-cloudflare", false, "the same as --private")
 	}
 }
 
@@ -73,8 +73,8 @@ func (f *accessFlags) access() (ops.Access, error) {
 		Registry:       f.registry,
 		RemoveRegistry: f.noRegistry,
 		Cloudflare:     f.cloudflare,
-		Quick:          f.quick || f.noCloudflare,
-		Private:        f.private,
+		Quick:          f.quick,
+		Private:        f.private || f.noCloudflare,
 	}
 	return a, a.Check()
 }

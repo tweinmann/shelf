@@ -24,15 +24,16 @@ Registry without TLS (this cluster uses one)</label>
 {{end}}</select>
 <label for="cloudflare">Cloudflare connection</label>
 <select id="cloudflare" name="cloudflare">
-<option value="">none: a quick tunnel at a temporary trycloudflare.com address</option>
-<option value="@private"{{if eq $.Cloudflare "@private"}} selected{{end}}>none: inside the cluster only</option>
+<option value="">none: inside the cluster only</option>
+<option value="@quick"{{if eq $.Cloudflare "@quick"}} selected{{end}}>none: a quick tunnel at a temporary trycloudflare.com address</option>
 {{range .Connections.Cloudflare}}{{if not .Missing}}<option value="{{.Name}}"{{if eq .Name $.Cloudflare}} selected{{end}}>{{.Name}} (account {{.Account}})</option>
 {{end}}{{end}}</select>
 <p>Connections are defined once, on the <a href="/connections">connections page</a>, and chosen
 here. With a registry connection, the form offers the deploy artifacts and tags of its user.
 With a Cloudflare connection, the app gets a tunnel of its own in that account and a DNS record
-in its zone. Without one, it gets a quick tunnel: a random address that needs no account and no
-domain, but changes whenever the tunnel restarts, and is meant for trying things out.</p>
+in its zone. Without one, it stays inside the cluster, or gets a quick tunnel: a random address
+that needs no account and no domain, but changes whenever the tunnel restarts, and is meant for
+trying things out.</p>
 </fieldset>
 <fieldset>
 <legend>Domain</legend>

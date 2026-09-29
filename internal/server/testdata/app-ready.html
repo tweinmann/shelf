@@ -109,8 +109,8 @@ you come forward again.</p>
 </select>
 <label for="cloudflare">Cloudflare connection</label>
 <select id="cloudflare" name="cloudflare">
-<option value="">none: a quick tunnel at a temporary trycloudflare.com address</option>
-<option value="@private">none: inside the cluster only</option>
+<option value="">none: take it off the internet</option>
+<option value="@quick">none: a quick tunnel at a temporary trycloudflare.com address</option>
 <option value="club">club (not on this machine)</option>
 <option value="tobile" selected>tobile (account acc-1)</option>
 </select>
@@ -121,7 +121,7 @@ you come forward again.</p>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
 page</a>. A new domain or a Cloudflare connection in another account moves the app's record, and
 its tunnel with it; the app is deployed again from the artifact above. Without a Cloudflare
-connection, a quick tunnel gives the app a random address that changes whenever it restarts.</p>
+connection, a quick tunnel can give the app a random address that changes whenever it restarts.</p>
 </section>
 
 <section class="card">

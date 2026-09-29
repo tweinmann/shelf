@@ -926,22 +926,22 @@ func TestAccessForms(t *testing.T) {
 			name: "add without", path: "/apps",
 			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
 				"registry": {""}, "cloudflare": {""}},
-			want: ops.Access{RemoveRegistry: true, Quick: true},
-		},
-		{
-			name: "add a private app", path: "/apps",
-			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
-				"registry": {""}, "cloudflare": {"@private"}},
 			want: ops.Access{RemoveRegistry: true, Private: true},
 		},
 		{
+			name: "add with a quick tunnel", path: "/apps",
+			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+				"registry": {""}, "cloudflare": {"@quick"}},
+			want: ops.Access{RemoveRegistry: true, Quick: true},
+		},
+		{
 			name: "move an app to a quick tunnel", path: "/apps/greeter/access",
-			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {"@quick"}},
 			want: ops.Access{Registry: "ghcr", Quick: true},
 		},
 		{
 			name: "take an app off the internet", path: "/apps/greeter/access",
-			form: url.Values{"registry": {"ghcr"}, "cloudflare": {"@private"}},
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
 			want: ops.Access{Registry: "ghcr", Private: true},
 		},
 	}

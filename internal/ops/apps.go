@@ -45,10 +45,10 @@ type Access struct {
 	Cloudflare string
 	// Quick exposes the app through a quick tunnel at a random trycloudflare.com name instead:
 	// no Cloudflare connection, no domain of its own needed. A tunnel and a record the app had
-	// through a connection are deleted. A new app without a connection gets one unless Private.
+	// through a connection are deleted.
 	Quick bool
 	// Private takes the app off the internet: it answers inside the cluster only, and a tunnel
-	// and a record it had are deleted.
+	// and a record it had are deleted. It is what a new app gets when nothing else is chosen.
 	Private bool
 }
 
@@ -103,8 +103,8 @@ type AddOptions struct {
 
 // AddApp registers an app and waits until it runs: it reads the deploy artifact, works out the
 // app's secret values, writes them to the backup and to the cluster, and exposes the app through
-// its own tunnel if it has a Cloudflare connection, or else, unless it is private, through a
-// quick tunnel. Running it again updates the artifact reference, keeps every value that exists,
+// its own tunnel if it has a Cloudflare connection, or through a quick tunnel if it asks for one;
+// otherwise it stays inside the cluster. Running it again updates the artifact reference, keeps every value that exists,
 // generates the ones that were added to app.yaml since, and keeps the app's access except where
 // it is changed.
 func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Reporter) error {
@@ -117,12 +117,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		return err
 	}
 	if current == nil {
-		// A new app goes on the internet the way that needs nothing set up, unless it is told
-		// otherwise.
-		current = &cluster.AppConfig{Quick: opts.Access.exposures() == 0}
-		if current.Quick {
-			rep.Report(progress.Info("internet: a quick tunnel, as there is no Cloudflare connection"))
-		}
+		current = &cluster.AppConfig{}
 	}
 	registry, cloudflare, quick := current.Registry, current.Cloudflare, current.Quick
 	switch {

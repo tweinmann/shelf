@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Checks the Phase 8c acceptance: an app added without a Cloudflare connection is exposed through
-# a quick tunnel. shelf reports its trycloudflare.com address, the address reaches the app with
+# Checks the Phase 8d acceptance: an app added with --quick is exposed through a quick tunnel,
+# without a Cloudflare connection. shelf reports its trycloudflare.com address, the address reaches the app with
 # the app's own host name in the Host header, a restarted cloudflared gets a new address that
 # `shelf app status` shows, and --private takes the app off the internet again.
 #
@@ -69,9 +69,9 @@ flux push artifact "$artifact:main" --path "$work/v1" --source local \
   --revision "main@sha1:$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
   --insecure-registry >/dev/null 2>&1 || die "push failed"
 
-step "shelf app add without a connection gives the app a quick tunnel"
+step "shelf app add --quick gives the app a quick tunnel"
 start=$SECONDS
-shelf app add "$app" "$artifact:main" --insecure-registry | tee "$work/add.txt"
+shelf app add "$app" "$artifact:main" --insecure-registry --quick | tee "$work/add.txt"
 echo "add: $((SECONDS - start)) s"
 grep -q '^internet: a quick tunnel' "$work/add.txt" || die "the app did not get a quick tunnel"
 url="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com/' "$work/add.txt" | tail -1)"
@@ -123,5 +123,5 @@ step "shelf app rm"
 shelf app rm "$app" --yes >/dev/null
 kubectl get namespace "$app" >/dev/null 2>&1 && die "namespace $app is still there"
 
-echo "PASS: quick tunnel by default, address reported, Host rewritten to $host," \
+echo "PASS: quick tunnel on request, address reported, Host rewritten to $host," \
   "new address after a restart, --private and --quick, app rm"
