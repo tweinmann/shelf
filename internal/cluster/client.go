@@ -48,6 +48,7 @@ func classify(before, after string) Action {
 var pollInterval = 2 * time.Second
 
 type client struct {
+	cfg    *rest.Config
 	dyn    dynamic.Interface
 	mapper *restmapper.DeferredDiscoveryRESTMapper
 }
@@ -61,7 +62,7 @@ func newClient(cfg *rest.Config) (*client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &client{dyn: dyn, mapper: restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(disc))}, nil
+	return &client{cfg: cfg, dyn: dyn, mapper: restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(disc))}, nil
 }
 
 func (c *client) resource(gvk schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, error) {

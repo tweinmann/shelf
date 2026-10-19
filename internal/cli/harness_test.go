@@ -82,7 +82,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	}
 	config := &cluster.AppConfig{
 		Artifact: o.Artifact, Insecure: o.Insecure, Domain: o.Domain, Registry: o.Registry,
-		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials,
+		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials, Quick: o.Quick,
 	}
 	if previous := f.configs[o.Name]; previous != nil && o.TunnelCredentials == nil && o.TunnelID != "" {
 		config.TunnelCredentials = previous.TunnelCredentials
@@ -91,7 +91,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	// The states follow what is registered, as they do in a cluster.
 	f.states = slices.DeleteFunc(f.states, func(s cluster.AppState) bool { return s.Name == o.Name })
 	f.states = append(f.states, cluster.AppState{
-		Name: o.Name, Artifact: o.Artifact, Domain: o.Domain, Tunnel: o.TunnelID,
+		Name: o.Name, Artifact: o.Artifact, Domain: o.Domain, Tunnel: o.TunnelID, Quick: o.Quick,
 		Registry: o.Registry, Cloudflare: o.Cloudflare,
 	})
 	return nil
@@ -183,6 +183,7 @@ type harness struct {
 
 	cluster *fakeCluster
 	api     *fakeCloudflare
+	gh      *fakeGitHub
 
 	// app is what the registry serves as the deploy artifact.
 	app      *schema.App
@@ -208,12 +209,15 @@ func newHarness(t *testing.T) *harness {
 		version:    "v0.0.0-test",
 		cluster:    &fakeCluster{},
 		api:        &fakeCloudflare{accounts: []string{"acc-1"}},
+		gh:         &fakeGitHub{},
 	}
 }
 
-// public makes the cluster one whose domain exists on the internet, so its apps can be exposed.
+// public makes the cluster one that was installed, with the host suffix -dev; its apps can be
+// exposed under a domain of their own.
 func (h *harness) public() *harness {
-	h.cluster.settings = cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
+	h.cluster.settings = cluster.Settings{HostSuffix: "-dev",
+		Chart: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"}}
 	return h
 }
 
@@ -234,6 +238,10 @@ func (h *harness) options() Options {
 				Cluster:       h.cluster,
 				Fetch:         h.fetch,
 				NewCloudflare: func(string) ops.CloudflareAPI { return h.api },
+				NewGitHub: func(token string) ops.GitHubAPI {
+					h.gh.token = token
+					return h.gh
+				},
 			}
 		},
 	}

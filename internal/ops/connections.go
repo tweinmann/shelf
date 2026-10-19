@@ -230,23 +230,24 @@ func pronoun(n int) string {
 	return "them"
 }
 
-// Zones returns the zones the Cloudflare connections of this machine can see, for offering them
-// as the domain of an app. A connection whose token is refused is left out rather than failing
-// the list: it is a suggestion, and the add itself checks the domain.
-func (o *Ops) Zones(ctx context.Context) []string {
-	conns, err := o.Env.Connections.CloudflareConnections()
+// Zones returns the zones in the account of a Cloudflare connection, for offering them as the
+// domain of an app.
+func (o *Ops) Zones(ctx context.Context, name string) ([]string, error) {
+	conn, err := o.Env.Connections.Cloudflare(name)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	seen := map[string]bool{}
-	for _, c := range conns {
-		zones, err := o.NewCloudflare(c.Token).Zones(ctx)
-		if err != nil {
-			continue
-		}
-		for _, z := range zones {
-			seen[z.Name] = true
-		}
+	if conn == nil {
+		return nil, missingCloudflare(name)
 	}
-	return slices.Sorted(maps.Keys(seen))
+	zones, err := o.NewCloudflare(conn.Token).Zones(ctx, conn.Account)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(zones))
+	for _, z := range zones {
+		names = append(names, z.Name)
+	}
+	slices.Sort(names)
+	return slices.Compact(names), nil
 }

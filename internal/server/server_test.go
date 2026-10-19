@@ -53,7 +53,28 @@ func (f *fakePlatform) Connections(context.Context) (ops.Connections, error) {
 	return f.connections, nil
 }
 
-func (f *fakePlatform) Zones(context.Context) []string { return []string{"example.com", "shop.ch"} }
+// Zones, Packages and Tags answer for the connections "cf" and "ghcr"; any other name is one
+// whose list cannot be read.
+func (f *fakePlatform) Zones(_ context.Context, name string) ([]string, error) {
+	if name != "cf" {
+		return nil, errors.New("this machine holds no Cloudflare connection " + name)
+	}
+	return []string{"example.com", "shop.ch"}, nil
+}
+
+func (f *fakePlatform) Packages(_ context.Context, name string) ([]ops.Package, error) {
+	if name != "ghcr" {
+		return nil, errors.New("Bad credentials (HTTP 401)")
+	}
+	return []ops.Package{{Name: "greeter", Artifact: "oci://ghcr.io/owner/greeter", Updated: now}}, nil
+}
+
+func (f *fakePlatform) Tags(_ context.Context, name, artifact string) ([]ops.Tag, error) {
+	if name != "ghcr" || artifact != "oci://ghcr.io/owner/greeter" {
+		return nil, errors.New("no tags for " + artifact)
+	}
+	return []ops.Tag{{Name: "main", Created: now}, {Name: "sha-905acce", Created: now.Add(-time.Hour)}}, nil
+}
 
 func (f *fakePlatform) SaveRegistryConnection(_ context.Context, name string, auth cluster.RegistryAuth,
 	rep progress.Reporter) error {
@@ -166,12 +187,11 @@ func (f *fakePlatform) Diagnose(_ context.Context, name string) (cluster.Diagnos
 
 // runningPlatform is a healthy cluster with one working and one broken app.
 func runningPlatform() *fakePlatform {
-	settings := cluster.Settings{Domain: "example.com", HostSuffix: "-dev"}
+	settings := cluster.Settings{HostSuffix: "-dev"}
 	return &fakePlatform{
 		status: ops.Status{
 			Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 			Reachable: true, Installed: true, Settings: settings,
-			Hosts: "<app>-dev.example.com", Public: true,
 		},
 		apps: []ops.App{
 			{
@@ -181,6 +201,7 @@ func runningPlatform() *fakePlatform {
 					Revision: "main@" + digest,
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
+					Domain:   "example.com",
 					Tunnel:   "t-1", Registry: "ghcr", Cloudflare: "tobile",
 				},
 				Host:              "greeter-dev.example.com",
@@ -268,6 +289,46 @@ func runningPlatform() *fakePlatform {
 			}},
 		},
 	}
+}
+
+// quickPlatform adds two apps with quick tunnels to runningPlatform: one whose cloudflared
+// reported its address, and one whose tunnel has none yet.
+func quickPlatform() *fakePlatform {
+	p := runningPlatform()
+	p.apps = append(p.apps,
+		ops.App{
+			AppState: cluster.AppState{
+				Name:     "notes",
+				Artifact: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/notes", Tag: "main"},
+				Revision: "main@" + digest,
+				Deployed: now.Add(-5 * time.Minute),
+				Phase:    cluster.PhaseReady,
+				Quick:    true, QuickURL: "https://some-random-words.trycloudflare.com/",
+			},
+			Host:   "some-random-words.trycloudflare.com",
+			Public: true,
+			URL:    "https://some-random-words.trycloudflare.com/",
+			Components: []ops.Component{
+				{
+					Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
+						Ports: []cluster.Port{{Name: "main", Number: 80}}, Path: "/"},
+					Address: "some-random-words.trycloudflare.com/",
+					URL:     "https://some-random-words.trycloudflare.com/",
+				},
+			},
+		},
+		ops.App{
+			AppState: cluster.AppState{
+				Name:     "draft",
+				Artifact: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/draft", Tag: "main"},
+				Phase:    cluster.PhaseWorking,
+				Quick:    true,
+			},
+			Host: "draft.shelf.internal",
+		},
+	)
+	p.diagnoses["notes"] = p.diagnoses["greeter"]
+	return p
 }
 
 // testServer builds a server with its own directory and a fixed clock.
@@ -407,6 +468,13 @@ func TestPages(t *testing.T) {
 		golden(t, "new", get(h, "/apps/new", cookie))
 	})
 
+	t.Run("quick tunnels", func(t *testing.T) {
+		t.Parallel()
+		h, cookie := claimed(t, quickPlatform())
+		golden(t, "dashboard-quick", get(h, "/", cookie))
+		golden(t, "app-quick", get(h, "/apps/notes", cookie))
+	})
+
 	t.Run("connections", func(t *testing.T) {
 		t.Parallel()
 		h, cookie := claimed(t, running)
@@ -442,14 +510,12 @@ func TestPages(t *testing.T) {
 
 	// A development cluster answers under a reserved name such as dev.local. No record can ever
 	// point there, so the page says that instead of offering a link that cannot work.
-	t.Run("reserved domain", func(t *testing.T) {
+	t.Run("no domain", func(t *testing.T) {
 		t.Parallel()
 		local := &fakePlatform{
 			status: ops.Status{
 				Context: "k3d-shelf-dev", Server: "https://127.0.0.1:6445",
 				Reachable: true, Installed: true,
-				Settings: cluster.Settings{Domain: "dev.local"},
-				Hosts:    "<app>.dev.local",
 			},
 			apps: []ops.App{{
 				AppState: cluster.AppState{
@@ -459,23 +525,29 @@ func TestPages(t *testing.T) {
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
 				},
-				Host: "greeter.dev.local",
+				Host: "greeter.shelf.internal",
 				Components: []ops.Component{{
 					Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,
 						Ports: []cluster.Port{{Name: "main", Number: 80}}, Path: "/"},
-					Address: "greeter.dev.local/",
+					Address: "greeter.shelf.internal/",
 				}},
 			}},
+			diagnoses: runningPlatform().diagnoses,
 		}
 		h, cookie := claimed(t, local)
 		rec := get(h, "/", cookie)
-		if strings.Contains(rec.Body.String(), `href="https://greeter.dev.local`) {
+		if strings.Contains(rec.Body.String(), `href="https://greeter.shelf.internal`) {
 			t.Error("the page offers a link to a name that cannot exist")
 		}
-		if page := get(h, "/apps/greeter", cookie); strings.Contains(page.Body.String(), `href="https://greeter.dev.local`) {
+		page := get(h, "/apps/greeter", cookie)
+		if page.Code != http.StatusOK {
+			t.Fatalf("status %d", page.Code)
+		}
+		if strings.Contains(page.Body.String(), `href="https://greeter.shelf.internal`) {
 			t.Error("a component offers a link to a name that cannot exist")
 		}
-		golden(t, "dashboard-reserved-domain", rec)
+		golden(t, "dashboard-no-domain", rec)
+		golden(t, "app-no-domain", page)
 	})
 
 	t.Run("platform not installed", func(t *testing.T) {
@@ -724,6 +796,41 @@ func TestAPIStatus(t *testing.T) {
 	}
 }
 
+// TestChoicesAPI checks the lists a form fetches once a connection is chosen: the items, or the
+// reason they cannot be read, and never without a session.
+func TestChoicesAPI(t *testing.T) {
+	t.Parallel()
+	h, cookie := claimed(t, runningPlatform())
+	tests := []struct {
+		path string
+		code int
+		want string
+	}{
+		{"/api/connections/registry/ghcr/packages", http.StatusOK,
+			`{"items":[{"name":"greeter","artifact":"oci://ghcr.io/owner/greeter","updated":"2026-09-20T12:00:00Z"}]}`},
+		{"/api/connections/registry/other/packages", http.StatusBadGateway,
+			`{"items":[],"error":"Bad credentials (HTTP 401)"}`},
+		{"/api/connections/registry/ghcr/tags?artifact=" + url.QueryEscape("oci://ghcr.io/owner/greeter"), http.StatusOK,
+			`{"items":[{"name":"main","created":"2026-09-20T12:00:00Z"},{"name":"sha-905acce","created":"2026-09-20T11:00:00Z"}]}`},
+		{"/api/connections/registry/ghcr/tags", http.StatusBadGateway, `{"items":[],"error":"no tags for "}`},
+		{"/api/connections/cloudflare/cf/zones", http.StatusOK, `{"items":["example.com","shop.ch"]}`},
+		{"/api/connections/cloudflare/gone/zones", http.StatusBadGateway,
+			`{"items":[],"error":"this machine holds no Cloudflare connection gone"}`},
+	}
+	for _, tt := range tests {
+		rec := get(h, tt.path, cookie)
+		if rec.Code != tt.code || strings.TrimSpace(rec.Body.String()) != tt.want {
+			t.Errorf("%s: %d %s\nwant %d %s", tt.path, rec.Code, rec.Body, tt.code, tt.want)
+		}
+		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Errorf("%s: content type %q", tt.path, got)
+		}
+		if rec := get(h, tt.path, nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without a session: %d", tt.path, rec.Code)
+		}
+	}
+}
+
 // TestCrossOriginPost checks that a form on another site cannot act as the logged-in user.
 func TestCrossOriginPost(t *testing.T) {
 	t.Parallel()
@@ -822,12 +929,23 @@ func TestAccessForms(t *testing.T) {
 			name: "add without", path: "/apps",
 			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
 				"registry": {""}, "cloudflare": {""}},
-			want: ops.Access{RemoveRegistry: true, RemoveCloudflare: true},
+			want: ops.Access{RemoveRegistry: true, Private: true},
+		},
+		{
+			name: "add with a quick tunnel", path: "/apps",
+			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
+				"registry": {""}, "cloudflare": {"@quick"}},
+			want: ops.Access{RemoveRegistry: true, Quick: true},
+		},
+		{
+			name: "move an app to a quick tunnel", path: "/apps/greeter/access",
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {"@quick"}},
+			want: ops.Access{Registry: "ghcr", Quick: true},
 		},
 		{
 			name: "take an app off the internet", path: "/apps/greeter/access",
 			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
-			want: ops.Access{Registry: "ghcr", RemoveCloudflare: true},
+			want: ops.Access{Registry: "ghcr", Private: true},
 		},
 	}
 	for _, tt := range tests {

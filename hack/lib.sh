@@ -31,26 +31,13 @@ require_devcontainer() {
     || die "docker talks to daemon '$daemon', not to the one in this container ($(hostname))"
 }
 
-# The domain the smoke tests install. They pass it to `shelf init cluster`, so a cluster that
-# serves anything else would be moved to it.
-readonly SHELF_DEV_DOMAIN=dev.local
-
-# Refuse to run against a cluster that serves a different domain. The smoke tests install
-# $SHELF_DEV_DOMAIN, which would take every app off the name it answers under and leave its DNS
-# records pointing at nothing. shelf itself refuses that without --move-hosts; this says so
-# before the test has done anything at all.
-require_dev_domain() {
-  local domain suffix
-  domain="$(kubectl -n flux-system get configmap shelf-config \
-    -o jsonpath='{.data.SHELF_DOMAIN}' 2>/dev/null || true)"
-  suffix="$(kubectl -n flux-system get configmap shelf-config \
-    -o jsonpath='{.data.SHELF_HOST_SUFFIX}' 2>/dev/null || true)"
-  if [[ -z "$domain" ]] || [[ "$domain" == "$SHELF_DEV_DOMAIN" && -z "$suffix" ]]; then
-    return 0
-  fi
-  die "this cluster serves <app>$suffix.$domain, and this test installs <app>.$SHELF_DEV_DOMAIN.
-Run 'just cluster-reset' to test on a fresh cluster, or restore the domain afterwards with
-  shelf init cluster --domain $domain --host-suffix '$suffix' --move-hosts ..."
+# cluster_host_suffix prints the host suffix the cluster was installed with, empty for none or
+# for a cluster shelf has not set up. The smoke tests install the platform again with it: a
+# different suffix would give every app with a domain another name, which shelf refuses without
+# --move-hosts.
+cluster_host_suffix() {
+  kubectl -n flux-system get configmap shelf-config \
+    -o jsonpath='{.data.SHELF_HOST_SUFFIX}' 2>/dev/null || true
 }
 
 # create_namespace <name>: creates a namespace and waits for its default ServiceAccount, which

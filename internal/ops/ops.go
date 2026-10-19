@@ -177,6 +177,7 @@ type Ops struct {
 	Cluster       Cluster
 	Fetch         FetchFunc
 	NewCloudflare func(token string) CloudflareAPI
+	NewGitHub     func(token string) GitHubAPI
 }
 
 // New returns the operations against a cluster, talking to the real world.
@@ -187,6 +188,7 @@ func New(t Target, env Env) *Ops {
 		Cluster:       liveCluster{},
 		Fetch:         deploy.Fetch,
 		NewCloudflare: liveCloudflare,
+		NewGitHub:     liveGitHub,
 	}
 }
 

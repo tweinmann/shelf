@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -35,13 +36,25 @@ const (
 	Unchanged Action = "unchanged"
 )
 
-// Zones returns the zones the token can see, for offering them as the domain of an app.
-func (c *Client) Zones(ctx context.Context) ([]Zone, error) {
+// Zones returns the zones of an account the token can see, for offering them as the domain of
+// an app. An empty account means every account the token reaches.
+func (c *Client) Zones(ctx context.Context, account string) ([]Zone, error) {
 	var zones []Zone
-	if err := c.do(ctx, http.MethodGet, "/zones?per_page=50", nil, &zones); err != nil {
-		return nil, err
+	for page := 1; ; page++ {
+		query := url.Values{"per_page": {"50"}, "page": {strconv.Itoa(page)}}
+		if account != "" {
+			query.Set("account.id", account)
+		}
+		var batch []Zone
+		pages, err := c.call(ctx, http.MethodGet, "/zones?"+query.Encode(), nil, &batch)
+		if err != nil {
+			return nil, err
+		}
+		zones = append(zones, batch...)
+		if page >= pages || len(batch) == 0 {
+			return zones, nil
+		}
 	}
-	return zones, nil
 }
 
 // ZoneFor returns the zone that holds name: the zone of the name itself, or of one of its parent

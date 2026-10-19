@@ -86,7 +86,7 @@ func (s *Server) showApp(w http.ResponseWriter, r *http.Request, name string,
 		return
 	}
 	view.SecretNames = slices.Sorted(maps.Keys(stored))
-	view.Connections, view.Zones = s.choices(ctx)
+	view.Connections = s.connections(ctx)
 	status := http.StatusOK
 	if secretError != "" {
 		status = http.StatusUnauthorized
@@ -115,6 +115,45 @@ func (s *Server) apiStatus(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(body)
+}
+
+// apiPackages, apiTags and apiZones fill the choices of a form once a connection is chosen. A
+// list that cannot be read answers with the reason, and the form falls back to a text field.
+// They exist for the pages of the admin UI and are not a stable interface.
+func (s *Server) apiPackages(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := withTimeout(r)
+	defer cancel()
+	pkgs, err := s.platform.Packages(ctx, r.PathValue("name"))
+	writeChoices(w, pkgs, err)
+}
+
+func (s *Server) apiTags(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := withTimeout(r)
+	defer cancel()
+	tags, err := s.platform.Tags(ctx, r.PathValue("name"), r.URL.Query().Get("artifact"))
+	writeChoices(w, tags, err)
+}
+
+func (s *Server) apiZones(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := withTimeout(r)
+	defer cancel()
+	zones, err := s.platform.Zones(ctx, r.PathValue("name"))
+	writeChoices(w, zones, err)
+}
+
+func writeChoices[T any](w http.ResponseWriter, items []T, err error) {
+	body := struct {
+		Items []T    `json:"items"`
+		Error string `json:"error,omitempty"`
+	}{Items: items}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err != nil {
+		body.Items, body.Error = []T{}, err.Error()
+		w.WriteHeader(http.StatusBadGateway)
+	} else if body.Items == nil {
+		body.Items = []T{}
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // setupForm is the page a fresh instance shows, and the only one it shows.

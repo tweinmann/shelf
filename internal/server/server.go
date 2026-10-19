@@ -38,7 +38,10 @@ type Platform interface {
 	Diagnose(ctx context.Context, name string) (cluster.Diagnosis, error)
 	Secrets(ctx context.Context, name string) (map[string]string, error)
 	Connections(ctx context.Context) (ops.Connections, error)
-	Zones(ctx context.Context) []string
+	// Packages, Tags and Zones are what a connection offers to choose from in a form.
+	Packages(ctx context.Context, registry string) ([]ops.Package, error)
+	Tags(ctx context.Context, registry, artifact string) ([]ops.Tag, error)
+	Zones(ctx context.Context, cloudflare string) ([]string, error)
 
 	AddApp(ctx context.Context, o ops.AddOptions, rep progress.Reporter) error
 	SetAccess(ctx context.Context, name string, access ops.Access, timeout time.Duration, rep progress.Reporter) error
@@ -152,6 +155,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /jobs/{id}", s.guard(http.HandlerFunc(s.jobPage)))
 	mux.Handle("GET /api/jobs/{id}/events", s.guard(http.HandlerFunc(s.jobEvents)))
 	mux.Handle("GET /api/status", s.guard(http.HandlerFunc(s.apiStatus)))
+	mux.Handle("GET /api/connections/registry/{name}/packages", s.guard(http.HandlerFunc(s.apiPackages)))
+	mux.Handle("GET /api/connections/registry/{name}/tags", s.guard(http.HandlerFunc(s.apiTags)))
+	mux.Handle("GET /api/connections/cloudflare/{name}/zones", s.guard(http.HandlerFunc(s.apiZones)))
 
 	// Cross-origin protection refuses a state-changing request that a different site sent, by
 	// looking at Sec-Fetch-Site and Origin. It is the outermost layer, so it also covers a

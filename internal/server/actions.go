@@ -47,12 +47,10 @@ func (s *Server) newAppForm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := withTimeout(r)
 	defer cancel()
 	status := s.platform.Status(ctx)
-	conns, zones := s.choices(ctx)
 	s.render(w, "new.html", http.StatusOK, newAppView{
 		base:        s.base(r, "Add an app"),
 		Status:      status,
-		Connections: conns,
-		Zones:       zones,
+		Connections: s.connections(ctx),
 		Insecure:    status.Settings.InsecureRegistry,
 	})
 }
@@ -92,16 +90,28 @@ func (s *Server) addApp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// quickChoice is the value of the Cloudflare choice that exposes an app through a quick tunnel.
+// It cannot be the name of a connection, which is a DNS label.
+const quickChoice = "@quick"
+
 // accessFromForm reads what a form chooses for an app: a domain, and a connection of each kind.
-// The choice of a connection is the whole of it, so "none" takes one away. An empty domain keeps
-// the one the app has.
+// The choice of a connection is the whole of it, so "none" takes one away: without a Cloudflare
+// connection the app stays inside the cluster, unless a quick tunnel is chosen. An empty domain
+// keeps the one the app has.
 func accessFromForm(r *http.Request) (ops.Access, error) {
 	a := ops.Access{
-		Domain:     strings.TrimSpace(r.PostFormValue("domain")),
-		Registry:   r.PostFormValue("registry"),
-		Cloudflare: r.PostFormValue("cloudflare"),
+		Domain:   strings.TrimSpace(r.PostFormValue("domain")),
+		Registry: r.PostFormValue("registry"),
 	}
-	a.RemoveRegistry, a.RemoveCloudflare = a.Registry == "", a.Cloudflare == ""
+	a.RemoveRegistry = a.Registry == ""
+	switch choice := r.PostFormValue("cloudflare"); choice {
+	case "":
+		a.Private = true
+	case quickChoice:
+		a.Quick = true
+	default:
+		a.Cloudflare = choice
+	}
 	return a, a.Check()
 }
 
@@ -111,19 +121,20 @@ func (s *Server) failedForm(w http.ResponseWriter, r *http.Request, form newAppV
 	defer cancel()
 	form.base = s.base(r, "Add an app")
 	form.Status = s.platform.Status(ctx)
-	form.Connections, form.Zones = s.choices(ctx)
+	form.Connections = s.connections(ctx)
 	form.Error = err.Error()
 	s.render(w, "new.html", http.StatusBadRequest, form)
 }
 
-// choices are the connections and zones a form offers. A cluster that cannot list them leaves
-// the lists empty; the operation itself says what is wrong.
-func (s *Server) choices(ctx context.Context) (ops.Connections, []string) {
+// connections are what a form offers to choose from. A cluster that cannot list them leaves
+// the lists empty; the operation itself says what is wrong. What each connection offers in turn
+// — packages, tags, zones — the page fetches from the api routes below once one is chosen.
+func (s *Server) connections(ctx context.Context) ops.Connections {
 	conns, err := s.platform.Connections(ctx)
 	if err != nil {
-		return ops.Connections{}, nil
+		return ops.Connections{}
 	}
-	return conns, s.platform.Zones(ctx)
+	return conns
 }
 
 // setAccess changes an app's domain and connections, and deploys it again from the artifact it

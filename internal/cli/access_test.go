@@ -35,7 +35,7 @@ func tunnelKey(account, name string) string { return account + "/" + name }
 
 func (f *fakeCloudflare) VerifyToken(context.Context) error { return f.verifyErr }
 
-func (f *fakeCloudflare) Zones(context.Context) ([]cloudflare.Zone, error) {
+func (f *fakeCloudflare) Zones(context.Context, string) ([]cloudflare.Zone, error) {
 	return []cloudflare.Zone{{ID: "zone-example.com", Name: "example.com"}, {ID: "zone-shop.ch", Name: "shop.ch"}}, nil
 }
 
@@ -223,7 +223,7 @@ func TestConnectionRules(t *testing.T) {
 	h := cloudflareHarness(t)
 	h.defineRegistry(t, "ghcr", "tobi", "ghcr-secret-token")
 	h.defineRegistry(t, "spare", "tobi", "ghcr-secret-token")
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--registry", "ghcr", "--cloudflare", "tobile")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--registry", "ghcr", "--cloudflare", "tobile", "--domain", "example.com")
 
 	stdout := h.mustRun(t, "connection", "list")
 	for _, want := range []string{"ghcr", "tobi@ghcr.io", "used by greeter", "spare", "unused", "account acc-1"} {
@@ -265,7 +265,7 @@ func TestAppAddWithCloudflare(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
 
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 	if !slices.Equal(h.api.created, []string{"acc-1/shelf-dev-greeter"}) {
 		t.Errorf("created %v; the tunnel is the app's own, in the connection's account", h.api.created)
 	}
@@ -274,8 +274,8 @@ func TestAppAddWithCloudflare(t *testing.T) {
 		!strings.Contains(string(added.TunnelCredentials), "tunnel-1") {
 		t.Errorf("the cluster got connection %q, tunnel %q with %s", added.Cloudflare, added.TunnelID, added.TunnelCredentials)
 	}
-	if added.Domain != "" {
-		t.Errorf("domain %q; without --domain the app keeps the cluster's", added.Domain)
+	if added.Domain != "example.com" {
+		t.Errorf("domain %q", added.Domain)
 	}
 	want := []string{"greeter-dev.example.com -> tunnel-1.cfargotunnel.com in zone-example.com"}
 	if !slices.Equal(h.api.records, want) {
@@ -291,7 +291,8 @@ func TestAppAddWithCloudflare(t *testing.T) {
 		}
 	}
 
-	// The next deploy keeps the connection, and the tunnel whose credentials the cluster holds.
+	// The next deploy keeps the connection, the domain, and the tunnel whose credentials the
+	// cluster holds.
 	stdout = h.mustRun(t, "app", "add", "greeter", greeterArtifact)
 	if len(h.api.created) != 1 || len(h.api.deleted) != 0 {
 		t.Errorf("created %v, deleted %v; the tunnel is reused", h.api.created, h.api.deleted)
@@ -305,17 +306,61 @@ func TestAppAddWithCloudflare(t *testing.T) {
 	}
 }
 
+// TestAppAddPrivateByDefault covers an app without a Cloudflare connection: it stays inside the
+// cluster unless it asks for a quick tunnel, which needs neither Cloudflare nor a public domain.
+func TestAppAddPrivateByDefault(t *testing.T) {
+	t.Parallel()
+	h := cloudflareHarness(t)
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
+	if added := h.lastAdded(t); added.Quick || added.TunnelID != "" || added.Cloudflare != "" {
+		t.Errorf("quick %t, tunnel %q, connection %q; a new app stays inside the cluster",
+			added.Quick, added.TunnelID, added.Cloudflare)
+	}
+
+	stdout := h.mustRun(t, "app", "add", "notes", greeterArtifact, "--quick")
+	if added := h.lastAdded(t); !added.Quick || added.TunnelID != "" {
+		t.Errorf("quick %t, tunnel %q; --quick gives the app a quick tunnel", added.Quick, added.TunnelID)
+	}
+	if !strings.Contains(stdout, "internet: a quick tunnel") {
+		t.Errorf("stdout:\n%s", stdout)
+	}
+	if len(h.api.created)+len(h.api.records)+len(h.api.zoneFor) != 0 {
+		t.Error("a quick tunnel needs nothing from the Cloudflare API")
+	}
+
+	// The next deploy keeps what the app has.
+	h.mustRun(t, "app", "add", "notes", greeterArtifact)
+	if added := h.lastAdded(t); !added.Quick {
+		t.Error("a deploy without flags keeps the quick tunnel")
+	}
+	h.mustRun(t, "app", "credentials", "notes", "--private")
+	if added := h.lastAdded(t); added.Quick {
+		t.Error("--private stops the quick tunnel")
+	}
+}
+
 func TestAppAddWithADomainOfItsOwn(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.cluster.settings = cluster.Settings{Domain: "dev.local", HostSuffix: "-dev"}
 
-	_, stderr, code := h.run(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
-	if code == 0 || !strings.Contains(stderr, "dev.local, which is not a public domain") {
-		t.Fatalf("code %d, stderr %q", code, stderr)
-	}
-	if len(h.api.created) != 0 || len(h.cluster.added) != 0 {
-		t.Fatal("nothing may be created for a name that cannot exist")
+	for domain, wantErr := range map[string]string{
+		"":          "greeter needs a domain of its own to be exposed through the Cloudflare connection tobile",
+		"dev.local": "dev.local, which is not a public domain",
+	} {
+		args := []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile"}
+		if domain != "" {
+			args = append(args, "--domain", domain)
+		}
+		_, stderr, code := h.run(t, args...)
+		if code == 0 || !strings.Contains(stderr, wantErr) {
+			t.Fatalf("domain %q: code %d, stderr %q", domain, code, stderr)
+		}
+		if len(h.api.created) != 0 || len(h.cluster.added) != 0 {
+			t.Fatal("nothing may be created for a name that cannot exist")
+		}
+		if _, err := os.Stat(h.backup.Path("greeter")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("nothing may be written before the domain is known")
+		}
 	}
 
 	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "shop.ch")
@@ -338,6 +383,7 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 		wantRecords []string
 		wantGone    []string
 		wantTunnel  string
+		wantQuick   bool
 	}{
 		{
 			name:        "another domain in the same account",
@@ -356,7 +402,20 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			wantTunnel:  "tunnel-2",
 		},
 		{
+			name:        "to a quick tunnel",
+			args:        []string{"--quick"},
+			wantDeleted: []string{"tunnel-1"},
+			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
+			wantQuick:   true,
+		},
+		{
 			name:        "off the internet",
+			args:        []string{"--private"},
+			wantDeleted: []string{"tunnel-1"},
+			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
+		},
+		{
+			name:        "without a connection, which is off the internet",
 			args:        []string{"--no-cloudflare"},
 			wantDeleted: []string{"tunnel-1"},
 			wantGone:    []string{"greeter-dev.example.com in zone-example.com"},
@@ -367,7 +426,7 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 			t.Parallel()
 			h := cloudflareHarness(t)
 			h.defineCloudflare(t, "club", "cf-other-token", "acc-2")
-			h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+			h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 			h.api.created, h.api.records = nil, nil
 
 			stdout := h.mustRun(t, append([]string{"app", "credentials", "greeter"}, tt.args...)...)
@@ -384,8 +443,8 @@ func TestAppCredentialsMovesTheApp(t *testing.T) {
 				t.Errorf("deleted records %v, want %v", h.api.deletedRecords, tt.wantGone)
 			}
 			added := h.lastAdded(t)
-			if added.TunnelID != tt.wantTunnel || added.Artifact.String() != greeterArtifact {
-				t.Errorf("the cluster got tunnel %q and artifact %s", added.TunnelID, added.Artifact)
+			if added.TunnelID != tt.wantTunnel || added.Quick != tt.wantQuick || added.Artifact.String() != greeterArtifact {
+				t.Errorf("the cluster got tunnel %q, quick %t and artifact %s", added.TunnelID, added.Quick, added.Artifact)
 			}
 			if stored, _ := h.conns.Cloudflare("tobile"); stored == nil {
 				t.Error("a connection belongs to no app; it stays when an app leaves it")
@@ -406,7 +465,7 @@ func TestAppAddReplacesATunnelWithoutCredentials(t *testing.T) {
 	h.api.tunnels = map[string]*cloudflare.Tunnel{
 		"acc-1/shelf-dev-greeter": {ID: "old-tunnel", Name: "shelf-dev-greeter"},
 	}
-	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	stdout := h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 	if !slices.Equal(h.api.deleted, []string{"old-tunnel"}) || len(h.api.created) != 1 {
 		t.Errorf("deleted %v, created %v", h.api.deleted, h.api.created)
 	}
@@ -420,7 +479,7 @@ func TestAppAddReplacesATunnelWithoutCredentials(t *testing.T) {
 func TestConnectionNotOnThisMachine(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 	if _, err := h.conns.DeleteCloudflare("tobile"); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +514,7 @@ func TestConnectionNotOnThisMachine(t *testing.T) {
 func TestAppRmWithdrawsTheExposure(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
 
 	stdout := h.mustRun(t, "app", "rm", "greeter", "--yes")
 	if !slices.Equal(h.api.deletedRecords, []string{"greeter-dev.example.com in zone-example.com"}) {
@@ -491,7 +550,7 @@ func TestAccessErrors(t *testing.T) {
 		},
 		{
 			name:    "unknown Cloudflare connection",
-			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "nope"},
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "nope", "--domain", "example.com"},
 			wantErr: "this machine holds no Cloudflare connection nope",
 		},
 		{
@@ -505,9 +564,19 @@ func TestAccessErrors(t *testing.T) {
 			wantErr: "nothing to change",
 		},
 		{
-			name:    "given and removed",
+			name:    "a connection and a quick tunnel",
 			args:    []string{"app", "credentials", "greeter", "--cloudflare", "tobile", "--no-cloudflare"},
-			wantErr: "given and removed at once",
+			wantErr: "or not at all; choose one",
+		},
+		{
+			name:    "a quick tunnel and private",
+			args:    []string{"app", "credentials", "greeter", "--quick", "--private"},
+			wantErr: "or not at all; choose one",
+		},
+		{
+			name:    "a quick tunnel with a connection",
+			args:    []string{"app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--quick"},
+			wantErr: "or not at all; choose one",
 		},
 		{
 			name:    "unknown app",

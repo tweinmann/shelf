@@ -35,7 +35,8 @@ and never goes into the cluster, so only this machine can expose apps through it
 	}
 	add := &cobra.Command{Use: "add", Short: "Define a connection, or give one a new token"}
 	add.AddCommand(newConnectionAddRegistryCmd(o), newConnectionAddCloudflareCmd(o))
-	cmd.AddCommand(add, newConnectionListCmd(o), newConnectionRmCmd(o))
+	cmd.AddCommand(add, newConnectionListCmd(o), newConnectionRmCmd(o),
+		newConnectionPackagesCmd(o), newConnectionZonesCmd(o))
 	return cmd
 }
 

@@ -9,7 +9,6 @@
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
-require_dev_domain
 
 app="${1:-}"
 artifact="${2:-}"
@@ -48,7 +47,7 @@ step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --domain dev.local --insecure-registry \
+shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" | grep -E 'Platform'
 # No Docker config at all: shelf has to read the artifact with the app's own login.
@@ -74,7 +73,7 @@ sleep 2
 # mistaken for the new version.
 answer() {
   local body code
-  body="$(curl -sS -m 5 -w '\n%{http_code}' -H "Host: $app.dev.local" http://127.0.0.1:18083/ 2>/dev/null)" || return 1
+  body="$(curl -sS -m 5 -w '\n%{http_code}' -H "Host: $app.shelf.internal" http://127.0.0.1:18083/ 2>/dev/null)" || return 1
   code="${body##*$'\n'}"
   [[ "$code" == 200 ]] || return 1
   head -1 <<<"$body"

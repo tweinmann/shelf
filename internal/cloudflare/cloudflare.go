@@ -62,6 +62,11 @@ type response struct {
 	Success bool            `json:"success"`
 	Errors  []apiError      `json:"errors"`
 	Result  json.RawMessage `json:"result"`
+	// ResultInfo is set on the replies of list calls.
+	ResultInfo *struct {
+		Page       int `json:"page"`
+		TotalPages int `json:"total_pages"`
+	} `json:"result_info"`
 }
 
 type apiError struct {
@@ -73,11 +78,18 @@ func (e apiError) String() string { return fmt.Sprintf("%s (code %d)", e.Message
 
 // do sends a request and unmarshals result, or returns what Cloudflare complained about.
 func (c *Client) do(ctx context.Context, method, path string, body, result any) error {
+	_, err := c.call(ctx, method, path, body, result)
+	return err
+}
+
+// call is do that also returns the number of pages a list call has, 1 when the reply does not
+// say.
+func (c *Client) call(ctx context.Context, method, path string, body, result any) (int, error) {
 	var payload io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		payload = bytes.NewReader(data)
 	}
@@ -87,7 +99,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, result any) 
 	}
 	req, err := http.NewRequestWithContext(ctx, method, base+path, payload)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", "application/json")
@@ -97,16 +109,16 @@ func (c *Client) do(ctx context.Context, method, path string, body, result any) 
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		return 0, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var env response
 	if err := json.Unmarshal(data, &env); err != nil {
-		return fmt.Errorf("%s %s: unexpected reply (HTTP %d)", method, path, resp.StatusCode)
+		return 0, fmt.Errorf("%s %s: unexpected reply (HTTP %d)", method, path, resp.StatusCode)
 	}
 	if !env.Success {
 		var msgs []string
@@ -116,12 +128,16 @@ func (c *Client) do(ctx context.Context, method, path string, body, result any) 
 		if len(msgs) == 0 {
 			msgs = []string{fmt.Sprintf("HTTP %d", resp.StatusCode)}
 		}
-		return fmt.Errorf("%s %s: %s", method, path, strings.Join(msgs, "; "))
+		return 0, fmt.Errorf("%s %s: %s", method, path, strings.Join(msgs, "; "))
+	}
+	pages := 1
+	if env.ResultInfo != nil && env.ResultInfo.TotalPages > 1 {
+		pages = env.ResultInfo.TotalPages
 	}
 	if result == nil {
-		return nil
+		return pages, nil
 	}
-	return json.Unmarshal(env.Result, result)
+	return pages, json.Unmarshal(env.Result, result)
 }
 
 // VerifyToken checks that the token itself is valid, which tells a wrong kind of credential

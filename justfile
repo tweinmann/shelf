@@ -72,7 +72,7 @@ chart-push:
 
 # Install Flux and the platform into the dev cluster from the dev registry
 init-cluster *flags:
-    go run ./cmd/shelf init cluster --domain dev.local --insecure-registry \
+    go run ./cmd/shelf init cluster --insecure-registry \
       --platform oci://shelf-registry:5000/shelf/platform:dev \
       --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
 
@@ -100,6 +100,10 @@ smoke-apps:
 # Phase 8b acceptance: expose an app through its own Cloudflare tunnel (asks for the API token)
 smoke-expose app domain:
     hack/smoke/expose.sh {{app}} {{domain}}
+
+# Phase 8c acceptance: an app without a Cloudflare connection gets a quick tunnel (needs network)
+smoke-quick app="hello-quick":
+    hack/smoke/quick.sh {{app}}
 
 # Phase 4 acceptance with a real tenant repository and GHCR (asks for the GHCR login)
 smoke-tenant app artifact:

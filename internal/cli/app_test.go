@@ -194,8 +194,8 @@ func TestAppRm(t *testing.T) {
 }
 
 // TestAppAddWithoutCloudflare checks that an app without a Cloudflare connection runs without
-// being published, even under a public domain and with a connection at hand: exposure is chosen
-// per app, not given to the cluster.
+// being published, even with a connection at hand: exposure is chosen per app, not given to the
+// cluster.
 func TestAppAddWithoutCloudflare(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t).public()
@@ -228,22 +228,25 @@ func TestAppStatusComponents(t *testing.T) {
 	}
 	tests := map[string]struct {
 		exposed bool
-		local   bool
-		own     bool
+		domain  string
 		want    []string
 	}{
-		"exposed": {exposed: true, want: []string{
+		"exposed": {exposed: true, domain: "example.com", want: []string{
 			"    check  Working  inside the cluster only",
 			"    db     Ready    db:5432 (inside the cluster only)",
 			"    web    Ready    https://hello-dev.example.com/",
 		}},
-		"a public domain without a tunnel": {want: []string{
+		"a public domain without a tunnel": {domain: "example.com", want: []string{
 			"    web    Ready    hello-dev.example.com/ (not exposed)",
 		}},
-		"a reserved domain": {local: true, exposed: true, want: []string{
+		"a reserved domain": {domain: "dev.local", exposed: true, want: []string{
 			"    web    Ready    hello-dev.dev.local/ (inside the cluster only)",
 		}},
-		"a domain of its own": {local: true, own: true, exposed: true, want: []string{
+		"no domain": {want: []string{
+			"  address   hello.shelf.internal",
+			"    web    Ready    hello.shelf.internal/ (inside the cluster only)",
+		}},
+		"a connection this machine does not hold": {domain: "shop.ch", exposed: true, want: []string{
 			"  exposed   through connection tobile, which this machine does not hold",
 			"    web    Ready    https://hello-dev.shop.ch/",
 		}},
@@ -252,16 +255,11 @@ func TestAppStatusComponents(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t).public()
-			if tt.local {
-				h.cluster.settings.Domain = "dev.local"
-			}
 			state := ready
 			if tt.exposed {
 				state = exposed
 			}
-			if tt.own {
-				state.Domain = "shop.ch"
-			}
+			state.Domain = tt.domain
 			h.cluster.states, h.cluster.components = []cluster.AppState{state}, components
 
 			stdout, stderr, code := h.run(t, "app", "status", "hello")
@@ -273,7 +271,7 @@ func TestAppStatusComponents(t *testing.T) {
 					t.Errorf("stdout lacks %q:\n%s", want, stdout)
 				}
 			}
-			if tt.local && strings.Contains(stdout, "https://hello-dev.dev.local") {
+			if strings.Contains(stdout, "https://hello-dev.dev.local") || strings.Contains(stdout, "https://hello.shelf.internal") {
 				t.Errorf("a link to a name that cannot exist:\n%s", stdout)
 			}
 		})
