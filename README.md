@@ -3,14 +3,15 @@
 **A small, self-hosted app platform for a single Apple Silicon Mac mini.**
 
 Describe your app in one short `app.yaml`, build your images in your own CI, and shelf runs
-them on Kubernetes: with persistent volumes, generated secrets, health checks and a public URL
-at `<app>.<your-domain>`.
+them on Kubernetes: with persistent volumes, generated secrets and health checks. An app stays
+inside the cluster until you give it a public address: `https://<app>.<your-domain>` through
+your own Cloudflare account, or a temporary `*.trycloudflare.com` name that needs no account.
 
 > [!WARNING]
 > shelf is a learning project for platform engineering. It is **not meant for production**,
-> and it is **still under construction**: a push to your repository deploys your app and makes
-> it reachable at `https://<app>.<your-domain>`, but the Mac mini setup and the admin UI are
-> still missing. See [Status](#status).
+> and it is **still under construction**: a push to your repository deploys your app, and an
+> admin UI in the browser adds, changes and removes apps. The Mac mini setup, the background
+> service, the installer and the setup wizard are still missing. See [Status](#status).
 
 Where this is going: shelf installs on the mini with one command, and everything after that
 happens in an admin UI in your browser — adding an app, changing which version runs, removing it
@@ -72,8 +73,8 @@ flowchart LR
 2. It pushes the result to GHCR as a small deploy artifact.
 3. Flux on the Mac mini notices the new artifact and hands it to the generic `shelf-app` Helm
    chart, which creates the Kubernetes objects.
-4. Traefik routes requests by host name, and a Cloudflare Tunnel makes the app reachable from
-   the internet without opening ports.
+4. Traefik routes requests by host name. An app you put on the internet gets a Cloudflare
+   Tunnel of its own, with cloudflared in its namespace, so no port on the mini is opened.
 
 The design, all decisions and the roadmap are in [docs/plan.md](docs/plan.md).
 
@@ -91,10 +92,12 @@ one starts.
 | 3 | `shelf init cluster`: Flux, Traefik | ✅ done |
 | 4 | Delivery: deploy artifact, `shelf app add` / `rm`, reusable workflow | ✅ done |
 | 4b | `build:` in `app.yaml`, release binaries, tenant repo without image names | ✅ done |
-| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | ✅ done |
+| 5 | `shelf init expose`: Cloudflare Tunnel, DNS | ✅ done, replaced by 8b |
 | 6 | Operations layer shared by the CLI and the admin UI | ✅ done |
 | 7 | `shelf serve`: admin UI with login and dashboard | ✅ done |
-| 8 | Adding, changing and removing apps from the browser | 🔍 in review |
+| 8 | Adding, changing and removing apps from the browser | ✅ done |
+| 8b | Connections instead of platform credentials: registry logins and Cloudflare accounts chosen per app, one tunnel per app | 🚧 in progress (checked without a cluster; runs against a real cluster and Cloudflare still open) |
+| 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | 🚧 in progress (tried by hand; `just smoke-quick` not run yet) |
 | 9 | Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy` | planned |
 | 10 | Service and one-command installer | planned |
 | 11 | Setup wizard | planned |
@@ -102,8 +105,9 @@ one starts.
 | 13 | Reference apps | planned |
 
 Phases 6 to 13 were re-cut on 2026-09-20, when the target product changed from a command-line
-tool to an appliance with an admin UI. The reasoning is in
-[docs/plan.md](docs/plan.md); the work happens on the branch `appliance`.
+tool to an appliance with an admin UI. The reasoning is in [docs/plan.md](docs/plan.md). From
+Phase 9 on, every phase is an [OpenSpec](https://github.com/Fission-AI/OpenSpec) change in
+[openspec/changes/](openspec/changes).
 
 ## Quick start
 
@@ -199,28 +203,54 @@ is `name` in `app.yaml`: the artifact is `ghcr.io/<owner>/<name>`, an image is
 Image names never appear in `app.yaml`. Ready-made images such as `postgres:16` stay as `image:`.
 [examples/tenant](examples/tenant) is a complete example repository.
 
-Once per cluster, install the platform. The GHCR login lets the cluster pull private images
-and artifacts; use a classic personal access token with `read:packages`:
+Once per cluster, install the platform:
 
 ```sh
-export GHCR_USERNAME=<you> GHCR_TOKEN=<token>
-shelf init cluster --domain example.com
+shelf init cluster
+```
+
+Once per GitHub account, define a registry connection, so the cluster can pull private images
+and artifacts. Use a classic personal access token with `read:packages`; a fine-grained token
+cannot pull. The token is read from the environment only, never from a flag:
+
+```sh
+GHCR_USERNAME=<you> GHCR_TOKEN=<token> shelf connection add registry ghcr
 ```
 
 Once per app, add it. shelf generates the app's secrets and keeps a backup in
 `~/.shelf/apps/<app>/secrets.yaml`:
 
 ```sh
-docker login ghcr.io          # shelf reads the artifact with your Docker credentials
-shelf app add <app> oci://ghcr.io/<owner>/<name>:main
+shelf app add <app> oci://ghcr.io/<owner>/<name>:main --registry ghcr
 ```
 
-`<app>` is yours to choose and need not match the package: it becomes the app's namespace and
-its host `<app>.<domain>`. The same artifact can be added under several names, for instance
-`shop` and `shop-staging`; each gets a namespace, secrets and a host of its own.
+`<app>` is yours to choose and need not match the package: it becomes the app's namespace. The
+same artifact can be added under several names, for instance `shop` and `shop-staging`; each
+gets a namespace and secrets of its own. A public artifact needs no `--registry`.
+
+The app now answers at `<app>.shelf.internal`, inside the cluster only. To reach it from the
+internet, choose one of two ways:
+
+- **Your own domain** through your Cloudflare account. Define the connection once; the token
+  needs Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit, and stays on your machine in
+  `~/.shelf/connections/cloudflare/`, never in the cluster:
+
+  ```sh
+  CF_API_TOKEN=<token> shelf connection add cloudflare home
+  shelf app add <app> oci://ghcr.io/<owner>/<name>:main --cloudflare home --domain example.com
+  ```
+
+  The app gets its own tunnel and a DNS record, and answers at `https://<app>.example.com`.
+- **A quick tunnel** with `--quick`: no account, no domain, a random
+  `https://<words>.trycloudflare.com` name that `shelf app status` shows. The name **changes
+  whenever cloudflared restarts**, anyone who has it can reach the app, and Cloudflare offers
+  it for trying things out only.
+
+`shelf app credentials <app>` changes the connections or the domain later, and `--private`
+takes the app off the internet again.
 
 From then on, every push to `main` reaches the cluster by itself, usually within two minutes.
-`shelf app rm <app>` removes the app with all its data.
+`shelf app rm <app>` removes the app with all its data, its tunnel and its DNS record.
 
 ## Writing an `app.yaml`
 
@@ -311,24 +341,31 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
   names must not end with `-headless`.
 - **Secrets:** only generated secrets (`generate: true`) are supported for now. Generated
   values are URL-safe, so you can put them into connection strings as they are.
-- **Changing the domain** of a cluster renames every app, so `shelf init cluster` refuses a new
-  `--domain` or `--host-suffix` while apps exist. With `--move-hosts` it goes ahead, moves them
-  to `<app>.<new>` and lists the DNS records that stay behind under the old name, so you can
-  delete them. Running `shelf app rm` for each app before the change avoids the leftovers.
+- **A host suffix** such as `--host-suffix -dev` separates two clusters that share a DNS zone:
+  an app with a domain then answers at `<app>-dev.<domain>`. A new suffix renames every app
+  that has a domain, so `shelf init cluster` refuses it while such apps exist. With
+  `--move-hosts` it goes ahead and lists the DNS records that stay behind under the old names,
+  so you can delete them. Apps without a domain are not affected.
 
 ## What shelf does in the cluster
 
 You never have to look, but nothing is hidden. shelf keeps the substrate reachable with
 `kubectl`, and the split of ownership is this:
 
-- **`shelf-system`** holds what shelf itself manages: one `ResourceSetInputProvider` per
-  registered app, which is the app's registration, and one Secret per app with its generated
-  secret values. `shelf app add` and `shelf app rm` write exactly these.
-- **`flux-system`** holds Flux and the platform: Traefik, the `ResourceSet` that turns each
-  registration into a running app, and — once the cluster is exposed — cloudflared. These
-  objects belong to Flux and come from a released artifact. **Editing them by hand does not
-  last**; Flux reverts the change at the next reconciliation.
-- **One namespace per app**, named after the app, holds everything that app runs. That is yours.
+- **`shelf-system`** holds the registrations and the `ResourceSet` `apps` that turns each one
+  into a running app. Per app, shelf writes a `ResourceSetInputProvider` (the app's
+  registration), the Secret `app-<app>` with its generated secret values and, for an app with
+  its own tunnel, `tunnel-<app>` with the tunnel's credentials. Registry connections are the
+  Secrets `connection-registry-<name>`; `registry-anonymous` is what an app without one pulls
+  with.
+- **`flux-system`** and **`traefik`** hold Flux and Traefik. They and the `ResourceSet` belong
+  to Flux and come from a released platform artifact. **Editing them by hand does not last**;
+  Flux reverts the change at the next reconciliation.
+- **One namespace per app**, named after the app, holds everything that app runs, including its
+  cloudflared if it is on the internet. That is yours.
+
+Cloudflare tokens never enter the cluster; they stay in `~/.shelf/connections/cloudflare/` on
+the machine that runs shelf.
 
 So: look at anything, change the app namespaces if you must, and leave the platform to Flux. If
 you want a different platform, change it in the repository and release it, not in the cluster.
@@ -345,14 +382,19 @@ drift.
 | `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <component>=<reference>` supplies the image of a component with a `build` directory. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
 | `shelf build-plan <app.yaml>` | Prints the package name (`name` in `app.yaml`) and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. |
-| `shelf init cluster --domain <domain>` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. `--host-suffix -dev` separates clusters that share a DNS zone: apps are then reachable at `<app>-dev.<domain>`. The GHCR login comes from `GHCR_USERNAME` and `GHCR_TOKEN`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
-| `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. On an exposed cluster it publishes the app's host name as a DNS record (`CF_API_TOKEN`). Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
+| `shelf init cluster` | Installs Flux and the platform (Traefik, app management) into the cluster of the current kubecontext, and waits until everything is ready. `--host-suffix -dev` separates clusters that share a DNS zone: apps with a domain are then reachable at `<app>-dev.<domain>`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
+| `shelf connection add registry <name>` | Defines a registry login for `ghcr.io` from `GHCR_USERNAME` and `GHCR_TOKEN`. It is stored in the cluster and copied only into the namespaces of the apps that chose it. |
+| `shelf connection add cloudflare <name>` | Defines a Cloudflare account from `CF_API_TOKEN` (and `CF_ACCOUNT_ID` when the token sees several). shelf checks the token and keeps it in `~/.shelf/connections/cloudflare/`, never in the cluster. |
+| `shelf connection list` / `rm <kind> <name>` | Lists the connections and the apps that use them; removes one no app uses. |
+| `shelf connection packages <name>` / `zones <name>` | Lists the deploy artifacts a registry connection can pull, or the zones of a Cloudflare connection's account. |
+| `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. `--registry` picks the registry connection; `--cloudflare` with `--domain` puts the app on the internet under its own domain, `--quick` through a quick tunnel; without either it stays inside the cluster. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Refuses at once if the cluster has no platform. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
+| `shelf app credentials <app>` | Changes the app's connections or domain and deploys it again: `--registry`, `--no-registry`, `--cloudflare`, `--domain`, `--quick`, `--private`. |
+| `shelf app tags <app>` | Lists the tags of the app's deploy artifact, newest first. |
 | `shelf app redeploy <app>` | Fetches the app's artifact again under the tag it is registered with and rolls out what it finds. For a tag that moved, or a deploy worth another try. |
 | `shelf app secrets <app>` | Lists the names of the generated secrets; `--reveal` prints the values. |
 | `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also names its components and where each of them answers. Same chain as the admin UI shows. |
-| `shelf serve` | Runs the admin UI on the local network (`--listen 127.0.0.1:7654` keeps it off the network). The first start prints a setup code that claims the instance; after that a password protects it. |
-| `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets and DNS record, after asking. The secret backup stays. |
-| `shelf init expose` | Connects the cluster to Cloudflare: finds or creates the tunnel, runs cloudflared with one rule to Traefik, and publishes one DNS record per app that already runs. The API token comes from `CF_API_TOKEN`. |
+| `shelf serve` | Runs the admin UI on port 7654 of the local network (`--listen 127.0.0.1:7654` keeps it off the network). The first start prints a setup code that claims the instance; after that a password protects it. |
+| `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets, tunnel and DNS record, after asking. The secret backup stays. |
 | `shelf version` | Prints the version. |
 
 Example of an error message:
@@ -385,14 +427,19 @@ Useful commands:
 
 | Command | Purpose |
 |---|---|
-| `just test` | Formatting, `go vet`, unit tests, chart lint and golden files, manifest validation, examples |
+| `just test` | Formatting, `go vet`, unit tests, chart lint and golden files, manifest validation, examples, OpenSpec specs |
 | `just golden` | Rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
-| `just platform-push`, `just chart-push`, `just init-cluster` | Push `platform/` and the chart to the local registry and install them with `shelf init cluster` |
+| `just platform-push`, `just chart-push`, `just init-cluster` | Push `platform/` and the chart to the local registry; `init-cluster` pushes both and installs them with `shelf init cluster` |
 | `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, and `shelf app add`/`rm` with rollouts from the local registry |
-| `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>`, `just smoke-expose <app>` | Smoke tests that need credentials: a private image pull, a real tenant repository end to end, and the Cloudflare tunnel |
+| `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>`, `just smoke-expose <app> <domain>` | Smoke tests that need credentials: a private image pull, a real tenant repository end to end, and an app's own Cloudflare tunnel (needs a cluster with a host suffix) |
+| `just smoke-quick` | A quick tunnel for `examples/hello`; puts it on the internet for a few minutes |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |
+
+Changes to shelf go through [OpenSpec](https://github.com/Fission-AI/OpenSpec): the behaviour
+is described in [openspec/specs/](openspec/specs), and a change starts as a proposal in
+[openspec/changes/](openspec/changes). [CLAUDE.md](CLAUDE.md) has the workflow.
 
 On your machine's Docker daemon, shelf only creates the devcontainer with its image and
 volumes, as listed in [docs/plan.md](docs/plan.md#footprint-on-the-existing-docker-desktop-setup).
