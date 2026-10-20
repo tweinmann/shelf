@@ -4,8 +4,12 @@ A self-hosted app platform for a single Apple Silicon Mac mini. Tenants build im
 own CI and push a deploy artifact to GHCR; shelf watches the artifact and deploys it.
 Learning project for platform engineering — not for production.
 
-Design, decisions and phase plan: [docs/plan.md](docs/plan.md). Read it before changing
-architecture.
+OpenSpec is the only planning source: what shelf does is in [openspec/specs/](openspec/specs),
+the roadmap and the work in progress are the changes in [openspec/changes/](openspec/changes), and
+the project context with the architecture is in [openspec/config.yaml](openspec/config.yaml).
+Everything before 2026-10-20 — every decision with its reasons, and the results of Phases 0
+to 8d — is in [the baseline archive](openspec/changes/archive/2026-10-20-baseline). Read the
+context and the relevant specs before changing architecture.
 
 ## Status
 
@@ -14,9 +18,9 @@ Phase 0b complete and approved: switch from Docker-outside-of-Docker to Docker-i
 Phase 1 complete: `shelf validate`, `shelf render`, `shelf schema`, JSON Schema,
 `examples/hello`, `just test`, CI.
 Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart`,
-`just smoke-chart`. Results and decisions in docs/plan.md.
+`just smoke-chart`. Results and decisions in the baseline archive.
 Phase 3 complete: `shelf init cluster` (Flux Operator, FluxInstance, platform artifact with
-Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md.
+Traefik), dev registry, `just smoke-init`. Results and decisions in the baseline archive.
 Phase 4 complete: deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`, reusable workflow,
 level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push reached the app in
 173 s.
@@ -25,12 +29,11 @@ releases `v0.1.0` and `v0.2.0` published. A tenant repo holds `app.yaml` plus on
 workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the registry.
 Phase 5 complete and approved: `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
 records written by shelf), `just smoke-expose`. `greeter-dev.<domain>` is reachable over HTTPS
-from the dev cluster. Results in docs/plan.md.
+from the dev cluster. Results in the baseline archive.
 Target product revised on 2026-09-20, after Phase 5: shelf becomes an appliance with an admin UI
 (host service on the mini, LAN with a login, one-command install plus a browser wizard), and the
-phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions and the new
-phase plan in docs/plan.md; the work happens on the branch `appliance`, so `main` still carries
-the old path.
+phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions in the baseline
+archive.
 Phase 6 complete: `internal/ops` holds the operations both the CLI and the server call,
 `internal/progress` replaces the `io.Writer` progress pattern with typed events, `cli.New` takes
 injected dependencies instead of package variables, and the CLI tests run in parallel under
@@ -42,7 +45,7 @@ Phase 8 complete: apps are added, pointed at another tag, deployed again and
 removed from the browser. Each change is a job with a live log that reads like the command
 line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
 level with the UI. The app page also lists the app's components with their addresses, the routed
-ones as links. Results in docs/plan.md.
+ones as links. Results in the baseline archive.
 Phase 8b in progress: connections instead of platform credentials. Registry logins
 (`shelf-system/connection-registry-<name>`) and Cloudflare tokens (`~/.shelf/connections/cloudflare/`)
 are defined once with `shelf connection add` or on the UI page `/connections`, and chosen per app
@@ -66,23 +69,27 @@ considered and rejected. Level 1 green; tried by hand in the dev cluster; `just 
 run yet.
 OpenSpec adopted (2026-10-20): `openspec/specs/` holds the behaviour of today's shelf as seven
 baseline specs, and from Phase 9 on every phase is an OpenSpec change. Node and the `openspec`
-CLI are pinned in the devcontainer; `just test` validates the specs.
-Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
+CLI are pinned in the devcontainer; `just test` validates the specs. On the same day
+the old plan document was retired: its history moved verbatim into the baseline archive, the rules of the
+dev environment and the host footprint became the spec `dev-environment`, and the roadmap became
+draft changes (`phase-8-acceptance` for the open 8b/8d runs, `phase-9-…` to `phase-13-…`).
+Next: `phase-8-acceptance`, then Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
 
-- Work phase by phase as laid out in docs/plan.md. At the end of each phase, stop, show the
-  result, and wait for approval before starting the next.
+- Work phase by phase, in the order of the `phase-<n>-<slug>` changes in `openspec/changes/`. At
+  the end of each phase, stop, show the result, and wait for approval before starting the next.
 - A phase is one OpenSpec change, `openspec/changes/phase-<n>-<slug>/`. It starts with
   `/opsx:propose`; the maintainer approves proposal, design, delta specs and tasks before
-  `/opsx:apply`. At the end of the phase, `/opsx:archive` merges the deltas into
+  `/opsx:apply`. A draft phase holds only its roadmap text and `skip_specs: true`; proposing it
+  writes the delta specs and removes the marker. At the end of the phase, `/opsx:archive` merges the deltas into
   `openspec/specs/`, then stop for approval as above.
 - `openspec/specs/` describes what shelf does today. A change of behaviour changes its spec in
   the same change; a spec never describes a future phase.
 - Ask about open design decisions instead of assuming. Record the answer in the change's
-  `design.md`; decisions that outlive the phase (conventions, guardrails, the product) also go
-  into docs/plan.md "Decisions".
-- Keep this file and docs/plan.md current at the end of every phase.
+  `design.md`, with the alternatives. A decision that changes a convention, guardrail or safety
+  rule also changes this file, or the context in `openspec/config.yaml`, in the same change.
+- Keep this file, the README Status table and the context current at the end of every phase.
 - Everything in the repo is English: code, comments, docs, commit messages, CLI output.
   Conversation with the maintainer may be German or English.
 
@@ -143,10 +150,10 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - `docker` inside the devcontainer talks to its own daemon; `require_devcontainer` checks that.
   Never mount the host's Docker socket or otherwise reach the host daemon from here.
 - The host Docker daemon is shared with the maintainer's other containers and volumes. The only
-  shelf objects on it are those in the footprint inventory in docs/plan.md (devcontainer,
+  shelf objects on it are those in the footprint inventory of the spec `dev-environment` (devcontainer,
   its images and volumes). Delete them by exact name — never by prefix, never with `prune`.
-  New host objects go into the inventory, `hack/nuke.sh` and (for volumes)
-  `devcontainer.json` together.
+  New host objects go into that spec, `hack/nuke.sh` and (for volumes) `devcontainer.json`
+  together, in one change.
 - A plain `go build` produces a Linux binary. Anything shipped to the mini needs
   `GOOS=darwin GOARCH=arm64`.
 - `internal/host` (brew, pmset, colima, launchctl) cannot run in the devcontainer. Test it

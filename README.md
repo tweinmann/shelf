@@ -76,7 +76,8 @@ flowchart LR
 4. Traefik routes requests by host name. An app you put on the internet gets a Cloudflare
    Tunnel of its own, with cloudflared in its namespace, so no port on the mini is opened.
 
-The design, all decisions and the roadmap are in [docs/plan.md](docs/plan.md).
+What shelf does is specified in [openspec/specs/](openspec/specs); the roadmap and the work in
+progress are the changes in [openspec/changes/](openspec/changes).
 
 ## Status
 
@@ -105,9 +106,10 @@ one starts.
 | 13 | Reference apps | planned |
 
 Phases 6 to 13 were re-cut on 2026-09-20, when the target product changed from a command-line
-tool to an appliance with an admin UI. The reasoning is in [docs/plan.md](docs/plan.md). From
-Phase 9 on, every phase is an [OpenSpec](https://github.com/Fission-AI/OpenSpec) change in
-[openspec/changes/](openspec/changes).
+tool to an appliance with an admin UI. Every phase from here on is an
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) change in [openspec/changes/](openspec/changes);
+the decisions and results of Phases 0 to 8d, with their reasons, are in
+[the baseline archive](openspec/changes/archive/2026-10-20-baseline).
 
 ## Quick start
 
@@ -442,7 +444,7 @@ is described in [openspec/specs/](openspec/specs), and a change starts as a prop
 [openspec/changes/](openspec/changes). [CLAUDE.md](CLAUDE.md) has the workflow.
 
 On your machine's Docker daemon, shelf only creates the devcontainer with its image and
-volumes, as listed in [docs/plan.md](docs/plan.md#footprint-on-the-existing-docker-desktop-setup).
+volumes, as listed in the spec [dev-environment](openspec/specs/dev-environment/spec.md).
 `hack/nuke.sh` removes exactly those, by name. The cluster disappears with them.
 
 Repository layout:
@@ -458,14 +460,14 @@ examples/hello/     reference app
 examples/tenant/    example tenant repository (app.yaml, image, workflow)
 .github/workflows/  CI, and build.yml, the reusable workflow for tenants
 hack/               dev cluster, platform push, smoke tests, cleanup
-docs/plan.md        design, decisions, phase plan
-openspec/           behaviour specs and the change of each phase (OpenSpec)
+openspec/           specs, the change of each phase, the archive of finished ones (OpenSpec)
 ```
 
 ## Further reading
 
-- [docs/plan.md](docs/plan.md): architecture, decisions, the schema in detail, and the phase
-  plan
+- [openspec/config.yaml](openspec/config.yaml): the project context and architecture in short
+- [openspec/changes/archive/2026-10-20-baseline](openspec/changes/archive/2026-10-20-baseline):
+  every decision before OpenSpec with its reasons, and the results of Phases 0 to 8d
 - [openspec/specs/](openspec/specs): what shelf does, as requirements and scenarios per
   capability
 - [CLAUDE.md](CLAUDE.md): working agreements for AI-assisted development in this repository

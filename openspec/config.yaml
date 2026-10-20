@@ -5,17 +5,45 @@ context: |
   All artifacts must be written in English.
   Keep OpenSpec structural headings and SHALL/MUST keywords in English.
 
+  ## The product
   shelf is a self-hosted app platform for a single Apple Silicon Mac mini, written in Go. Tenants
-  build images in their own CI and push a deploy artifact to GHCR; shelf watches it and deploys it
-  with Flux, Helm and Traefik, and exposes apps through Cloudflare tunnels. It is an appliance: a
-  CLI (`shelf`) and an admin UI (`shelf serve`) on the mini. Learning project, not production.
+  build images in their own CI and push a deploy artifact to GHCR; shelf watches it and deploys
+  it. It is an appliance: one binary that is a CLI (`shelf`) and, as `shelf serve`, an admin UI on
+  the LAN with a login. One-command install and a browser wizard are planned. Learning project for
+  platform engineering, not for production.
 
-  The full text of every rule below is in CLAUDE.md (working agreements, guardrails, safety rules,
-  conventions) and docs/plan.md (decisions, architecture, phase plan). Read both before proposing;
-  they win over this summary.
+  OpenSpec is the only planning source: `openspec/specs/` is what shelf does today,
+  `openspec/changes/` what it is about to do (the roadmap is the `phase-<n>-<slug>` changes), and
+  `openspec/changes/archive/` how it got here. Everything before OpenSpec, with the reasons of
+  every earlier decision, is in `archive/2026-10-20-baseline/` (design.md, phases.md). CLAUDE.md
+  holds the working agreements, guardrails, safety rules and conventions in full; read it before
+  proposing, it wins over this summary.
 
-  - A phase of docs/plan.md is one change, named `phase-<n>-<slug>`. Decisions that only concern
-    the phase go into its design.md; cross-cutting ones into docs/plan.md "Decisions".
+  ## Architecture
+  - On the mini (from Phase 9): macOS runs Colima, Colima runs k3s. `shelf serve` runs as the
+    logged-in user under a LaunchAgent, never as root; its state is plain files under `~/.shelf`
+    (0700, files 0600): config, admin file, secret backups, Cloudflare connections, audit log. No
+    keychain: an unsigned, self-updating binary would re-prompt.
+  - In the cluster: Flux, installed through the Flux Operator (`FluxInstance`), syncs the platform
+    artifact (`platform/`: Traefik as ClusterIP in `traefik`, the ResourceSet `apps` in
+    `shelf-system`). Each app is a `ResourceSetInputProvider`; the ResourceSet renders its
+    namespace, the deploy artifact source and the HelmRelease of the generic chart `shelf-app`.
+    An exposed app has cloudflared in its namespace with one rule to Traefik, which routes by Host.
+  - `shelf init` is split into idempotent layers: `init host` (the Mac only, Phase 9),
+    `init cluster` (any kubecontext, no Colima assumptions) and the wrapper. The wizard (Phase 11)
+    calls the same operations, so re-running it changes nothing.
+  - Test levels: 1 is `just test` without a cluster (also CI), 2 the k3d cluster `shelf-dev` in
+    the devcontainer (`just smoke-*`, in CI on pull requests), 3 the mini and real Cloudflare.
+    The rules are in the spec `dev-environment`.
+
+  ## Rules for proposals
+  - A phase is one change, `phase-<n>-<slug>`. Proposing a draft phase replaces its roadmap text
+    with a real proposal, writes its delta specs, design.md and tasks.md, and removes
+    `skip_specs: true` from its `.openspec.yaml`. Only a change that changes no behaviour (pure
+    verification, tooling, docs) keeps `skip_specs`.
+  - Decisions go into the change's design.md, with the alternatives and why they lost. A decision
+    that changes a convention, guardrail or safety rule also changes CLAUDE.md, or this context,
+    in the same change.
   - Ask the maintainer about open design decisions instead of assuming.
   - The registry is the only interface between build and platform; the cluster never talks to
     Git or forge APIs.
@@ -26,9 +54,23 @@ context: |
     progress through progress.Reporter; test seams are fields of ops.Ops / ops.Env, never
     package variables; tests run in parallel under -race.
   - Secret values never appear in manifests, logs, golden files or rendered pages.
-  - Level-1 checks are `just test` (also run by CI); golden files are rewritten with `just golden`.
-  - Tasks that need the dev cluster, the network or the Mac mini (levels 2 and 3) say so, and
-    name the `just smoke-*` recipe that checks them.
+  - Level-1 checks are `just test`; golden files are rewritten with `just golden`. Tasks that
+    need the dev cluster, the network or the Mac mini say so, and name the `just smoke-*` recipe
+    that checks them.
+
+  ## Not in the MVP
+  Per-branch environments, scale-to-zero, supply-chain security (signatures, scans, policies), an
+  own registry, backups, seed data, devcontainer integration for tenant apps, a catalog of managed
+  services; more than one user or roles, admin access from the internet, TLS on the LAN, a stable
+  public HTTP API (`/api/` serves the UI and may change), code signing, notarization, `.pkg`
+  installers, metrics history and graphs, log retention and search, editing app.yaml in the UI,
+  apps without a tenant repository, Prometheus. LAN access to apps (proxy plus mDNS) was
+  considered and rejected in 8d.
+
+  ## Later (no phase yet)
+  Packages of a GitHub organisation in the form choices; a short 504 seen once during a rollout of
+  a single-instance app; MongoDB with auth and a replica set (secrets as file mounts); builds via
+  `path`, CronJobs, init and migration jobs, `${app.url}`, secret rotation.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

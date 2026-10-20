@@ -46,8 +46,8 @@ if [ -z "$base_image" ]; then
   exit 1
 fi
 
-# Keep in sync with the footprint inventory in docs/plan.md and the mounts in
-# .devcontainer/devcontainer.json.
+# Keep in sync with the footprint inventory in openspec/specs/dev-environment/spec.md and the
+# mounts in .devcontainer/devcontainer.json.
 container=shelf-devcontainer
 volumes="shelf-gomodcache shelf-gocache shelf-claude-config shelf-docker shelf-containerd"
 shared_images="$base_image"

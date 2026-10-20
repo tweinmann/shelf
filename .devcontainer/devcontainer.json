@@ -25,8 +25,8 @@
     "SHELF_DEVCONTAINER": "1"
   },
 
-  // Every volume here is listed in the footprint inventory in docs/plan.md and removed by
-  // hack/nuke.sh. Add new ones in all three places.
+  // Every volume here is listed in the footprint inventory of the dev-environment spec and
+  // removed by hack/nuke.sh. Add new ones in all three places.
   // The last two replace the docker-in-docker feature's own mounts for the same targets, whose
   // names contain a generated ID; fixed names keep exact-name cleanup possible.
   "mounts": [
