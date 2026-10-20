@@ -50,7 +50,7 @@ func TestIsQuick(t *testing.T) {
 	}
 }
 
-// TestPlatformRunsQuickTunnels keeps checkQuickTunnels and the platform in step: the check looks
+// TestPlatformRunsQuickTunnels keeps CheckPlatform and the platform in step: the check looks
 // for the input in the ResourceSet that ships with this shelf.
 func TestPlatformRunsQuickTunnels(t *testing.T) {
 	t.Parallel()
@@ -60,5 +60,41 @@ func TestPlatformRunsQuickTunnels(t *testing.T) {
 	}
 	if !strings.Contains(string(data), quickInput) {
 		t.Errorf("platform/apps/resourceset.yaml does not refer to %s", quickInput)
+	}
+}
+
+func TestPlatformError(t *testing.T) {
+	t.Parallel()
+	resourceSet := func(template string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"spec": map[string]any{"resourcesTemplate": template},
+		}}
+	}
+	current := resourceSet(`quick: << index inputs ` + quickInput + ` >>`)
+	old := resourceSet(`tunnel: << inputs.tunnel >>`)
+	tests := []struct {
+		name        string
+		resourceSet *unstructured.Unstructured
+		quick       bool
+		wantErr     string
+	}{
+		{name: "missing", resourceSet: nil, wantErr: "no shelf platform"},
+		{name: "missing, quick", resourceSet: nil, quick: true, wantErr: "no shelf platform"},
+		{name: "old, quick", resourceSet: old, quick: true, wantErr: "without --quick"},
+		{name: "old", resourceSet: old},
+		{name: "current, quick", resourceSet: current, quick: true},
+		{name: "current", resourceSet: current},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := platformError(tt.resourceSet, tt.quick)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Errorf("unexpected error: %v", err)
+			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
+				t.Errorf("error %v, want one containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }

@@ -120,7 +120,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
 | `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
 | `just serve` | devcontainer | run the admin UI against the dev cluster on port 8080 (forwarded to the Mac's browser); prints the setup code on the first start |
-| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart (pass `--host-suffix -dev` if the cluster has one) |
+| `just init-cluster [--yes]` | devcontainer | push the working copy's platform and chart, then `shelf init cluster` against the dev cluster with them (pass `--host-suffix -dev` if the cluster has one) |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |

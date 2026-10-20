@@ -7,6 +7,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -159,11 +160,6 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		return err
 	}
 	rep := progress.OrDiscard(o.Report)
-	if o.Quick {
-		if err := c.checkQuickTunnels(ctx); err != nil {
-			return err
-		}
-	}
 
 	objs := []*unstructured.Unstructured{AppSecret(o.Name, o.Secrets)}
 	if o.TunnelCredentials != nil {
@@ -213,6 +209,10 @@ func ReadAppConfig(ctx context.Context, cfg *rest.Config, app string) (*AppConfi
 		return nil, err
 	}
 	provider, err := c.get(ctx, ref{gvk: providerGVK, namespace: SystemNamespace, name: app})
+	if meta.IsNoMatchError(err) {
+		// Without the Flux Operator there is no app; CheckPlatform says what is missing.
+		return nil, nil
+	}
 	if err != nil || provider == nil {
 		return nil, err
 	}

@@ -72,8 +72,9 @@ platform-push:
 chart-push:
     hack/chart-push.sh
 
-# Install Flux and the platform into the dev cluster from the dev registry
-init-cluster *flags:
+# Install Flux and the platform into the dev cluster from the dev registry. The working copy's
+# platform and chart are pushed first: a reset cluster comes with an empty registry.
+init-cluster *flags: platform-push chart-push
     go run ./cmd/shelf init cluster --insecure-registry \
       --platform oci://shelf-registry:5000/shelf/platform:dev \
       --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -56,6 +57,10 @@ type fakeCluster struct {
 	components []cluster.Component
 	stages     []cluster.Stage
 	found      bool
+	// noPlatform is a cluster that init cluster never installed the platform into, oldPlatform
+	// one whose platform predates quick tunnels.
+	noPlatform  bool
+	oldPlatform bool
 
 	installed  []cluster.Options
 	added      []cluster.AppOptions
@@ -68,6 +73,17 @@ type fakeCluster struct {
 func (f *fakeCluster) Install(_ context.Context, cfg *rest.Config, o cluster.Options) error {
 	f.installed = append(f.installed, o)
 	f.host = cfg.Host
+	return nil
+}
+
+func (f *fakeCluster) CheckPlatform(_ context.Context, _ *rest.Config, quick bool) error {
+	switch {
+	case f.noPlatform:
+		return errors.New("this cluster has no shelf platform; install it with `shelf init cluster`")
+	case f.oldPlatform && quick:
+		return errors.New("the platform in this cluster does not run quick tunnels yet; " +
+			"install the platform of this shelf with `shelf init cluster` first, or add the app without --quick")
+	}
 	return nil
 }
 
