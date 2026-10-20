@@ -412,12 +412,15 @@ examples/tenant/    example tenant repository (app.yaml, image, workflow)
 .github/workflows/  CI, and build.yml, the reusable workflow for tenants
 hack/               dev cluster, platform push, smoke tests, cleanup
 docs/plan.md        design, decisions, phase plan
+openspec/           behaviour specs and the change of each phase (OpenSpec)
 ```
 
 ## Further reading
 
 - [docs/plan.md](docs/plan.md): architecture, decisions, the schema in detail, and the phase
   plan
+- [openspec/specs/](openspec/specs): what shelf does, as requirements and scenarios per
+  capability
 - [CLAUDE.md](CLAUDE.md): working agreements for AI-assisted development in this repository
 
 ## License

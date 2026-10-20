@@ -8,7 +8,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Level-1 checks, as in CI: formatting, vet, unit tests, chart lint, manifest schemas, examples
+# Level-1 checks, as in CI: formatting, vet, unit tests, chart lint, manifest schemas, examples,
+# specs
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -31,6 +32,7 @@ test:
       internal/cluster/testdata/*.yaml
     kubectl kustomize platform | kubeconform -strict -summary "${schemas[@]}" -
     go run ./cmd/shelf validate examples/*/app.yaml
+    openspec validate --all --strict --no-interactive
 
 # Rewrite golden files and schema/app.schema.json from the current code
 golden:

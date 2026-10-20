@@ -223,6 +223,18 @@ Cloudflare account of their own:
 | Clusters from before | `init cluster` reads the old `SHELF_DOMAIN` once. If it is a public domain, every app without a domain of its own gets it as its own (reported per app), so no app loses its name and no DNS record is stranded. A reserved one such as `dev.local` is not kept; those apps become `<app>.shelf.internal`. The ConfigMap key disappears with the next apply. |
 | Phase | **8d**, before the Mac mini. (8c is the name the reverted change of the same day had.) |
 
+Decided on 2026-10-20, after Phase 8d, when the maintainer asked to retrofit
+[OpenSpec](https://github.com/Fission-AI/OpenSpec):
+
+| Question | Decision |
+|---|---|
+| What OpenSpec is for | **The behaviour of shelf as specs, and every phase as a change.** `openspec/specs/<capability>/spec.md` holds requirements and scenarios for what shelf does today; `openspec/changes/<name>/` holds proposal, design, delta specs and tasks of the work in progress, and moves to `openspec/changes/archive/` when the phase ends. |
+| Baseline | **Seven specs, written from this plan and the code** before the first change: `app-manifest`, `app-chart`, `cluster-init`, `app-delivery`, `connections`, `app-exposure`, `admin-ui`. Where the plan and the code disagreed, the code won. Leftovers of 8b and 8d (level 2 and 3 runs, `smoke-quick`) stay in this plan and were not turned into a change. |
+| This plan | **Keeps context, decisions, architecture and the roadmap.** From Phase 9 on, a phase section is the roadmap entry plus a link to its change; goals, tasks and phase-local decisions live in the change. Cross-cutting decisions still go into this section. |
+| Installation | **Node and `@fission-ai/openspec` pinned in `.devcontainer/Dockerfile`**, like every other tool, with `OPENSPEC_TELEMETRY=0` and `DO_NOT_TRACK=1`. No new Docker object on the host, so the footprint inventory and `hack/nuke.sh` are unchanged. |
+| Checks | `just test` runs `openspec validate --all --strict`, so CI checks the specs at level 1. |
+| Claude Code | `openspec init --tools claude` writes the `/opsx:*` commands and skills into `.claude/`; they are committed and regenerated with `openspec update` after a version bump, never edited by hand. Core profile only. |
+
 ## Validated assumptions
 
 These close three of the four original spikes:
@@ -849,6 +861,11 @@ shelf/
   schema/app.schema.json
   docs/
     plan.md                   this plan
+  openspec/
+    config.yaml               project context for proposals
+    specs/                    behaviour of today's shelf, one directory per capability
+    changes/                  one change per phase; archive/ holds the finished ones
+  .claude/                    OpenSpec's /opsx commands and skills (generated)
   justfile
 ```
 
@@ -859,11 +876,16 @@ language rule, guardrails, the command table, safety rules and naming convention
 deliberately short and points here for design detail. It also carries a short status section,
 because a new Claude session inside the devcontainer has no memory of earlier conversations.
 It is updated at the end of every phase; the command table grows with it (`just test` in
-Phase 1, `just push-mini` in Phase 9).
+Phase 1, `just push-mini` in Phase 9). Since 2026-10-20 it also says how a phase runs as an
+OpenSpec change.
 
 ## Phases
 
 Stop after each phase, show the result, wait for approval.
+From Phase 9 on, every phase is an OpenSpec change `openspec/changes/phase-<n>-<slug>/`
+(archived to `openspec/changes/archive/` when it ends); its section here keeps the roadmap entry
+and gains a link to the change and a short summary of the result. Phases 0–8d keep their full
+text here.
 Phases 0–8 run entirely in the devcontainer on the MacBook; the mini joins in Phase 9.
 Phases 6 and up were re-cut on 2026-09-20 when the target product changed: the old Phase 6
 (Mac mini) is now Phase 9, the old Phase 7 (reference apps) is now Phase 13.

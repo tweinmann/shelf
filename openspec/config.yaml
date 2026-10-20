@@ -1,0 +1,53 @@
+schema: spec-driven
+
+context: |
+  Language: English
+  All artifacts must be written in English.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  shelf is a self-hosted app platform for a single Apple Silicon Mac mini, written in Go. Tenants
+  build images in their own CI and push a deploy artifact to GHCR; shelf watches it and deploys it
+  with Flux, Helm and Traefik, and exposes apps through Cloudflare tunnels. It is an appliance: a
+  CLI (`shelf`) and an admin UI (`shelf serve`) on the mini. Learning project, not production.
+
+  The full text of every rule below is in CLAUDE.md (working agreements, guardrails, safety rules,
+  conventions) and docs/plan.md (decisions, architecture, phase plan). Read both before proposing;
+  they win over this summary.
+
+  - A phase of docs/plan.md is one change, named `phase-<n>-<slug>`. Decisions that only concern
+    the phase go into its design.md; cross-cutting ones into docs/plan.md "Decisions".
+  - Ask the maintainer about open design decisions instead of assuming.
+  - The registry is the only interface between build and platform; the cluster never talks to
+    Git or forge APIs.
+  - Every admin UI action exists as a CLI command; both call the same function in internal/ops.
+  - The platform is generic (everything is a component) and apps are isolated from each other.
+  - Layering: internal/cluster talks to the API server only (client-go, server-side apply);
+    orchestration in internal/ops, flags in internal/cli, routes and templates in internal/server;
+    progress through progress.Reporter; test seams are fields of ops.Ops / ops.Env, never
+    package variables; tests run in parallel under -race.
+  - Secret values never appear in manifests, logs, golden files or rendered pages.
+  - Level-1 checks are `just test` (also run by CI); golden files are rewritten with `just golden`.
+  - Tasks that need the dev cluster, the network or the Mac mini (levels 2 and 3) say so, and
+    name the `just smoke-*` recipe that checks them.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

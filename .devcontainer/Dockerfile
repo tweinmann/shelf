@@ -9,6 +9,11 @@ ARG HELM_VERSION=4.3.0
 ARG FLUX_VERSION=2.9.5
 ARG JUST_VERSION=1.58.0
 ARG KUBECONFORM_VERSION=0.8.0
+ARG NODE_VERSION=24.21.0
+ARG OPENSPEC_VERSION=1.14.1
+
+# OpenSpec (spec-driven changes, see openspec/) collects usage data unless told not to.
+ENV OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 NPM_CONFIG_UPDATE_NOTIFIER=false
 
 # k3s image for the dev cluster. Matches the k3s stable channel; kubectl follows its minor version.
 ENV SHELF_K3S_IMAGE=rancher/k3s:v1.36.4-k3s1
@@ -16,8 +21,8 @@ ENV SHELF_K3S_IMAGE=rancher/k3s:v1.36.4-k3s1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-      arm64) just_arch=aarch64 ;; \
-      amd64) just_arch=x86_64 ;; \
+      arm64) just_arch=aarch64; node_arch=arm64 ;; \
+      amd64) just_arch=x86_64; node_arch=x64 ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
     tmp="$(mktemp -d)"; \
@@ -34,6 +39,10 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin just; \
     curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-${arch}.tar.gz" \
       | tar -xz -C /usr/local/bin kubeconform; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+      | tar -xJ -C /usr/local --strip-components=1 --exclude='*.md' --exclude=LICENSE; \
+    npm install -g "@fission-ai/openspec@${OPENSPEC_VERSION}"; \
+    npm cache clean --force; \
     chmod 0755 /usr/local/bin/k3d /usr/local/bin/kubectl /usr/local/bin/helm \
       /usr/local/bin/flux /usr/local/bin/just /usr/local/bin/kubeconform; \
     rm -rf "$tmp"
