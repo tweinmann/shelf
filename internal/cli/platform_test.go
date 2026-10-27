@@ -16,7 +16,7 @@ func TestAppAddWithoutPlatform(t *testing.T) {
 	h.cluster.noPlatform = true
 
 	_, stderr, code := h.run(t, "app", "add", "greeter", greeterArtifact,
-		"--cloudflare", "tobile", "--domain", "example.com")
+		"--cloudflare", "home", "--domain", "example.com")
 	if code == 0 || !strings.Contains(stderr, "no shelf platform") || !strings.Contains(stderr, "shelf init cluster") {
 		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
 	}
@@ -54,7 +54,7 @@ func TestAppRedeployWithoutPlatform(t *testing.T) {
 func TestQuickTunnelOnOldPlatform(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "tobile", "--domain", "example.com")
+	h.mustRun(t, "app", "add", "greeter", greeterArtifact, "--cloudflare", "home", "--domain", "example.com")
 	h.cluster.oldPlatform = true
 	added, created, records := len(h.cluster.added), len(h.api.created), len(h.api.records)
 

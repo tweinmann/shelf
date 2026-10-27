@@ -308,7 +308,7 @@ the cluster, the host backup or Cloudflare. The error SHALL say that the cluster
 that `shelf init cluster` installs it.
 
 #### Scenario: Adding an app to a cluster without the platform
-- **WHEN** `shelf app add greeter oci://ghcr.io/owner/greeter:main --cloudflare tobile --domain example.com` runs against a cluster where `shelf init cluster` never installed the platform
+- **WHEN** `shelf app add greeter oci://ghcr.io/owner/greeter:main --cloudflare home --domain example.com` runs against a cluster where `shelf init cluster` never installed the platform
 - **THEN** it fails within seconds, saying the cluster has no platform and to run `shelf init cluster`
 - **AND** no Secret or provider exists in `shelf-system` for `greeter`, no backup file was written, and nothing was changed in Cloudflare
 

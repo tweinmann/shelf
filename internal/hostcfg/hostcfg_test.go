@@ -153,36 +153,36 @@ func TestNewTokenIsRandom(t *testing.T) {
 func TestCloudflareConnections(t *testing.T) {
 	t.Parallel()
 	conns := hostcfg.Connections{Dir: filepath.Join(t.TempDir(), "connections")}
-	got, err := conns.Cloudflare("tobile")
+	got, err := conns.Cloudflare("home")
 	if err != nil || got != nil {
 		t.Fatalf("a missing connection: %+v, %v", got, err)
 	}
 	if list, err := conns.CloudflareConnections(); err != nil || len(list) != 0 {
 		t.Fatalf("no connections yet: %v, %v", list, err)
 	}
-	want := hostcfg.Cloudflare{Name: "tobile", Token: "not-a-real-token", Account: "acc-1"}
+	want := hostcfg.Cloudflare{Name: "home", Token: "not-a-real-token", Account: "acc-1"}
 	other := hostcfg.Cloudflare{Name: "club", Token: "not-a-real-token-either", Account: "acc-2"}
 	for _, c := range []hostcfg.Cloudflare{want, other} {
 		if err := conns.SaveCloudflare(c); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, err = conns.Cloudflare("tobile")
+	got, err = conns.Cloudflare("home")
 	if err != nil || got == nil || *got != want {
 		t.Fatalf("read back %+v, %v", got, err)
 	}
 	list, err := conns.CloudflareConnections()
-	if err != nil || len(list) != 2 || list[0].Name != "club" || list[1].Name != "tobile" {
+	if err != nil || len(list) != 2 || list[0].Name != "club" || list[1].Name != "home" {
 		t.Fatalf("list %+v, %v", list, err)
 	}
-	info, err := os.Stat(conns.CloudflarePath("tobile"))
+	info, err := os.Stat(conns.CloudflarePath("home"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("file mode %v", info.Mode().Perm())
 	}
-	for _, dir := range []string{conns.Dir, filepath.Dir(conns.CloudflarePath("tobile"))} {
+	for _, dir := range []string{conns.Dir, filepath.Dir(conns.CloudflarePath("home"))} {
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -193,27 +193,27 @@ func TestCloudflareConnections(t *testing.T) {
 	}
 
 	// A file renamed by hand is refused rather than used for the wrong account.
-	data, err := os.ReadFile(conns.CloudflarePath("tobile"))
+	data, err := os.ReadFile(conns.CloudflarePath("home"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(conns.CloudflarePath("copy"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conns.Cloudflare("copy"); err == nil || !strings.Contains(err.Error(), `holds the connection "tobile"`) {
+	if _, err := conns.Cloudflare("copy"); err == nil || !strings.Contains(err.Error(), `holds the connection "home"`) {
 		t.Errorf("a renamed file: %v", err)
 	}
 	if err := os.Remove(conns.CloudflarePath("copy")); err != nil {
 		t.Fatal(err)
 	}
 
-	if found, err := conns.DeleteCloudflare("tobile"); err != nil || !found {
+	if found, err := conns.DeleteCloudflare("home"); err != nil || !found {
 		t.Fatalf("delete: %v, %v", found, err)
 	}
-	if got, err := conns.Cloudflare("tobile"); err != nil || got != nil {
+	if got, err := conns.Cloudflare("home"); err != nil || got != nil {
 		t.Errorf("after delete: %+v, %v", got, err)
 	}
-	if found, err := conns.DeleteCloudflare("tobile"); err != nil || found {
+	if found, err := conns.DeleteCloudflare("home"); err != nil || found {
 		t.Errorf("deleting twice: %v, %v", found, err)
 	}
 }

@@ -5,7 +5,7 @@
 - [x] 1.1 Install the dev cluster with a host suffix: `just init-cluster --yes --host-suffix -dev`.
   Verify with `kubectl -n flux-system get cm shelf-config -o jsonpath='{.data.SHELF_HOST_SUFFIX}'`,
   which must print `-dev`.
-- [x] 1.2 Check whether the shared tunnel of Phase 5 and the record `greeter-dev.tobile.ch` still
+- [x] 1.2 Check whether the shared tunnel of Phase 5 and the record `greeter-dev.<domain>` still
   exist in Cloudflare (the dev cluster was reset on 2026-10-20), and if they do, have the
   maintainer delete them by exact name. Verify that neither is listed in the Cloudflare dashboard.
 - [x] 1.3 Private registry: add an app from a private artifact with `--registry ghcr`, then give
@@ -19,18 +19,18 @@
   (`copyFrom`, no explicit reconcile needed). `shelf app redeploy acc-private` fetched the artifact
   with the new login; `acc-private` and `greeter` Ready afterwards; `just smoke-registry
   ghcr.io/tweinmann/greeter/web:sha-42a964e` run by the maintainer with the new token.
-- [x] 1.4 The maintainer runs `just smoke-expose <app> tobile.ch`. Verify that it passes: HTTPS
+- [x] 1.4 The maintainer runs `just smoke-expose <app> <domain>`. Verify that it passes: HTTPS
   under its own domain, then the move to another domain and off the internet with no record or
   tunnel left behind.
 
   Notes (2026-10-27): `CF_ACCOUNT_ID=<account id> just smoke-expose
-  acc-private tobile.ch` passed ("PASS: own tunnel in the connection's account, record published
-  and corrected, HTTPS as acc-private-dev.tobile.ch, and nothing left behind when taken off").
+  acc-private <domain>` passed ("PASS: own tunnel in the connection's account, record published
+  and corrected, HTTPS as acc-private-dev.<domain>, and nothing left behind when taken off").
   The token sees several accounts, so the script needs `CF_ACCOUNT_ID`. HTTPS answered after
   121 s; until then the Cloudflare edge returned a 500 page of the zone's old host while Traefik
   inside the cluster already answered 200. Not checkable at level 3, accepted by the maintainer:
-  the script does not move the app to another domain, and the account `tobile` has a single zone
-  (`tobile.ch`); the move is covered at level 1 only (`TestAppCredentialsMovesTheApp`, "another
+  the script does not move the app to another domain, and the connection's account has a single zone
+  (`<domain>`); the move is covered at level 1 only (`TestAppCredentialsMovesTheApp`, "another
   domain in the same account", "a connection in another account"). Taking an app off the internet
   without leaving anything behind was seen twice for real: here and with `greeter` in 1.1.
 - [x] 1.5 Refusals and token hygiene: removing a connection in use and moving it to another
@@ -47,10 +47,10 @@
   ```
   $ shelf connection rm registry ghcr
   error: the registry connection ghcr is used by acc-private, greeter; give them another one first
-  $ shelf connection rm cloudflare tobile
-  error: the cloudflare connection tobile is used by greeter; give it another one first
+  $ shelf connection rm cloudflare <connection>
+  error: the cloudflare connection <connection> is used by greeter; give it another one first
   ```
-  `grep -cF "$token"` (token read from `~/.shelf/connections/cloudflare/tobile.yaml`, never
+  `grep -cF "$token"` (token read from `~/.shelf/connections/cloudflare/<connection>.yaml`, never
   printed): `kubectl get secrets -A -o yaml` 0, its base64 form 0; ConfigMaps, providers and
   ResourceSets 0; `~/.shelf/audit.log` 0; the logs of all 18 pods 0.
 - [x] 1.6 `form.js` against the real connections: the package, tag and zone selects on the new-app
@@ -58,7 +58,7 @@
   Verify by hand in `just serve`, with screenshots or notes here.
 
   Notes (2026-10-27): checked by the maintainer in `just serve` with the connections `ghcr` and
-  `tobile`: package, tag and zone selects fill; "other package…"/"other tag…" show the text
+  `<connection>`: package, tag and zone selects fill; "other package…"/"other tag…" show the text
   field; with the browser offline, changing the connection shows the text field with "the list
   could not be read". OK.
 

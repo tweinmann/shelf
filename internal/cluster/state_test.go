@@ -238,7 +238,7 @@ func TestAppState(t *testing.T) {
 	objects.provider = &unstructured.Unstructured{Object: map[string]any{
 		"spec": map[string]any{"defaultValues": map[string]any{
 			"name": "shop", "url": "oci://ghcr.io/o/shop", "tag": "main", "insecure": true,
-			"domain": "shop.example", "tunnel": "t-1", "registry": "ghcr", "cloudflare": "tobile",
+			"domain": "shop.example", "tunnel": "t-1", "registry": "ghcr", "cloudflare": "home",
 		}},
 	}}
 	_ = unstructured.SetNestedMap(objects.source.Object,
@@ -249,7 +249,7 @@ func TestAppState(t *testing.T) {
 		t.Errorf("state %+v", state)
 	}
 	if state.Domain != "shop.example" || state.Tunnel != "t-1" || state.Registry != "ghcr" ||
-		state.Cloudflare != "tobile" {
+		state.Cloudflare != "home" {
 		t.Errorf("registration %+v", state)
 	}
 	if state.Revision != "main@sha256:abc" {

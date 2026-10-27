@@ -182,8 +182,8 @@ func TestInitClusterRefusesToMoveTheApps(t *testing.T) {
 	t.Parallel()
 	chart := cluster.Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"}
 	settings := cluster.Settings{HostSuffix: "-dev", Chart: chart}
-	greeter := cluster.AppState{Name: "greeter", Domain: "tobile.ch", Tunnel: "t-1"}
-	shop := cluster.AppState{Name: "shop", Domain: "tobile.ch"}
+	greeter := cluster.AppState{Name: "greeter", Domain: "example.org", Tunnel: "t-1"}
+	shop := cluster.AppState{Name: "shop", Domain: "example.org"}
 	blog := cluster.AppState{Name: "blog", Domain: "blog.example", Tunnel: "t-2"}
 	notes := cluster.AppState{Name: "notes", Tunnel: "t-3"}
 	tests := []struct {
@@ -217,7 +217,7 @@ func TestInitClusterRefusesToMoveTheApps(t *testing.T) {
 		{name: "the first installation", apps: []cluster.AppState{greeter}},
 		{
 			name: "an app about to keep the cluster's former domain", apps: []cluster.AppState{notes},
-			settings: cluster.Settings{HostSuffix: "-dev", Chart: chart, LegacyDomain: "tobile.ch"},
+			settings: cluster.Settings{HostSuffix: "-dev", Chart: chart, LegacyDomain: "example.org"},
 			args:     []string{"--host-suffix", "-test"},
 			wantErr:  "moves app notes, and the records under the old names stay behind",
 		},
@@ -259,7 +259,7 @@ func TestInitClusterRefusesToMoveTheApps(t *testing.T) {
 func TestInitClusterPinsTheFormerDomain(t *testing.T) {
 	t.Parallel()
 	chart := cluster.Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"}
-	for legacy, want := range map[string]string{"tobile.ch": "tobile.ch", "dev.local": "", "": ""} {
+	for legacy, want := range map[string]string{"example.org": "example.org", "dev.local": "", "": ""} {
 		h := newHarness(t)
 		h.cluster.settings = cluster.Settings{HostSuffix: "-dev", Chart: chart, LegacyDomain: legacy}
 		_, stderr, code := h.run(t, "init", "cluster", "--yes", "--host-suffix", "-dev")

@@ -26,7 +26,7 @@ None. A defect found here becomes its own change.
 
 ## Impact
 
-The dev cluster and the Cloudflare account `tobile` (records and tunnels named `shelf-dev-<app>`
+The dev cluster and the maintainer's Cloudflare account (records and tunnels named `shelf-dev-<app>`
 only). The maintainer runs every step that needs the Cloudflare token.
 
 ## Acceptance (from the plan before OpenSpec)

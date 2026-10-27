@@ -64,7 +64,7 @@ func TestConnectionPackages(t *testing.T) {
 func TestConnectionZones(t *testing.T) {
 	t.Parallel()
 	h := cloudflareHarness(t)
-	if stdout := h.mustRun(t, "connection", "zones", "tobile"); stdout != "example.com\nshop.ch\n" {
+	if stdout := h.mustRun(t, "connection", "zones", "home"); stdout != "example.com\nshop.ch\n" {
 		t.Errorf("stdout %q", stdout)
 	}
 	if _, stderr, code := h.run(t, "connection", "zones", "other"); code == 0 ||

@@ -202,7 +202,7 @@ func runningPlatform() *fakePlatform {
 					Deployed: now.Add(-17 * time.Minute),
 					Phase:    cluster.PhaseReady,
 					Domain:   "example.com",
-					Tunnel:   "t-1", Registry: "ghcr", Cloudflare: "tobile",
+					Tunnel:   "t-1", Registry: "ghcr", Cloudflare: "home",
 				},
 				Host:              "greeter-dev.example.com",
 				Public:            true,
@@ -260,7 +260,7 @@ func runningPlatform() *fakePlatform {
 			},
 			Cloudflare: []ops.CloudflareConnection{
 				{Name: "club", Apps: []string{"shop"}, Missing: true},
-				{Name: "tobile", Account: "acc-1", Apps: []string{"greeter"}},
+				{Name: "home", Account: "acc-1", Apps: []string{"greeter"}},
 			},
 		},
 		diagnoses: map[string]cluster.Diagnosis{
@@ -922,8 +922,8 @@ func TestAccessForms(t *testing.T) {
 		{
 			name: "add with connections", path: "/apps",
 			form: url.Values{"name": {"greeter"}, "artifact": {"oci://ghcr.io/o/greeter:main"},
-				"domain": {"greeter.ch"}, "registry": {"ghcr"}, "cloudflare": {"tobile"}},
-			want: ops.Access{Domain: "greeter.ch", Registry: "ghcr", Cloudflare: "tobile"},
+				"domain": {"greeter.ch"}, "registry": {"ghcr"}, "cloudflare": {"home"}},
+			want: ops.Access{Domain: "greeter.ch", Registry: "ghcr", Cloudflare: "home"},
 		},
 		{
 			name: "add without", path: "/apps",
@@ -1003,12 +1003,12 @@ func TestConnectionForms(t *testing.T) {
 		},
 		{
 			name: "a Cloudflare connection", path: "/connections/cloudflare",
-			form:     url.Values{"name": {"tobile"}, "token": {token}, "account": {"acc-1"}},
-			wantCall: "save cloudflare tobile", wantSaved: "cloudflare tobile " + token + " acc-1",
+			form:     url.Values{"name": {"home"}, "token": {token}, "account": {"acc-1"}},
+			wantCall: "save cloudflare home", wantSaved: "cloudflare home " + token + " acc-1",
 		},
 		{
-			name: "remove", path: "/connections/cloudflare/tobile/delete",
-			form: url.Values{}, wantCall: "remove cloudflare tobile",
+			name: "remove", path: "/connections/cloudflare/home/delete",
+			form: url.Values{}, wantCall: "remove cloudflare home",
 		},
 		{
 			name: "a registry connection without a user", path: "/connections/registry",
@@ -1071,7 +1071,7 @@ func TestChangesNeedTheFormToken(t *testing.T) {
 		"/apps/greeter/redeploy":            {},
 		"/apps/greeter/access":              {"domain": {"greeter.ch"}},
 		"/connections/registry":             {"name": {"ghcr"}, "username": {"tobi"}, "token": {"t"}},
-		"/connections/cloudflare":           {"name": {"tobile"}, "token": {"t"}},
+		"/connections/cloudflare":           {"name": {"home"}, "token": {"t"}},
 		"/connections/registry/ghcr/delete": {},
 		"/apps/greeter/delete":              {"confirm": {"greeter"}},
 		"/apps/greeter/secrets":             {"password": {password}},
