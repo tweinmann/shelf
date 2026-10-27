@@ -1,8 +1,11 @@
 # shelf
 
-A self-hosted app platform for a single Apple Silicon Mac mini. Tenants build images in their
-own CI and push a deploy artifact to GHCR; shelf watches the artifact and deploys it.
-Learning project for platform engineering — not for production.
+A self-hosted GitOps platform for running parallel coding-agent branches as isolated, verified
+previews on your own hardware, with a path to production through standard artefacts. Tenants
+build images in their own CI and push a deploy artifact to GHCR; shelf watches the artifact and
+deploys it. Target host: any Linux machine with k3s, with a one-step install on a Mac (Colima).
+Pre-production: production is a separate cluster reached through eject (planned). Learning and
+reference project for platform engineering.
 
 OpenSpec is the only planning source: what shelf does is in [openspec/specs/](openspec/specs),
 the roadmap and the work in progress are the changes in [openspec/changes/](openspec/changes), and
@@ -75,7 +78,15 @@ dev environment and the host footprint became the spec `dev-environment`, and th
 draft changes (`phase-8-acceptance` for the open 8b/8d runs, `phase-9-…` to `phase-13-…`).
 Phase 8 closed (2026-10-27): release v0.6.0 published (binaries, chart `0.6.0`, platform
 `v0.6.0` on GHCR) and `phase-8-acceptance` archived.
-Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
+Roadmap re-cut (2026-10-27): shelf is repositioned as a platform for parallel coding-agent
+branches as isolated, verified previews, and the core thesis comes before the host. New order:
+9 agent interface, 10 branch previews, 11 verification chain, 12 hardening, 13 host (macOS with
+Colima and Linux, formerly 9), 14 service and installer (formerly 10), 15 operations (formerly
+12), 16 eject with Hetzner as the reference target. The wizard (formerly 11) moved to "Later" in
+the context; the reference apps (formerly 13) became the acceptance of Phases 10 and 16. The Mac
+lock-in is dropped; exposure stays the operator's decision; LAN access with certificates stays
+rejected and previews are reached by port-forward.
+Next: Phase 9 (agent interface: `--json`, `shelf app status --wait`, `shelf app open`).
 
 ## Working agreements
 
@@ -97,19 +108,26 @@ Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Guardrails
 
-- The registry is the only interface between build and platform. The platform never talks to
-  Git or forge APIs. That rule is about the cluster: the host service may call the GitHub API for
+- The registry is the only interface between build and platform, also for previews. The
+  platform never talks to Git or forge APIs. That rule is about the cluster: the host service may call the GitHub API for
   convenience (checking for a newer release), as long as no deploy path depends on it.
 - Every action the admin UI offers exists as a CLI command, and both call the same function in
   `internal/ops`. The UI is a second face on one operations layer, never a second implementation.
+- Exposure is an operator decision, made with `shelf app add` / `shelf app credentials` (CLI or
+  UI, audit-logged) and never part of `app.yaml`. A tenant repository, and so an agent working in
+  it, cannot make its app public.
+- Agent-facing commands offer `--json` with stable fields, so an agent never parses text written
+  for people.
+- The runtime output depends on no shelf-specific CRD: what runs in the cluster is Flux, Helm and
+  plain Kubernetes objects, so an app can be ejected to plain Flux and Helm.
 - The platform is generic: no knowledge of databases or specific services. Everything is a
   component.
 - Apps are isolated from each other. The only thing apps share is a connection the user assigned
   to several of them; namespace, secret values, tunnel and cloudflared are every app's own.
 - Prefer standard building blocks used by larger platforms (Flux, Helm, Traefik,
   Cloudflare Tunnel) over custom code.
-- `shelf init cluster` must work against any kubecontext. No Colima or macOS assumptions
-  outside `internal/host`.
+- `shelf init cluster` must work against any kubecontext. No Colima, macOS or Linux
+  distribution assumptions outside `internal/host`.
 
 ## Dev environment
 

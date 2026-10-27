@@ -28,6 +28,12 @@ To be decided at `/opsx:propose`.
 
 `internal/server`, `internal/cluster`, `internal/ops`, release artifacts. Level 2, and level 3 for the update.
 
+## Re-cut of 2026-10-27
+
+Formerly Phase 12; content unchanged. With previews (Phase 10) the logs and resource usage cover
+previews as well as apps, and the disk warning matters more, since every preview brings its own
+volumes.
+
 ## Roadmap text (from the plan before OpenSpec)
 
 Live pod logs including the previous container of a crash-looping pod, instantaneous CPU and

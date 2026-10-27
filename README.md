@@ -1,6 +1,12 @@
 # shelf
 
-**A small, self-hosted app platform for a single Apple Silicon Mac mini.**
+**Build and verify on your hardware, ship to any cloud, with the same verified artefact.**
+
+shelf is a self-hosted GitOps platform for developers who let several coding agents work in
+parallel. It runs on any Linux host with k3s, or with one command on a Mac (Colima). The goal is
+that every branch gets its own isolated preview, only verified artefacts become reachable beyond
+it, and the same verified state reaches any Kubernetes cloud as a pull request, without depending
+on shelf.
 
 Describe your app in one short `app.yaml`, build your images in your own CI, and shelf runs
 them on Kubernetes: with persistent volumes, generated secrets and health checks. An app stays
@@ -8,16 +14,20 @@ inside the cluster until you give it a public address: `https://<app>.<your-doma
 your own Cloudflare account, or a temporary `*.trycloudflare.com` name that needs no account.
 
 > [!WARNING]
-> shelf is a learning project for platform engineering. It is **not meant for production**,
-> and it is **still under construction**: a push to your repository deploys your app, and an
-> admin UI in the browser adds, changes and removes apps. The Mac mini setup, the background
-> service, the installer and the setup wizard are still missing. See [Status](#status).
+> shelf is a learning and reference project for platform engineering, and it is
+> **pre-production**: production is a separate cluster reached through eject (planned). It is
+> **still under construction**: today a push to your repository deploys your app, and the CLI or
+> an admin UI in the browser adds, changes and removes apps. Branch previews, the verification
+> chain, the host setup, the installer and eject are planned, not built. See [Status](#status).
 
-Where this is going: shelf installs on the mini with one command, and everything after that
-happens in an admin UI in your browser — adding an app, changing which version runs, removing it
-again, later logs and resource usage. You do not need to know that Kubernetes is underneath. The
-command line stays the expert interface for everything the UI can do, and the cluster stays open
-to `kubectl` if you want it.
+Where this is going: you run Claude Code (other agents later) in several worktrees at once. Every
+branch your agents push gets its own preview of the complete stack, database included, in a
+namespace of its own, reachable from your machine with `shelf app open` and from nowhere else.
+Your agents push, wait for the rollout and read a machine-readable verdict. Only an artefact that
+CI signed and scanned can be put on the internet, and the operator decides that, never the
+repository. When an app is ready, `shelf eject` hands the same verified digest to your production
+cluster as a pull request of plain Flux and Helm objects. shelf is for developers who are
+willing to see Kubernetes; the cluster stays open to `kubectl`.
 
 ## Contents
 
@@ -59,7 +69,7 @@ flowchart LR
     end
     B --> R[(GHCR)]
     I --> R
-    subgraph mini["Mac mini (k3s)"]
+    subgraph host["Your host (k3s)"]
         F[Flux] --> H[Helm chart shelf-app]
         H --> K[Deployments, StatefulSets,<br/>Services, Ingress, PVCs]
         K --> X[Traefik]
@@ -71,10 +81,10 @@ flowchart LR
 1. Your workflow builds the images and runs `shelf render` on your `app.yaml`. This pins every
    image to a digest, fills in host names and ports, and checks your file.
 2. It pushes the result to GHCR as a small deploy artifact.
-3. Flux on the Mac mini notices the new artifact and hands it to the generic `shelf-app` Helm
+3. Flux on your host notices the new artifact and hands it to the generic `shelf-app` Helm
    chart, which creates the Kubernetes objects.
 4. Traefik routes requests by host name. An app you put on the internet gets a Cloudflare
-   Tunnel of its own, with cloudflared in its namespace, so no port on the mini is opened.
+   Tunnel of its own, with cloudflared in its namespace, so no port on the host is opened.
 
 What shelf does is specified in [openspec/specs/](openspec/specs); the roadmap and the work in
 progress are the changes in [openspec/changes/](openspec/changes).
@@ -99,14 +109,19 @@ one starts.
 | 8 | Adding, changing and removing apps from the browser | ✅ done |
 | 8b | Connections instead of platform credentials: registry logins and Cloudflare accounts chosen per app, one tunnel per app | ✅ done |
 | 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | ✅ done |
-| 9 | Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy` | planned |
-| 10 | Service and one-command installer | planned |
-| 11 | Setup wizard | planned |
-| 12 | Logs, resource usage, self-update | planned |
-| 13 | Reference apps | planned |
+| 9 | Agent interface: `--json`, `shelf app status --wait`, `shelf app open` | planned |
+| 10 | Branch previews: one isolated preview per branch, discovered from the registry | planned |
+| 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | planned |
+| 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | planned |
+| 13 | Host: macOS with Colima and Linux with k3s, `shelf doctor`, `shelf destroy` | planned |
+| 14 | Service and one-command installer | planned |
+| 15 | Logs, resource usage, self-update | planned |
+| 16 | Eject and promotion to a production cluster | planned |
 
 Phases 6 to 13 were re-cut on 2026-09-20, when the target product changed from a command-line
-tool to an appliance with an admin UI. Every phase from here on is an
+tool to an appliance with an admin UI. On 2026-10-27 the roadmap was re-cut again: shelf became
+a platform for parallel agent branches, the previews and the verification chain moved ahead of
+the host setup, the Mac lock-in was dropped, and the setup wizard was deferred. Every phase from here on is an
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) change in [openspec/changes/](openspec/changes);
 the decisions and results of Phases 0 to 8d, with their reasons, are in
 [the baseline archive](openspec/changes/archive/2026-10-20-baseline).
@@ -114,10 +129,9 @@ the decisions and results of Phases 0 to 8d, with their reasons, are in
 ## Quick start
 
 > [!NOTE]
-> On the finished product this becomes one command on the mini —
-> `curl -fsSL https://raw.githubusercontent.com/tweinmann/shelf/v0/install.sh | sh` — followed by
-> a setup wizard in the browser. That installer arrives in Phase 10. Until then, install the
-> binary yourself:
+> On the finished product this becomes one command on the host —
+> `curl -fsSL https://raw.githubusercontent.com/tweinmann/shelf/v0/install.sh | sh`. That
+> installer arrives in Phase 14. Until then, install the binary yourself:
 
 Download the latest release for your platform (linux or darwin, amd64 or arm64):
 
@@ -331,7 +345,7 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 
 ### Things to know
 
-- **Volume sizes are not enforced.** The local storage on the Mac mini does not limit
+- **Volume sizes are not enforced.** The local storage on the host does not limit
   capacity, so `size` is documentation. A component can fill the disk.
 - **Plan volumes up front.** Kubernetes does not allow changing the volumes of a StatefulSet in
   place, and the local storage cannot grow, so changing an existing volume later needs manual
@@ -406,7 +420,7 @@ app.yaml:12: error: components.web.route: route needs a port; add port or ports 
 ```
 
 `shelf service`, which installs the admin UI as a background service, and the commands for the
-Mac mini (`shelf init host`, `shelf doctor`, `shelf destroy`) follow in later phases.
+host (`shelf init host`, `shelf doctor`, `shelf destroy`) follow in later phases.
 
 ## Developing shelf
 

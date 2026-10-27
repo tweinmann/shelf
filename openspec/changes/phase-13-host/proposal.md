@@ -6,11 +6,15 @@
 
 ## Why
 
-Everything so far runs in the devcontainer against k3d. The appliance needs the real machine: a Mac mini that is prepared, runs Colima, and can be diagnosed and reset without a developer at the keyboard.
+Everything so far runs in the devcontainer against k3d. shelf needs a real host: a Linux machine
+with k3s, or a Mac that runs the same Linux in a Colima VM, prepared, diagnosable and resettable
+without a developer at the keyboard.
 
 ## What Changes
 
-- `shelf init host`: preflight, tool installation, energy settings, host name, Colima profile.
+- `shelf init host`, split into "provide the environment" (macOS: preflight, tools, energy
+  settings, host name, Colima VM; Linux: preflight and k3s directly) and "install shelf's
+  components", which is the same on both.
 - `shelf doctor` on top of the five-stage diagnosis, and `shelf destroy [--purge]`.
 - The `shelf init` wrapper, `just push-mini` and the SSH access from the devcontainer.
 
@@ -18,7 +22,7 @@ Everything so far runs in the devcontainer against k3d. The appliance needs the 
 
 ### New Capabilities
 
-- `host-setup` (planned): preflight and preparation of the Mac.
+- `host-setup` (planned): preflight and preparation of the host, macOS and Linux.
 - `diagnostics` (planned, or a change to `app-delivery`): `shelf doctor`.
 - `teardown` (planned): `shelf destroy`.
 
@@ -28,7 +32,18 @@ To be decided at `/opsx:propose`.
 
 ## Impact
 
-`internal/host` (tested through the fake command runner only), CLI, justfile, `.devcontainer/ssh_config`. Level 3: needs the mini.
+`internal/host` (tested through the fake command runner only), CLI, justfile, `.devcontainer/ssh_config`. Level 3: needs the mini and a Linux host.
+
+## Re-cut of 2026-10-27
+
+Formerly Phase 9 (Mac mini). The core thesis (Phases 9 to 12) now comes first, and the Mac
+lock-in is dropped: shelf runs on any Linux host with k3s, and on macOS the installer creates the
+Colima VM and then runs the same Linux bootstrap. Tier 1: macOS (Apple Silicon, Colima) and
+Ubuntu/Debian (arm64, amd64). The guardrail "no Colima, macOS or distribution assumptions outside
+`internal/host`" covers both.
+
+**Open:** what the Linux preflight checks (k3s already installed or not, cgroup setup, distribution
+versions), and whether k3s is installed by its upstream script or by shelf.
 
 ## Roadmap text (from the plan before OpenSpec)
 
@@ -93,7 +108,7 @@ on the mini with "exec format error". `just push-mini` therefore builds explicit
   unknown of the new plan, because it decides whether automatic login is required: an agent in
   `~/Library/LaunchAgents` loads when a user session is created, and a headless mini has nobody to
   log in. Plan: ship automatic login as the documented path, run the experiment with
-  `launchctl bootstrap user/<uid>` from a daemon in Phase 9, and drop automatic login only if it
+  `launchctl bootstrap user/<uid>` from a daemon in this phase, and drop automatic login only if it
   demonstrably works without it. Automatic login in turn requires FileVault to be off, so the disk
   holding the tokens and the secret backups is unencrypted — accepted for a home appliance whose
   threat model is the LAN, but it belongs in the documentation, not in a footnote.
