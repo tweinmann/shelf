@@ -4,3 +4,6 @@
 # Build output
 /bin/
 /dist/
+
+# Go build and module cache of CI (the test job keeps it in the workspace)
+/.cache/

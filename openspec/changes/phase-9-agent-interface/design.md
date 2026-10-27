@@ -207,6 +207,42 @@ The new smoke test does the following:
 
 It runs in CI with the other level-2 smoke tests.
 
+### 8. CI runs level 2 when a pull request is ready, chosen by paths, and in full on main
+
+Added after the first PR run, when `smoke-agent` made each pull-request run about 12 minutes
+(33 runner minutes), on every push. Measured on the PR runs of 2026-10-19 and 2026-10-27: test
+2.7 min, smoke-secrets 2, smoke-chart 4.5, smoke-init 4.7, smoke-apps 6.8, smoke-agent about
+12, of which about 5 are Helm's upgrade timeout in its last step.
+
+- **When.** Level 2 runs when a pull request is opened or reopened as ready, or leaves draft;
+  on every push and when the label is added while it carries the label `level-2` (also as a
+  draft); and in full with the label `level-2-full`. Other pushes run level 1 only. A new push
+  cancels the run it replaces, while a label unrelated to CI cancels nothing.
+- **What.** `.github/scripts/select-smokes.sh` maps changed paths to smoke tests. Planning,
+  docs, examples, the admin UI and the Cloudflare and GitHub clients need none. A path it does
+  not list needs all of them, so a forgotten entry costs time, never coverage.
+- **How much.** Pull requests run `smoke-agent` with `SMOKE_FULL=0`, which skips the fixed
+  commit after the broken one (Helm's 5-minute timeout). `smoke-agent` asks Flux to fetch each
+  new artifact at once; `--wait` stays read-only, and what is checked is how it follows a
+  rollout, not Flux's interval. `smoke-apps` keeps its one step that waits for the poll on
+  purpose.
+- **main.** Every merge runs everything with `SMOKE_FULL=1`, so a failure belongs to one commit.
+  A failure opens an issue labelled `ci-main-red`, or comments on the open one, because the
+  e-mail GitHub sends goes to one person and is easy to miss (the maintainer chose the issue).
+  `release.yml` publishes only a commit whose CI run on main succeeded.
+- **Cache.** `just test` keeps Go's build and module cache in `.cache/go` through
+  `actions/cache`. `gofmt` therefore checks the tracked files only.
+
+Expected: about 2 minutes for a push to a pull request, about 4–5 when it is ready (smoke-apps
+and smoke-agent decide), about 7 in full on main.
+
+*Alternatives:* a nightly full run instead of one per merge (it was rejected: the result belongs
+to no commit, GitHub mails only the last editor of the schedule, and it disables schedules in
+public repositories after 60 days without activity). A cached devcontainer image in GHCR (about
+a minute per job, but it publishes a new package; deferred to the maintainer). A shorter Helm
+timeout or Flux interval for every app (product changes, not CI ones). One job for all smoke
+tests (fewer runner minutes, but no shorter wait, and the tests would share a cluster).
+
 ## Risks / Trade-offs
 
 - **The values digest reproduces helm-controller's.** If a Flux release changes how
@@ -229,6 +265,10 @@ It runs in CI with the other level-2 smoke tests.
 - **Absolute URLs an app builds from the Host header point at `<app>.shelf.internal`.** Quick
   tunnels have the same issue. → Rewrite `Location` headers (decision 5). Links inside page
   bodies stay the app's responsibility, as they do behind any proxy.
+- **A regression in the fix-after-failure path shows on main, not in the pull request.** → The
+  `ci-main-red` issue and the release gate; `level-2-full` runs it on a pull request on demand.
+- **The path map can miss a dependency.** → Unlisted paths run everything, and main runs
+  everything after each merge.
 - **The JSON contract can't be made stable after the fact.** → Golden files per kind from the
   first release, and the rule in the spec "Stable fields within a version".
 

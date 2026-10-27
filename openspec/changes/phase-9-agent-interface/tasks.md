@@ -35,9 +35,17 @@
 
 ## 6. Level-2 acceptance
 
-- [ ] 6.1 Add `hack/smoke/agent.sh` and `just smoke-agent` as in design decision 7 (status JSON, wait for a new commit with exit 0 only after it rolled out, failing image with exit 1, unknown commit with exit 2, `open` against a whoami fixture with `/api` + `stripPrefix`, cleanup); verify that `just smoke-agent` passes on a fresh `just cluster-reset`
-- [ ] 6.2 Add `smoke-agent` to the level-2 matrix in `.github/workflows/ci.yml` and to the CLAUDE.md dev-environment table; verify that the CI job runs it on a pull request
+- [x] 6.1 Add `hack/smoke/agent.sh` and `just smoke-agent` as in design decision 7 (status JSON, wait for a new commit with exit 0 only after it rolled out, failing image with exit 1, unknown commit with exit 2, `open` against a whoami fixture with `/api` + `stripPrefix`, cleanup); verify that `just smoke-agent` passes on a fresh `just cluster-reset`
+- [x] 6.2 Add `smoke-agent` to the level-2 matrix in `.github/workflows/ci.yml` and to the CLAUDE.md dev-environment table; verify that the CI job runs it on a pull request
 - [x] 6.3 Run `just test` and `openspec validate --all --strict`; both pass
+
+## 7. Faster CI
+
+- [x] 7.1 Add `.github/scripts/select-smokes.sh` (changed paths to smoke tests, unlisted paths to all of them); verify on the paths of both commits of this branch (the roadmap commit selects none)
+- [x] 7.2 Rework `.github/workflows/ci.yml` as in design decision 8 (plan job, label and draft rules, concurrency, `SMOKE_FULL`, Go cache, `ci-main-red` issue on main); verify the plan logic by running its script for every event kind
+- [x] 7.3 Add `SMOKE_FULL` and the Flux nudge to `hack/smoke/agent.sh`, and limit `gofmt` in `just test` to tracked files; verify with `just test` and `just smoke-agent` with `SMOKE_FULL=0` and `1`
+- [x] 7.4 Gate `release.yml` on a successful CI run on main; verify the query against the GitHub API for a green commit and an unknown one
+- [ ] 7.5 Update the spec `dev-environment` (delta), CLAUDE.md and the context; verify `openspec validate --all --strict` and that a pull request run shows the selected matrix in its summary
 
 ## Workflow follow-up
 

@@ -30,6 +30,10 @@ verdict, and if a person can look at it without exposing it.
   section that explain the loop: push, wait for the commit, read the verdict, fix. There is no
   hook.
 
+- CI runs level 2 when a pull request is ready rather than on every push, only the smoke tests its
+  paths need, and everything in full after each merge to main, which opens an issue when it fails;
+  a release needs a green main.
+
 ## Capabilities
 
 ### New Capabilities
@@ -42,6 +46,8 @@ verdict, and if a person can look at it without exposing it.
 
 - `app-delivery`: the app status command also shows the commit the running artifact was built
   from.
+- `dev-environment`: when CI runs which level-2 checks, the issue for a red main, the release
+  gate.
 - `app-exposure`: a new way to reach an app: a local port-forward to Traefik with the app's Host,
   for private and exposed apps alike, on the loopback interface only.
 
