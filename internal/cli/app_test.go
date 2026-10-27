@@ -277,3 +277,28 @@ func TestAppStatusComponents(t *testing.T) {
 		})
 	}
 }
+
+func TestAppStatusShowsTheCommit(t *testing.T) {
+	t.Parallel()
+	const sha = "42a964eb0b4bd7248305d5f22233d6dbabcd56f3"
+	for name, commit := range map[string]string{"with a commit": sha, "without one": ""} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t).public()
+			h.cluster.states = []cluster.AppState{{Name: "hello", Phase: cluster.PhaseReady,
+				Revision: "main@sha256:abc", Commit: commit}}
+
+			stdout, stderr, code := h.run(t, "app", "status", "hello")
+			if code != 0 {
+				t.Fatalf("exit code %d: %s", code, stderr)
+			}
+			line := "  commit    " + sha
+			if got := strings.Contains(stdout, line); got != (commit != "") {
+				t.Errorf("commit line shown %v, want %v:\n%s", got, commit != "", stdout)
+			}
+			if commit == "" && strings.Contains(stdout, "commit") {
+				t.Errorf("an artifact without a commit shows a commit line:\n%s", stdout)
+			}
+		})
+	}
+}

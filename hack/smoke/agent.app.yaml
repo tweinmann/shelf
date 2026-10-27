@@ -1,0 +1,15 @@
+# The app smoke-agent deploys: two whoami components, one at / and one at /api with stripPrefix,
+# so that a request shows which component got it, under which path and with which Host.
+apiVersion: shelf.dev/v1alpha1
+name: agent
+components:
+  web:
+    image: traefik/whoami:v1.11.0
+    port: 80
+    route: /
+    env:
+      WHOAMI_NAME: web-v1
+  api:
+    image: traefik/whoami:v1.11.0
+    port: 80
+    route: { path: /api, stripPrefix: true }

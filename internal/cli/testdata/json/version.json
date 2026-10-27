@@ -1,0 +1,6 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "Version",
+  "version": "v0.0.0-test",
+  "appAPIVersion": "shelf.dev/v1alpha1"
+}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -15,27 +16,66 @@ import (
 )
 
 func newAppStatusCmd(o Options) *cobra.Command {
-	var target clusterFlags
+	var (
+		target  clusterFlags
+		asJSON  bool
+		wait    bool
+		commit  string
+		timeout time.Duration
+	)
 	cmd := &cobra.Command{
 		Use:   "status [name]",
 		Short: "Show how the apps of this cluster are doing",
 		Long: `Without a name, list every app with its state. With a name, walk the chain from the
 deploy artifact to the running pods and say which step is not ready.
 
+With --wait, wait until the app is Ready or a step failed, and print the verdict. With --commit
+as well, wait first until the app runs the deploy artifact built from that git commit, so that
+the verdict is about it and not about the version before. The exit status is 0 when the app is
+Ready, 1 when a step failed and 2 when the time ran out. Waiting only reads the cluster; the
+platform notices a new artifact within a minute by itself.
+
 This is what the admin UI shows on its pages, in text.`,
-		Args: cobra.MaximumNArgs(1),
+		Example: `  shelf app status hello --wait --commit "$(git rev-parse HEAD)" --json`,
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if commit != "" && !wait {
+				return errors.New("--commit needs --wait")
+			}
+			if wait && len(args) == 0 {
+				return errors.New("--wait needs the name of an app")
+			}
+			if commit != "" {
+				if err := ops.CheckCommit(commit); err != nil {
+					return err
+				}
+			}
 			shelf, err := target.load(o)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			if len(args) == 0 {
-				return listApps(cmd, shelf, out)
+				return listApps(cmd, shelf, out, asJSON)
 			}
 			name := args[0]
 			if err := ops.CheckAppName(name); err != nil {
 				return err
+			}
+			if wait {
+				result, err := shelf.Wait(cmd.Context(), name, ops.WaitOptions{Commit: commit, Timeout: timeout})
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					err = printJSON(out, waitResult(result))
+				} else {
+					printVerdict(out, result)
+				}
+				if err != nil {
+					return err
+				}
+				return verdictExit(result.Outcome)
 			}
 			app, err := shelf.App(cmd.Context(), name)
 			if err != nil {
@@ -45,6 +85,9 @@ This is what the admin UI shows on its pages, in text.`,
 			if err != nil {
 				return err
 			}
+			if asJSON {
+				return printJSON(out, appStatus(app, diagnosis))
+			}
 			printApp(out, app)
 			printComponents(out, app.Components, app.Public || app.Quick)
 			printChain(out, diagnosis)
@@ -52,13 +95,55 @@ This is what the admin UI shows on its pages, in text.`,
 		},
 	}
 	target.registerTarget(cmd.Flags())
+	registerJSON(cmd, &asJSON)
+	cmd.Flags().BoolVar(&wait, "wait", false, "wait until the app is Ready or a step failed, and print the verdict")
+	cmd.Flags().StringVar(&commit, "commit", "", "with --wait: the git commit the app has to run, at least 7 hex digits")
+	cmd.Flags().DurationVar(&timeout, "timeout", ops.DefaultWaitTimeout, "with --wait: how long to wait")
 	return cmd
 }
 
-func listApps(cmd *cobra.Command, shelf *ops.Ops, out io.Writer) error {
+// printVerdict is the wait's result in three lines at most: the outcome, the step that is not
+// Ready with its reason, and shelf's hint.
+func printVerdict(out io.Writer, r ops.WaitResult) {
+	line := fmt.Sprintf("%s: %s", r.App, r.Outcome)
+	if r.Commit != "" {
+		line += ", running commit " + r.Commit[:min(len(r.Commit), 12)]
+	}
+	fmt.Fprintln(out, line)
+	if r.Stage == nil {
+		return
+	}
+	detail := r.Stage.Name
+	for _, part := range []string{r.Stage.Reason, firstLine(r.Stage.Message)} {
+		if part != "" {
+			detail += ": " + part
+		}
+	}
+	fmt.Fprintf(out, "  %s\n", detail)
+	if r.Stage.Hint != "" {
+		fmt.Fprintf(out, "  %s\n", r.Stage.Hint)
+	}
+}
+
+// verdictExit turns an outcome into the command's exit status: 0, 1 or 2.
+func verdictExit(outcome ops.Outcome) error {
+	switch outcome {
+	case ops.OutcomeReady:
+		return nil
+	case ops.OutcomeFailed:
+		return &ExitError{Code: 1}
+	default:
+		return &ExitError{Code: 2}
+	}
+}
+
+func listApps(cmd *cobra.Command, shelf *ops.Ops, out io.Writer, asJSON bool) error {
 	apps, err := shelf.Apps(cmd.Context())
 	if err != nil {
 		return err
+	}
+	if asJSON {
+		return printJSON(out, appList(apps))
 	}
 	if len(apps) == 0 {
 		fmt.Fprintln(out, "No apps yet.")
@@ -98,6 +183,9 @@ func printApp(out io.Writer, app ops.App) {
 	}
 	if app.Revision != "" {
 		fmt.Fprintf(out, "  running   %s\n", app.Revision)
+	}
+	if app.Commit != "" {
+		fmt.Fprintf(out, "  commit    %s\n", app.Commit)
 	}
 	if !app.Deployed.IsZero() {
 		fmt.Fprintf(out, "  deployed  %s\n", app.Deployed.Local().Format(time.RFC3339))

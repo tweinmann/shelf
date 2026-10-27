@@ -1,0 +1,20 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "TagList",
+  "app": "greeter",
+  "items": [
+    {
+      "name": "main",
+      "created": "2026-09-03T08:00:00Z",
+      "current": true
+    },
+    {
+      "name": "sha-333",
+      "created": "2026-09-03T08:00:00Z"
+    },
+    {
+      "name": "sha-111",
+      "created": "2026-09-01T08:00:00Z"
+    }
+  ]
+}

@@ -100,6 +100,10 @@ smoke-init:
 smoke-apps:
     hack/smoke/apps.sh
 
+# Phase 9: --json, --wait --commit (Ready, Failed, TimedOut, a fix after a failure) and shelf app open
+smoke-agent:
+    hack/smoke/agent.sh
+
 # Phase 8b acceptance: expose an app through its own Cloudflare tunnel (asks for the API token)
 smoke-expose app domain:
     hack/smoke/expose.sh {{app}} {{domain}}

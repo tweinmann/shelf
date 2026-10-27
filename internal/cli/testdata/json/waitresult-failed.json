@@ -1,0 +1,16 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "WaitResult",
+  "outcome": "Failed",
+  "app": "hello",
+  "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+  "revision": "main@sha256:abc",
+  "stage": {
+    "name": "the pods",
+    "object": "Pod hello/web-6d4f",
+    "phase": "Failed",
+    "reason": "ImagePullBackOff",
+    "message": "Back-off pulling image",
+    "hint": "the image cannot be pulled; check the reference and whether the cluster may read that registry"
+  }
+}

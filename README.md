@@ -244,8 +244,14 @@ shelf app add <app> oci://ghcr.io/<owner>/<name>:main --registry ghcr
 same artifact can be added under several names, for instance `shop` and `shop-staging`; each
 gets a namespace and secrets of its own. A public artifact needs no `--registry`.
 
-The app now answers at `<app>.shelf.internal`, inside the cluster only. To reach it from the
-internet, choose one of two ways:
+The app now answers at `<app>.shelf.internal`, inside the cluster only. To look at it from a
+browser on your machine, without putting it anywhere else:
+
+```sh
+shelf app open <app> --browser
+```
+
+To reach it from the internet, choose one of two ways:
 
 - **Your own domain** through your Cloudflare account. Define the connection once; the token
   needs Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit, and stays on your machine in
@@ -266,6 +272,11 @@ internet, choose one of two ways:
 takes the app off the internet again.
 
 From then on, every push to `main` reaches the cluster by itself, usually within two minutes.
+A coding agent working in the repository waits for its own commit with
+`shelf app status <app> --wait --commit "$(git rev-parse HEAD)" --json` and reads the verdict
+(see [Output for scripts and agents](#output-for-scripts-and-agents));
+[examples/tenant](examples/tenant) ships a Claude Code skill and a `CLAUDE.md` that explain the
+loop.
 `shelf app rm <app>` removes the app with all its data, its tunnel and its DNS record.
 
 ## Writing an `app.yaml`
@@ -405,13 +416,58 @@ drift.
 | `shelf connection packages <name>` / `zones <name>` | Lists the deploy artifacts a registry connection can pull, or the zones of a Cloudflare connection's account. |
 | `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. `--registry` picks the registry connection; `--cloudflare` with `--domain` puts the app on the internet under its own domain, `--quick` through a quick tunnel; without either it stays inside the cluster. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Refuses at once if the cluster has no platform. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
 | `shelf app credentials <app>` | Changes the app's connections or domain and deploys it again: `--registry`, `--no-registry`, `--cloudflare`, `--domain`, `--quick`, `--private`. |
+| `shelf app open <app>` | Makes the app reachable from a browser on this machine at `http://127.0.0.1:<port>/`, for as long as it runs: requests go through the Kubernetes API server to the cluster's Traefik with the app's own Host header, so routes and `stripPrefix` behave as through a tunnel. Works for apps that stay inside the cluster. Listens on 127.0.0.1 only; `--port` picks the port, `--browser` opens it. It is not an exposure and changes nothing about the app. |
 | `shelf app tags <app>` | Lists the tags of the app's deploy artifact, newest first. |
 | `shelf app redeploy <app>` | Fetches the app's artifact again under the tag it is registered with and rolls out what it finds. For a tag that moved, or a deploy worth another try. |
 | `shelf app secrets <app>` | Lists the names of the generated secrets; `--reveal` prints the values. |
-| `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also names its components and where each of them answers. Same chain as the admin UI shows. |
+| `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also shows the git commit the running artifact was built from, and names its components and where each of them answers. Same chain as the admin UI shows. `--wait` waits until the app is Ready or a step failed and prints the verdict; `--commit <sha>` first waits until the app runs the artifact built from that commit. Exit status 0 Ready, 1 failed, 2 timed out (`--timeout`, default 10m). |
 | `shelf serve` | Runs the admin UI on port 7654 of the local network (`--listen 127.0.0.1:7654` keeps it off the network). The first start prints a setup code that claims the instance; after that a password protects it. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets, tunnel and DNS record, after asking. The secret backup stays. |
 | `shelf version` | Prints the version. |
+
+### Output for scripts and agents
+
+`shelf app status`, `shelf app tags`, `shelf connection list` and `shelf version` take `--json`
+and then print one JSON document on stdout and nothing else there:
+
+```console
+$ shelf app status hello --json
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "AppStatus",
+  "name": "hello",
+  "phase": "Ready",
+  "artifact": "oci://ghcr.io/o/hello:main",
+  "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+  "stages": [ ... ],
+  ...
+}
+```
+
+Every document has `apiVersion` and `kind` (`AppList`, `AppStatus`, `WaitResult`, `TagList`,
+`ConnectionList`, `Version`). A command that fails prints a document of kind `Error` with a
+`message`, and exits with status 1. Within one `apiVersion`, no field is removed, renamed or
+given another meaning; new fields may appear, so ignore the ones you do not know. Empty fields
+are left out rather than `null`. `shelf app secrets` has no `--json`, so that secret values never
+end up in an agent's transcript.
+
+An agent that pushed a commit waits for it like this:
+
+```console
+$ shelf app status hello --wait --commit "$(git rev-parse HEAD)"
+hello: Failed, running commit 42a964eb0b4b
+  the pods: ImagePullBackOff: Back-off pulling image
+  the image cannot be pulled; check the reference and whether the cluster may read that registry
+$ echo $?
+1
+```
+
+The wait reads the commit from the deploy artifact the cluster holds, which the reusable workflow
+stamps with the commit it was built from, and is Ready only once every step has caught up with
+that artifact. It never changes anything: the platform notices a new artifact within a minute
+by itself. With `--json` the verdict is a `WaitResult` with `outcome` (`Ready`, `Failed` or
+`TimedOut`) and, unless Ready, the `stage` that holds the app up, with its `reason`, `message`
+and `hint`.
 
 Example of an error message:
 
@@ -448,7 +504,7 @@ Useful commands:
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
 | `just platform-push`, `just chart-push`, `just init-cluster` | Push `platform/` and the chart to the local registry; `init-cluster` pushes both and installs them with `shelf init cluster` |
-| `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, and `shelf app add`/`rm` with rollouts from the local registry |
+| `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps`, `just smoke-agent` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, `shelf app add`/`rm` with rollouts from the local registry, and the agent interface (`--json`, `--wait --commit`, `shelf app open`) |
 | `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>`, `just smoke-expose <app> <domain>` | Smoke tests that need credentials: a private image pull, a real tenant repository end to end, and an app's own Cloudflare tunnel (needs a cluster with a host suffix) |
 | `just smoke-quick` | A quick tunnel for `examples/hello`; puts it on the internet for a few minutes |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |

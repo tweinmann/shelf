@@ -1,60 +1,60 @@
 # Proposal
 
-> Draft. This change holds the roadmap text only and is marked `skip_specs: true`.
-> `/opsx:propose` turns it into a full change: it writes the delta specs, `design.md` and
-> `tasks.md`, revises this proposal, and removes `skip_specs` from `.openspec.yaml`.
-
 ## Why
 
-shelf's users run several coding agents in parallel. An agent that pushes a commit has to learn
-whether it arrived and what is broken without parsing text written for people, and a person has
-to open a private app in a browser, which today needs a public address.
+shelf's users run several coding agents in parallel, and each agent has to learn whether its
+push arrived and what is broken. Today it has to parse text written for people, and it cannot
+tell its new commit from the old one that was already running. The person behind the agents
+cannot open a private app in a browser without giving it a public address. Both block the core
+thesis: branch previews (Phase 10) are only useful if an agent can wait for one and read its
+verdict, and if a person can look at it without exposing it.
 
 ## What Changes
 
-- `--json` with stable fields for `shelf app status` (all apps and one app, including the five
-  stages and the hints) and the other agent-facing commands.
-- `shelf app status <app> --wait`: wait for the rollout of a given revision and return a condensed
-  result (stage, reason, hint), suitable for a Claude Code hook after `git push`.
-- `shelf app open <app>`: a local port forwarded through the API server to Traefik, with the Host
-  header set to the app's internal host, so routes and `stripPrefix` behave as through a tunnel.
-  CLI only, not the admin UI.
-- The tenant template gains a Claude Code skill or `CLAUDE.md` snippet that explains the loop:
-  push, wait, read the status, fix.
+- `--json` on the read-only agent-facing commands: `shelf app status` (all apps and one app),
+  `shelf app tags`, `shelf connection list` and `shelf version`. The output is a versioned
+  document with its own types (`apiVersion: shelf.dev/v1alpha1`, a `kind`), changed only
+  additively within a version. `shelf app secrets` gets no `--json`, so secret values don't end up
+  in an agent's transcript, and the mutating commands keep their text output.
+- `shelf app status <app> --wait [--commit <sha>] [--timeout]`: waits until the app's chain
+  is Ready or Failed. With `--commit`, it first waits until the deploy artifact carries that git
+  commit. It prints a condensed verdict (outcome, stage, reason, hint) and exits 0 (Ready), 1
+  (Failed) or 2 (timed out). It stays read-only: it never asks Flux to reconcile.
+- `shelf app status` shows the git commit the running deploy artifact was built from. shelf reads
+  it from the artifact's revision annotation, which the OCIRepository reports, so no forge API is
+  involved.
+- `shelf app open <app> [--port] [--browser]`: a local listener on `127.0.0.1` only that forwards
+  through the API server to Traefik and sets the Host header to the app's own host, so routes and
+  `stripPrefix` behave as they do through a tunnel. It runs until it is stopped. CLI only.
+- `examples/tenant` gains a Claude Code skill (`.claude/skills/shelf/SKILL.md`) and a `CLAUDE.md`
+  section that explain the loop: push, wait for the commit, read the verdict, fix. There is no
+  hook.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `agent-interface` (planned), or changes to `app-delivery` and `app-exposure`: to be decided at
-  `/opsx:propose`.
+- `agent-interface`: the machine-readable contract for agents: the versioned JSON documents and
+  which commands offer them, the wait verdict with its exit codes, and the agent instructions in
+  the tenant template.
 
 ### Modified Capabilities
 
-To be decided at `/opsx:propose`; likely `app-delivery` (status, `--json`, `--wait`) and
-`app-exposure` (`shelf app open`).
+- `app-delivery`: the app status command also shows the commit the running artifact was built
+  from.
+- `app-exposure`: a new way to reach an app: a local port-forward to Traefik with the app's Host,
+  for private and exposed apps alike, on the loopback interface only.
 
 ## Impact
 
-`internal/cli`, `internal/ops`, `internal/cluster` (port-forward through the API server),
-`examples/tenant`. Level 1 for the JSON output, level 2 for `--wait` and `open`.
-
-## Roadmap text (from the re-cut of 2026-10-27)
-
-First phase of the core thesis: an agent interface before previews, so every later phase can be
-accepted by an agent in a tenant repository.
-
-`shelf app open` uses the same trick as quick tunnels' `--http-host-header`: the forward ends at
-Traefik, not at a pod, so the request takes the path a tunnel's would. It also makes private apps
-usable from a browser, which they are not today. It is the way previews are reached (Phase 10);
-LAN access with certificates stays rejected (router DNS rebind protection, Colima VM networking,
-DNS-01 needing a Cloudflare token in the cluster, renewal, the LAN not being a trust boundary, no
-access from outside).
-
-The guardrail "agent-facing commands offer `--json` with stable fields" was adopted with the
-re-cut; this phase defines which commands are agent-facing and what "stable" means (field names,
-additive changes only, a version field or not).
-
-**Acceptance:** an agent in a tenant repository can push, wait and read a machine-readable verdict
-without parsing text output; `shelf app open` serves a private app with multiple routes,
-`stripPrefix` included, in a browser on the developer's machine.
+- `internal/cluster`: reads the commit from the OCIRepository status, and opens a port-forward
+  connection to a Traefik pod through the API server (client-go `tools/portforward`, no kubectl).
+- `internal/ops`: the wait loop, and the Host-rewriting proxy for `open`.
+- `internal/cli`: the JSON document types, `--json`, `--wait`, `--commit` and the `open` command.
+  Golden files for every JSON document.
+- `examples/tenant`: skill and `CLAUDE.md`. README CLI reference.
+- No new direct Go dependency. client-go's port-forward brings three indirect modules of its own
+  graph (`gorilla/websocket`, `moby/spdystream`, `k8s.io/streaming`). No change to the platform
+  artifact, the chart or `build.yml`.
+- Level 1 for the JSON documents and the verdict logic (fake cluster). Level 2 for `--wait`
+  against a real rollout and for `open`, in a new `just smoke-agent`.

@@ -1,0 +1,22 @@
+apiVersion: shelf.dev/v1alpha1
+name: agent
+components:
+  api:
+    image: traefik/whoami:v1.11.0@sha256:200689790a0a0ea48ca45992e0450bc26ccab5307375b41c84dfc4f2475937ab
+    ports:
+      main: 80
+    route:
+      path: /api
+      port: main
+      stripPrefix: true
+    instances: 1
+  web:
+    image: traefik/whoami:v1.11.0@sha256:200689790a0a0ea48ca45992e0450bc26ccab5307375b41c84dfc4f2475937ab
+    env:
+      WHOAMI_NAME: web-v1
+    ports:
+      main: 80
+    route:
+      path: /
+      port: main
+    instances: 1

@@ -56,7 +56,12 @@ type fakeCluster struct {
 	states     []cluster.AppState
 	components []cluster.Component
 	stages     []cluster.Stage
-	found      bool
+	// rollouts are what AppRollout returns, one per call; the last one is repeated.
+	rollouts     []cluster.Rollout
+	rolloutCalls int
+	// traefik is the address ForwardTraefik hands out, empty when no Traefik pod is ready.
+	traefik string
+	found   bool
 	// noPlatform is a cluster that init cluster never installed the platform into, oldPlatform
 	// one whose platform predates quick tunnels.
 	noPlatform  bool
@@ -145,6 +150,22 @@ func (f *fakeCluster) AppDiagnosis(_ context.Context, _ *rest.Config, app string
 	return cluster.Diagnosis{Name: app, Stages: f.stages}, nil
 }
 
+func (f *fakeCluster) AppRollout(_ context.Context, _ *rest.Config, app string) (cluster.Rollout, error) {
+	if !slices.ContainsFunc(f.states, func(s cluster.AppState) bool { return s.Name == app }) {
+		return cluster.Rollout{}, errors.New("app " + app + " does not exist")
+	}
+	r := f.rollouts[min(f.rolloutCalls, len(f.rollouts)-1)]
+	f.rolloutCalls++
+	return r, nil
+}
+
+func (f *fakeCluster) ForwardTraefik(context.Context, *rest.Config) (*cluster.Forward, error) {
+	if f.traefik == "" {
+		return nil, errors.New("no Traefik pod is ready")
+	}
+	return &cluster.Forward{Addr: f.traefik, Done: make(chan struct{})}, nil
+}
+
 func (f *fakeCluster) Settings(context.Context, *rest.Config) (cluster.Settings, error) {
 	return f.settings, f.settingsErr
 }
@@ -208,6 +229,8 @@ type harness struct {
 	fetched  string
 	insecure bool
 	pull     authn.Authenticator
+	// browser is what --browser opens an address with.
+	browser func(url string) error
 }
 
 func newHarness(t *testing.T) *harness {
@@ -247,6 +270,12 @@ func (h *harness) options() Options {
 		Images:  images,
 		Version: h.version,
 		Getenv:  func(key string) string { return h.env[key] },
+		OpenBrowser: func(url string) error {
+			if h.browser == nil {
+				return errors.New("no browser in tests")
+			}
+			return h.browser(url)
+		},
 		NewOps: func(target ops.Target, env ops.Env) *ops.Ops {
 			return &ops.Ops{
 				Target:        target,
@@ -271,13 +300,19 @@ func (h *harness) run(t *testing.T, args ...string) (stdout, stderr string, code
 
 func (h *harness) runWithInput(t *testing.T, stdin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	return h.runContext(t, context.Background(), stdin, args...)
+}
+
+// runContext runs a command until it ends or ctx is cancelled, as Ctrl-C does.
+func (h *harness) runContext(t *testing.T, ctx context.Context, stdin string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
 	cmd := New(h.options())
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetIn(strings.NewReader(stdin))
 	cmd.SetArgs(append(args, "--kubeconfig", h.kubeconfig))
-	code = Execute(context.Background(), cmd)
+	code = Execute(ctx, cmd)
 	return out.String(), errOut.String(), code
 }
 

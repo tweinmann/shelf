@@ -91,6 +91,9 @@ type AppState struct {
 	Cloudflare string `json:"cloudflare,omitempty"`
 	// Revision is the deploy artifact that is applied, e.g. main@sha256:1f4e….
 	Revision string `json:"revision,omitempty"`
+	// Commit is the git commit the deploy artifact was built from, empty when the artifact does
+	// not name one.
+	Commit string `json:"commit,omitempty"`
 	// Deployed is when the release last changed.
 	Deployed time.Time `json:"deployed,omitzero"`
 	Phase    Phase     `json:"phase"`
@@ -250,6 +253,7 @@ func appState(name string, o *appObjects) AppState {
 	state.Name = name
 	if o.source != nil {
 		state.Revision, _, _ = unstructured.NestedString(o.source.Object, "status", "artifact", "revision")
+		state.Commit = artifactCommit(o.source)
 	}
 	if o.release != nil {
 		state.Deployed = lastDeployed(o.release)
@@ -264,6 +268,28 @@ func appState(name string, o *appObjects) AppState {
 		}
 	}
 	return state
+}
+
+// revisionAnnotation is where `flux push artifact --revision` records the commit an artifact was
+// built from. Flux copies the artifact's annotations into the status of the OCIRepository, so
+// the cluster knows the commit without asking the forge.
+const revisionAnnotation = "org.opencontainers.image.revision"
+
+// gitSHA is a full git commit hash.
+var gitSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// artifactCommit returns the commit the source's artifact was built from: the revision
+// annotation in its `<ref>@sha1:<sha>` form, or a bare commit hash. Anything else names no
+// commit, as an artifact pushed with `--source local` and no revision does not.
+func artifactCommit(source *unstructured.Unstructured) string {
+	value, _, _ := unstructured.NestedString(source.Object, "status", "artifact", "metadata", revisionAnnotation)
+	if _, sha, found := strings.Cut(value, "@sha1:"); found {
+		value = sha
+	}
+	if !gitSHA.MatchString(value) {
+		return ""
+	}
+	return value
 }
 
 // diagnose walks the chain in the order things have to happen and reports every step. Walking

@@ -272,3 +272,33 @@ func TestShortenedMessages(t *testing.T) {
 		t.Errorf("stage %q", state.Stage)
 	}
 }
+
+func TestArtifactCommit(t *testing.T) {
+	t.Parallel()
+	const sha = "42a964eb0b4bd7248305d5f22233d6dbabcd56f3"
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		want     string
+	}{
+		{"pushed by the workflow", map[string]any{revisionAnnotation: "main@sha1:" + sha}, sha},
+		{"bare commit", map[string]any{revisionAnnotation: sha}, sha},
+		{"pushed by hand", map[string]any{revisionAnnotation: "local"}, ""},
+		{"short commit", map[string]any{revisionAnnotation: "main@sha1:42a964e"}, ""},
+		{"no revision", map[string]any{"dev.shelf.package": "shop"}, ""},
+		{"no metadata", nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			source := fluxObject("True", "Succeeded", "stored artifact")
+			if tt.metadata != nil {
+				_ = unstructured.SetNestedMap(source.Object,
+					map[string]any{"revision": "main@sha256:abc", "metadata": tt.metadata}, "status", "artifact")
+			}
+			if got := artifactCommit(source); got != tt.want {
+				t.Errorf("commit %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -95,7 +95,10 @@ it gets the new token; it cannot move to another account while apps are exposed 
 }
 
 func newConnectionListCmd(o Options) *cobra.Command {
-	var target clusterFlags
+	var (
+		target clusterFlags
+		asJSON bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List the connections and the apps that use them",
@@ -110,6 +113,9 @@ func newConnectionListCmd(o Options) *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
+			if asJSON {
+				return printJSON(out, connectionList(conns))
+			}
 			if len(conns.Registry)+len(conns.Cloudflare) == 0 {
 				fmt.Fprintln(out, "No connections yet.")
 				return nil
@@ -129,6 +135,7 @@ func newConnectionListCmd(o Options) *cobra.Command {
 		},
 	}
 	target.registerTarget(cmd.Flags())
+	registerJSON(cmd, &asJSON)
 	return cmd
 }
 

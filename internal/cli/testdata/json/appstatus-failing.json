@@ -1,0 +1,67 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "AppStatus",
+  "name": "hello",
+  "phase": "Failed",
+  "host": "hello.shelf.internal",
+  "artifact": "oci://ghcr.io/o/hello:main",
+  "registry": "ghcr",
+  "exposure": {
+    "kind": "none"
+  },
+  "revision": "main@sha256:abc",
+  "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+  "deployed": "2026-10-27T13:03:00Z",
+  "components": [
+    {
+      "name": "db",
+      "phase": "Ready",
+      "address": "db:5432",
+      "internal": true
+    },
+    {
+      "name": "web",
+      "phase": "Ready",
+      "path": "/",
+      "address": "hello.shelf.internal/"
+    }
+  ],
+  "stages": [
+    {
+      "name": "the deploy artifact",
+      "object": "OCIRepository hello/deploy",
+      "phase": "Ready",
+      "reason": "Succeeded",
+      "message": "stored artifact for digest 'main@sha256:abc'"
+    },
+    {
+      "name": "the app values",
+      "object": "Kustomization hello/deploy",
+      "phase": "Ready",
+      "reason": "ReconciliationSucceeded",
+      "message": "Applied revision: main@sha256:abc"
+    },
+    {
+      "name": "the chart",
+      "object": "OCIRepository hello/shelf-app",
+      "phase": "Ready",
+      "reason": "Succeeded",
+      "message": "stored artifact for digest '0.6.0@sha256:def'"
+    },
+    {
+      "name": "the app",
+      "object": "HelmRelease hello/hello",
+      "phase": "Ready",
+      "reason": "UpgradeSucceeded",
+      "message": "Helm upgrade succeeded"
+    },
+    {
+      "name": "the pods",
+      "object": "Pod hello/web-6d4f",
+      "phase": "Failed",
+      "reason": "ImagePullBackOff",
+      "message": "Back-off pulling image",
+      "hint": "the image cannot be pulled; check the reference and whether the cluster may read that registry"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "WaitResult",
+  "outcome": "Ready",
+  "app": "hello",
+  "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+  "revision": "main@sha256:abc"
+}

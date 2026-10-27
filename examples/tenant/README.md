@@ -17,3 +17,16 @@ same artifact can run more than once:
 ```sh
 shelf app add greeter-staging oci://ghcr.io/tweinmann/greeter:main
 ```
+
+## Coding agents
+
+`CLAUDE.md` and the skill in `.claude/skills/shelf/` tell Claude Code how to work with shelf in
+this repository: after a push, wait for the verdict on that commit with
+
+```sh
+shelf app status greeter --wait --commit "$(git rev-parse HEAD)" --json
+```
+
+and fix what it names. Put the name you gave the app in `shelf app add` into `CLAUDE.md`. The
+agent cannot make the app public: exposure is set with `shelf app add` or
+`shelf app credentials`, never in this repository.

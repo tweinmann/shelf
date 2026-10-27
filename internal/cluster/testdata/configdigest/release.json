@@ -1,0 +1,11 @@
+{
+  "values": {
+    "name": "agent-spike",
+    "platform": {
+      "domain": "shelf.internal",
+      "hostSuffix": null,
+      "imagePullSecret": "shelf-registry"
+    }
+  },
+  "configDigest": "sha256:2bea5f0e48691f804d2b51e3d1d591005fd30447c96df94ee481b7ff82a635cf"
+}

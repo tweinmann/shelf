@@ -8,7 +8,9 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -44,6 +46,20 @@ type Options struct {
 	// NewOps builds the operations against a cluster. Nil means ops.New, which talks to the
 	// real cluster, registry and Cloudflare.
 	NewOps func(ops.Target, ops.Env) *ops.Ops
+	// OpenBrowser opens an address in the default browser. Nil means `open` on macOS and
+	// `xdg-open` elsewhere.
+	OpenBrowser func(url string) error
+}
+
+func (o Options) openBrowser(url string) error {
+	if o.OpenBrowser != nil {
+		return o.OpenBrowser(url)
+	}
+	name := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		name = "open"
+	}
+	return exec.Command(name, url).Start()
 }
 
 func (o Options) getenv(key string) string {
@@ -296,14 +312,22 @@ func newSchemaCmd() *cobra.Command {
 }
 
 func newVersionCmd(o Options) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print the shelf version",
 		Args:  cobra.NoArgs,
-		Run: func(cmd *cobra.Command, _ []string) {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), versionDocument{header: newHeader("Version"),
+					Version: o.version(), AppAPIVersion: schema.APIVersion})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "shelf %s (app.yaml %s)\n", o.version(), schema.APIVersion)
+			return nil
 		},
 	}
+	registerJSON(cmd, &asJSON)
+	return cmd
 }
 
 // buildVersion is the version stamped into this binary, or a marker that it is a development
@@ -323,12 +347,28 @@ func buildVersion() string {
 }
 
 // Execute runs the command line and returns the process exit code.
+// ExitError ends a command with a status other than 1, after it has printed what that status
+// means; Execute prints nothing more.
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
+
 func Execute(ctx context.Context, cmd *cobra.Command) int {
-	if err := cmd.ExecuteContext(ctx); err != nil {
-		if !errors.Is(err, ErrReported) {
-			fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-		}
+	ran, err := cmd.ExecuteContextC(ctx)
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, ErrReported) {
 		return 1
 	}
-	return 0
+	if exit := (*ExitError)(nil); errors.As(err, &exit) {
+		return exit.Code
+	}
+	// Run with --json, the error is a document on stdout as well, so that a script reads one
+	// place whatever happened, and a person watching still sees it on stderr.
+	if ran != nil && wantsJSON(ran) {
+		_ = printJSON(ran.OutOrStdout(), errorDocument{header: newHeader("Error"), Message: err.Error()})
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+	return 1
 }
