@@ -79,10 +79,15 @@
 
 - [x] 3.1 Record the results in CLAUDE.md's status (8b and 8d complete) and in the README Status
   table. Verify with `git diff`.
-- [ ] 3.2 Merge into `main`, then tag and publish release v0.6.0 there. Verify that the release
+- [x] 3.2 Merge into `main`, then tag and publish release v0.6.0 there. Verify that the release
   workflow is green, the release lists the binaries, and GHCR has the chart
   `shelf/charts/shelf-app:0.6.0` and the platform artifact `shelf/platform:v0.6.0`.
 
   Notes (2026-10-27): the task first named v0.5.0, but v0.5.0 had been published on 2026-09-29
   (at `0d7fe37`, before the form choices and 8d); a published tag is never moved, so the
   maintainer chose v0.6.0 on `main` after the merge.
+
+  Notes (2026-10-27): `v0.6.0` tagged at `f85e6e2` (merge of PR #4). Release workflow run
+  40530173300 succeeded; the release lists `shelf_{darwin,linux}_{amd64,arm64}.tar.gz` and
+  `checksums.txt`; `ghcr.io/tweinmann/shelf/charts/shelf-app:0.6.0` and
+  `ghcr.io/tweinmann/shelf/platform:v0.6.0` answer 200 to an anonymous manifest request.

@@ -73,7 +73,9 @@ CLI are pinned in the devcontainer; `just test` validates the specs. On the same
 the old plan document was retired: its history moved verbatim into the baseline archive, the rules of the
 dev environment and the host footprint became the spec `dev-environment`, and the roadmap became
 draft changes (`phase-8-acceptance` for the open 8b/8d runs, `phase-9-…` to `phase-13-…`).
-Next: release v0.5.0 and archive `phase-8-acceptance`, then Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
+Phase 8 closed (2026-10-27): release v0.6.0 published (binaries, chart `0.6.0`, platform
+`v0.6.0` on GHCR) and `phase-8-acceptance` archived.
+Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
 
