@@ -46,34 +46,34 @@ removed from the browser. Each change is a job with a live log that reads like t
 line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
 level with the UI. The app page also lists the app's components with their addresses, the routed
 ones as links. Results in the baseline archive.
-Phase 8b in progress: connections instead of platform credentials. Registry logins
+Phase 8b complete: connections instead of platform credentials. Registry logins
 (`shelf-system/connection-registry-<name>`) and Cloudflare tokens (`~/.shelf/connections/cloudflare/`)
 are defined once with `shelf connection add` or on the UI page `/connections`, and chosen per app
 with `--registry`/`--cloudflare`. An exposed app has its own tunnel in the connection's account and
-cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Level 1
-green; level 2 and 3 not run yet, because migrating the dev cluster takes `greeter-dev.tobile.ch`
-off the shared tunnel.
+cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Accepted
+at level 2 and 3 in `phase-8-acceptance` (2026-10-27): private registry with a new login,
+`just smoke-expose`, refusals, no Cloudflare token in Secrets, logs or pages; the dev cluster runs
+with the host suffix `-dev`.
 Also in 8b (2026-09-29): `name` in app.yaml names the packages only; the app's name is chosen at
-`shelf app add`, so one artifact can run as several apps. Level 1 green; release v0.5.0 open.
+`shelf app add`, so one artifact can run as several apps.
 Also in 8b (2026-09-29): the forms offer the deploy artifacts and tags of the registry connection
 (GitHub API, `internal/github`) and the zones of the Cloudflare connection as selects, with free
-text as the fallback; `shelf connection packages|zones` and `shelf app tags` list the same. Level 1
-green; `form.js` untested against real connections.
-Phase 8d in progress (2026-09-29): an app without a Cloudflare connection stays inside the
+text as the fallback; `shelf connection packages|zones` and `shelf app tags` list the same. `form.js`
+checked against the real connections on 2026-10-27.
+Phase 8d complete (2026-09-29): an app without a Cloudflare connection stays inside the
 cluster by default and can ask for a quick tunnel with `--quick` (random `*.trycloudflare.com`
 name, changes when cloudflared restarts); cloudflared rewrites the Host header to the app's own
 host, and shelf reads the name from `/quicktunnel` through the pod proxy. The cluster has no
 domain any more: an app has one of its own or answers at `<app>.shelf.internal`; `init cluster`
 keeps a former public cluster domain on the apps that used it. LAN access (proxy + mDNS) was
-considered and rejected. Level 1 green; tried by hand in the dev cluster; `just smoke-quick` not
-run yet.
+considered and rejected. `just smoke-quick` passed on 2026-10-27.
 OpenSpec adopted (2026-10-20): `openspec/specs/` holds the behaviour of today's shelf as seven
 baseline specs, and from Phase 9 on every phase is an OpenSpec change. Node and the `openspec`
 CLI are pinned in the devcontainer; `just test` validates the specs. On the same day
 the old plan document was retired: its history moved verbatim into the baseline archive, the rules of the
 dev environment and the host footprint became the spec `dev-environment`, and the roadmap became
 draft changes (`phase-8-acceptance` for the open 8b/8d runs, `phase-9-…` to `phase-13-…`).
-Next: `phase-8-acceptance`, then Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
+Next: release v0.5.0 and archive `phase-8-acceptance`, then Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
 
@@ -135,7 +135,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
-| `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token; needs a cluster with a host suffix |
+| `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token (set `CF_ACCOUNT_ID` if it sees several accounts); needs a cluster with a host suffix |
 | `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |
 | `openspec validate --all --strict` | devcontainer | check specs and active changes (part of `just test`) |
 | `openspec list` / `openspec list --specs` / `openspec view` | devcontainer | active changes, specs, dashboard |

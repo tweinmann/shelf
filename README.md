@@ -97,8 +97,8 @@ one starts.
 | 6 | Operations layer shared by the CLI and the admin UI | ✅ done |
 | 7 | `shelf serve`: admin UI with login and dashboard | ✅ done |
 | 8 | Adding, changing and removing apps from the browser | ✅ done |
-| 8b | Connections instead of platform credentials: registry logins and Cloudflare accounts chosen per app, one tunnel per app | 🚧 in progress (checked without a cluster; runs against a real cluster and Cloudflare still open) |
-| 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | 🚧 in progress (tried by hand; `just smoke-quick` not run yet) |
+| 8b | Connections instead of platform credentials: registry logins and Cloudflare accounts chosen per app, one tunnel per app | ✅ done |
+| 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | ✅ done |
 | 9 | Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy` | planned |
 | 10 | Service and one-command installer | planned |
 | 11 | Setup wizard | planned |
