@@ -86,7 +86,16 @@ Colima and Linux, formerly 9), 14 service and installer (formerly 10), 15 operat
 the context; the reference apps (formerly 13) became the acceptance of Phases 10 and 16. The Mac
 lock-in is dropped; exposure stays the operator's decision; LAN access with certificates stays
 rejected and previews are reached by port-forward.
-Next: Phase 9 (agent interface: `--json`, `shelf app status --wait`, `shelf app open`).
+Phase 9 complete (2026-10-27): the agent interface. `--json` on `app status`, `app tags`,
+`connection list` and `version` prints versioned documents (`shelf.dev/v1alpha1` plus a `kind`);
+`shelf app status <app> --wait --commit <sha>` waits until the app runs the artifact built from
+that commit and ends with a verdict (exit 0 Ready, 1 Failed, 2 TimedOut), read-only;
+`shelf app status` shows the running commit; `shelf app open` forwards 127.0.0.1 to Traefik
+with the app's Host; `examples/tenant` ships a Claude Code skill and `CLAUDE.md`. Accepted with
+`tweinmann/shelf-hello`: a push reached a Ready verdict on `greeter` in 127 s. CI runs level 2
+when a pull request is ready, chosen by changed paths, and in full after every merge to main.
+Results in `openspec/changes/archive/2026-10-27-phase-9-agent-interface`.
+Next: Phase 10 (branch previews).
 
 ## Working agreements
 
@@ -253,6 +262,13 @@ it there when it belongs to one smoke test.
   server-sent events. One change runs at a time, and every one is written to `~/.shelf/audit.log`
 - Files under `~/.shelf` belong to `internal/hostcfg`: mode 0600 in a 0700 directory, written
   atomically. Passwords are PBKDF2-SHA256 with the algorithm in the stored string
+- What `--json` prints are document types of their own in `internal/cli/json.go`, never the
+  structs of `ops` or `cluster`: `apiVersion` `shelf.dev/v1alpha1`, a `kind`, empty fields left
+  out rather than null, one golden file per kind in `internal/cli/testdata/json`. Within a version
+  fields are only added; a failing command prints an `Error` document
+- Which values a Helm release holds is decided by its `configDigest`, which `cluster.ConfigDigest`
+  computes as helm-controller does, never by timestamps: after a failed upgrade, its failure and
+  its rollback are both newer than the values that replaced it
 - Chart tests run `helm template` from Go (`internal/chart`); they read the chart files
   themselves so that go test's cache notices chart changes
 - Adding a Go module in a devcontainer built before the `/go/pkg` fix (see Phase 1 results):

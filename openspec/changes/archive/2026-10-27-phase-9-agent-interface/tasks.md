@@ -45,7 +45,7 @@
 - [x] 7.2 Rework `.github/workflows/ci.yml` as in design decision 8 (plan job, label and draft rules, concurrency, `SMOKE_FULL`, Go cache, `ci-main-red` issue on main); verify the plan logic by running its script for every event kind
 - [x] 7.3 Add `SMOKE_FULL` and the Flux nudge to `hack/smoke/agent.sh`, and limit `gofmt` in `just test` to tracked files; verify with `just test` and `just smoke-agent` with `SMOKE_FULL=0` and `1`
 - [x] 7.4 Gate `release.yml` on a successful CI run on main; verify the query against the GitHub API for a green commit and an unknown one
-- [ ] 7.5 Update the spec `dev-environment` (delta), CLAUDE.md and the context; verify `openspec validate --all --strict` and that a pull request run shows the selected matrix in its summary
+- [x] 7.5 Update the spec `dev-environment` (delta), CLAUDE.md and the context; verify `openspec validate --all --strict` and that a pull request run shows the selected matrix in its summary
 
 ## Workflow follow-up
 
