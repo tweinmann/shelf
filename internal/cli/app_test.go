@@ -200,7 +200,7 @@ func TestAppAddWithoutCloudflare(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t).public()
 	h.app = appWithSecrets("greeter")
-	h.defineCloudflare(t, "tobile", "cf-secret-token", "")
+	h.defineCloudflare(t, "home", "cf-secret-token", "")
 
 	h.mustRun(t, "app", "add", "greeter", greeterArtifact)
 	if len(h.api.records)+len(h.api.created) != 0 {
@@ -219,7 +219,7 @@ func TestAppStatusComponents(t *testing.T) {
 	t.Parallel()
 	ready := cluster.AppState{Name: "hello", Phase: cluster.PhaseReady}
 	exposed := ready
-	exposed.Tunnel, exposed.Cloudflare = "t-1", "tobile"
+	exposed.Tunnel, exposed.Cloudflare = "t-1", "home"
 	components := []cluster.Component{
 		{Name: "check", Phase: cluster.PhaseWorking},
 		{Name: "db", Phase: cluster.PhaseReady, Ports: []cluster.Port{{Name: "main", Number: 5432}}},
@@ -247,7 +247,7 @@ func TestAppStatusComponents(t *testing.T) {
 			"    web    Ready    hello.shelf.internal/ (inside the cluster only)",
 		}},
 		"a connection this machine does not hold": {domain: "shop.ch", exposed: true, want: []string{
-			"  exposed   through connection tobile, which this machine does not hold",
+			"  exposed   through connection home, which this machine does not hold",
 			"    web    Ready    https://hello-dev.shop.ch/",
 		}},
 	}

@@ -75,6 +75,9 @@ type Env struct {
 // behind it needs an API server.
 type Cluster interface {
 	Install(ctx context.Context, cfg *rest.Config, o cluster.Options) error
+	// CheckPlatform fails when the cluster has no platform, or, with quick, one without quick
+	// tunnels.
+	CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error
 	AddApp(ctx context.Context, cfg *rest.Config, o cluster.AppOptions) error
 	RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
 		rep progress.Reporter) (bool, error)
@@ -101,6 +104,10 @@ type liveCluster struct{}
 
 func (liveCluster) Install(ctx context.Context, cfg *rest.Config, o cluster.Options) error {
 	return cluster.Install(ctx, cfg, o)
+}
+
+func (liveCluster) CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error {
+	return cluster.CheckPlatform(ctx, cfg, quick)
 }
 
 func (liveCluster) AddApp(ctx context.Context, cfg *rest.Config, o cluster.AppOptions) error {

@@ -8,7 +8,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Level-1 checks, as in CI: formatting, vet, unit tests, chart lint, manifest schemas, examples
+# Level-1 checks, as in CI: formatting, vet, unit tests, chart lint, manifest schemas, examples,
+# specs
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -31,6 +32,7 @@ test:
       internal/cluster/testdata/*.yaml
     kubectl kustomize platform | kubeconform -strict -summary "${schemas[@]}" -
     go run ./cmd/shelf validate examples/*/app.yaml
+    openspec validate --all --strict --no-interactive
 
 # Rewrite golden files and schema/app.schema.json from the current code
 golden:
@@ -70,8 +72,9 @@ platform-push:
 chart-push:
     hack/chart-push.sh
 
-# Install Flux and the platform into the dev cluster from the dev registry
-init-cluster *flags:
+# Install Flux and the platform into the dev cluster from the dev registry. The working copy's
+# platform and chart are pushed first: a reset cluster comes with an empty registry.
+init-cluster *flags: platform-push chart-push
     go run ./cmd/shelf init cluster --insecure-registry \
       --platform oci://shelf-registry:5000/shelf/platform:dev \
       --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}

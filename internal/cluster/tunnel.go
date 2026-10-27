@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -173,20 +174,38 @@ const appsResourceSet = "apps"
 // quickInput is how the platform refers to the input of a quick tunnel.
 const quickInput = `"quick"`
 
-// checkQuickTunnels fails when the platform in the cluster is older than quick tunnels: it would
-// never start cloudflared for one, and a wait for it would only end at the timeout.
-func (c *client) checkQuickTunnels(ctx context.Context) error {
-	obj, err := c.get(ctx, ref{gvk: resourceSetGVK, namespace: SystemNamespace, name: appsResourceSet})
+// CheckPlatform fails when this cluster cannot deploy the app an operation is about to change:
+// without the platform's ResourceSet nothing ever creates the app, and a platform older than
+// quick tunnels never starts cloudflared for one. Either way, a wait would only end at the
+// timeout, so operations call it before they write anything, here or in Cloudflare.
+func CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error {
+	c, err := newClient(cfg)
 	if err != nil {
 		return err
 	}
-	template := ""
-	if obj != nil {
-		template, _, _ = unstructured.NestedString(obj.Object, "spec", "resourcesTemplate")
+	obj, err := c.get(ctx, ref{gvk: resourceSetGVK, namespace: SystemNamespace, name: appsResourceSet})
+	if meta.IsNoMatchError(err) {
+		// Not even the Flux Operator is installed.
+		obj, err = nil, nil
 	}
+	if err != nil {
+		return err
+	}
+	return platformError(obj, quick)
+}
+
+// platformError decides CheckPlatform on the ResourceSet as read; nil means there is none.
+func platformError(resourceSet *unstructured.Unstructured, quick bool) error {
+	if resourceSet == nil {
+		return errors.New("this cluster has no shelf platform; install it with `shelf init cluster`")
+	}
+	if !quick {
+		return nil
+	}
+	template, _, _ := unstructured.NestedString(resourceSet.Object, "spec", "resourcesTemplate")
 	if !strings.Contains(template, quickInput) {
 		return errors.New("the platform in this cluster does not run quick tunnels yet; " +
-			"install the platform of this shelf with `shelf init cluster` first, or add the app with --private")
+			"install the platform of this shelf with `shelf init cluster` first, or add the app without --quick")
 	}
 	return nil
 }

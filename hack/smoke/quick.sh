@@ -96,11 +96,11 @@ kubectl -n "$app" rollout restart deploy/cloudflared >/dev/null
 kubectl -n "$app" rollout status deploy/cloudflared --timeout=120s >/dev/null
 moved() {
   shelf app status "$app" >"$work/status2.txt" &&
-    new="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com/' "$work/status2.txt")" &&
+    new="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com/' "$work/status2.txt" | head -1)" &&
     [[ -n "$new" && "$new" != "$url" ]]
 }
 retry 60 moved || die "shelf app status still shows the old address"
-new="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com/' "$work/status2.txt")"
+new="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com/' "$work/status2.txt" | head -1)"
 echo "new address: $new"
 retry 120 reaches "$new" || die "$new did not reach $app within 2 minutes"
 

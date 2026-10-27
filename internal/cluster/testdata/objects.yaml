@@ -84,7 +84,7 @@ metadata:
   namespace: shelf-system
 spec:
   defaultValues:
-    cloudflare: tobile
+    cloudflare: home
     domain: example.com
     insecure: false
     name: hello

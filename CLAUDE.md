@@ -4,8 +4,12 @@ A self-hosted app platform for a single Apple Silicon Mac mini. Tenants build im
 own CI and push a deploy artifact to GHCR; shelf watches the artifact and deploys it.
 Learning project for platform engineering — not for production.
 
-Design, decisions and phase plan: [docs/plan.md](docs/plan.md). Read it before changing
-architecture.
+OpenSpec is the only planning source: what shelf does is in [openspec/specs/](openspec/specs),
+the roadmap and the work in progress are the changes in [openspec/changes/](openspec/changes), and
+the project context with the architecture is in [openspec/config.yaml](openspec/config.yaml).
+Everything before 2026-10-20 — every decision with its reasons, and the results of Phases 0
+to 8d — is in [the baseline archive](openspec/changes/archive/2026-10-20-baseline). Read the
+context and the relevant specs before changing architecture.
 
 ## Status
 
@@ -14,9 +18,9 @@ Phase 0b complete and approved: switch from Docker-outside-of-Docker to Docker-i
 Phase 1 complete: `shelf validate`, `shelf render`, `shelf schema`, JSON Schema,
 `examples/hello`, `just test`, CI.
 Phase 2 complete: chart `charts/shelf-app`, golden-file tests in `internal/chart`,
-`just smoke-chart`. Results and decisions in docs/plan.md.
+`just smoke-chart`. Results and decisions in the baseline archive.
 Phase 3 complete: `shelf init cluster` (Flux Operator, FluxInstance, platform artifact with
-Traefik), dev registry, `just smoke-init`. Results and decisions in docs/plan.md.
+Traefik), dev registry, `just smoke-init`. Results and decisions in the baseline archive.
 Phase 4 complete: deploy artifact, ResourceSet `apps`, `shelf app add`/`rm`, reusable workflow,
 level 2 in CI. Accepted with the tenant repo `tweinmann/shelf-hello`: a push reached the app in
 173 s.
@@ -25,12 +29,11 @@ releases `v0.1.0` and `v0.2.0` published. A tenant repo holds `app.yaml` plus on
 workflow; everything of an app lives under `ghcr.io/<owner>/<app>` in the registry.
 Phase 5 complete and approved: `shelf init expose` (Cloudflare tunnel, cloudflared, DNS
 records written by shelf), `just smoke-expose`. `greeter-dev.<domain>` is reachable over HTTPS
-from the dev cluster. Results in docs/plan.md.
+from the dev cluster. Results in the baseline archive.
 Target product revised on 2026-09-20, after Phase 5: shelf becomes an appliance with an admin UI
 (host service on the mini, LAN with a login, one-command install plus a browser wizard), and the
-phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions and the new
-phase plan in docs/plan.md; the work happens on the branch `appliance`, so `main` still carries
-the old path.
+phases from 6 on were re-cut — the old Phase 6 (Mac mini) is now Phase 9. Decisions in the baseline
+archive.
 Phase 6 complete: `internal/ops` holds the operations both the CLI and the server call,
 `internal/progress` replaces the `io.Writer` progress pattern with typed events, `cli.New` takes
 injected dependencies instead of package variables, and the CLI tests run in parallel under
@@ -42,36 +45,51 @@ Phase 8 complete: apps are added, pointed at another tag, deployed again and
 removed from the browser. Each change is a job with a live log that reads like the command
 line's output; one change at a time. `shelf app redeploy` and `shelf app secrets` keep the CLI
 level with the UI. The app page also lists the app's components with their addresses, the routed
-ones as links. Results in docs/plan.md.
-Phase 8b in progress: connections instead of platform credentials. Registry logins
+ones as links. Results in the baseline archive.
+Phase 8b complete: connections instead of platform credentials. Registry logins
 (`shelf-system/connection-registry-<name>`) and Cloudflare tokens (`~/.shelf/connections/cloudflare/`)
 are defined once with `shelf connection add` or on the UI page `/connections`, and chosen per app
 with `--registry`/`--cloudflare`. An exposed app has its own tunnel in the connection's account and
-cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Level 1
-green; level 2 and 3 not run yet, because migrating the dev cluster takes `greeter-dev.tobile.ch`
-off the shared tunnel.
+cloudflared in its namespace; `shelf init expose` and the shared login and tunnel are gone. Accepted
+at level 2 and 3 in `phase-8-acceptance` (2026-10-27): private registry with a new login,
+`just smoke-expose`, refusals, no Cloudflare token in Secrets, logs or pages; the dev cluster runs
+with the host suffix `-dev`.
 Also in 8b (2026-09-29): `name` in app.yaml names the packages only; the app's name is chosen at
-`shelf app add`, so one artifact can run as several apps. Level 1 green; release v0.5.0 open.
+`shelf app add`, so one artifact can run as several apps.
 Also in 8b (2026-09-29): the forms offer the deploy artifacts and tags of the registry connection
 (GitHub API, `internal/github`) and the zones of the Cloudflare connection as selects, with free
-text as the fallback; `shelf connection packages|zones` and `shelf app tags` list the same. Level 1
-green; `form.js` untested against real connections.
-Phase 8d in progress (2026-09-29): an app without a Cloudflare connection stays inside the
+text as the fallback; `shelf connection packages|zones` and `shelf app tags` list the same. `form.js`
+checked against the real connections on 2026-10-27.
+Phase 8d complete (2026-09-29): an app without a Cloudflare connection stays inside the
 cluster by default and can ask for a quick tunnel with `--quick` (random `*.trycloudflare.com`
 name, changes when cloudflared restarts); cloudflared rewrites the Host header to the app's own
 host, and shelf reads the name from `/quicktunnel` through the pod proxy. The cluster has no
 domain any more: an app has one of its own or answers at `<app>.shelf.internal`; `init cluster`
 keeps a former public cluster domain on the apps that used it. LAN access (proxy + mDNS) was
-considered and rejected. Level 1 green; tried by hand in the dev cluster; `just smoke-quick` not
-run yet.
-Next: Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
+considered and rejected. `just smoke-quick` passed on 2026-10-27.
+OpenSpec adopted (2026-10-20): `openspec/specs/` holds the behaviour of today's shelf as seven
+baseline specs, and from Phase 9 on every phase is an OpenSpec change. Node and the `openspec`
+CLI are pinned in the devcontainer; `just test` validates the specs. On the same day
+the old plan document was retired: its history moved verbatim into the baseline archive, the rules of the
+dev environment and the host footprint became the spec `dev-environment`, and the roadmap became
+draft changes (`phase-8-acceptance` for the open 8b/8d runs, `phase-9-…` to `phase-13-…`).
+Next: release v0.5.0 and archive `phase-8-acceptance`, then Phase 9 (Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy`).
 
 ## Working agreements
 
-- Work phase by phase as laid out in docs/plan.md. At the end of each phase, stop, show the
-  result, and wait for approval before starting the next.
-- Ask about open design decisions instead of assuming. Record the answer in docs/plan.md.
-- Keep this file and docs/plan.md current at the end of every phase.
+- Work phase by phase, in the order of the `phase-<n>-<slug>` changes in `openspec/changes/`. At
+  the end of each phase, stop, show the result, and wait for approval before starting the next.
+- A phase is one OpenSpec change, `openspec/changes/phase-<n>-<slug>/`. It starts with
+  `/opsx:propose`; the maintainer approves proposal, design, delta specs and tasks before
+  `/opsx:apply`. A draft phase holds only its roadmap text and `skip_specs: true`; proposing it
+  writes the delta specs and removes the marker. At the end of the phase, `/opsx:archive` merges the deltas into
+  `openspec/specs/`, then stop for approval as above.
+- `openspec/specs/` describes what shelf does today. A change of behaviour changes its spec in
+  the same change; a spec never describes a future phase.
+- Ask about open design decisions instead of assuming. Record the answer in the change's
+  `design.md`, with the alternatives. A decision that changes a convention, guardrail or safety
+  rule also changes this file, or the context in `openspec/config.yaml`, in the same change.
+- Keep this file, the README Status table and the context current at the end of every phase.
 - Everything in the repo is English: code, comments, docs, commit messages, CLI output.
   Conversation with the maintainer may be German or English.
 
@@ -109,7 +127,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
 | `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
 | `just serve` | devcontainer | run the admin UI against the dev cluster on port 8080 (forwarded to the Mac's browser); prints the setup code on the first start |
-| `just init-cluster [--yes]` | devcontainer | `shelf init cluster` against the dev cluster with the dev platform and chart (pass `--host-suffix -dev` if the cluster has one) |
+| `just init-cluster [--yes]` | devcontainer | push the working copy's platform and chart, then `shelf init cluster` against the dev cluster with them (pass `--host-suffix -dev` if the cluster has one) |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
@@ -117,8 +135,11 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
-| `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token; needs a cluster with a host suffix |
+| `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token (set `CF_ACCOUNT_ID` if it sees several accounts); needs a cluster with a host suffix |
 | `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |
+| `openspec validate --all --strict` | devcontainer | check specs and active changes (part of `just test`) |
+| `openspec list` / `openspec list --specs` / `openspec view` | devcontainer | active changes, specs, dashboard |
+| `/opsx:explore`, `/opsx:propose`, `/opsx:apply`, `/opsx:archive` | Claude Code | the change workflow; skills in `.claude/skills/`, regenerated by `openspec update` |
 | `hack/nuke.sh` | host Mac terminal (refuses to run in a container) | remove every Docker object shelf created (only needs `docker`) |
 
 ## Safety rules
@@ -129,10 +150,10 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 - `docker` inside the devcontainer talks to its own daemon; `require_devcontainer` checks that.
   Never mount the host's Docker socket or otherwise reach the host daemon from here.
 - The host Docker daemon is shared with the maintainer's other containers and volumes. The only
-  shelf objects on it are those in the footprint inventory in docs/plan.md (devcontainer,
+  shelf objects on it are those in the footprint inventory of the spec `dev-environment` (devcontainer,
   its images and volumes). Delete them by exact name — never by prefix, never with `prune`.
-  New host objects go into the inventory, `hack/nuke.sh` and (for volumes)
-  `devcontainer.json` together.
+  New host objects go into that spec, `hack/nuke.sh` and (for volumes) `devcontainer.json`
+  together, in one change.
 - A plain `go build` produces a Linux binary. Anything shipped to the mini needs
   `GOOS=darwin GOARCH=arm64`.
 - `internal/host` (brew, pmset, colima, launchctl) cannot run in the devcontainer. Test it

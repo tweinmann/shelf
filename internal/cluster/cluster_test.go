@@ -224,7 +224,7 @@ func TestPlatformObjects(t *testing.T) {
 		AppSecret("empty", nil),
 		TunnelSecret("hello", []byte(`{"TunnelID":"t-1","TunnelSecret":"not-a-real-secret"}`)),
 		AppProvider(AppOptions{Name: "hello", Artifact: app, Domain: "example.com", TunnelID: "t-1",
-			Registry: "ghcr", Cloudflare: "tobile"}),
+			Registry: "ghcr", Cloudflare: "home"}),
 		AppProvider(AppOptions{Name: "empty", Artifact: app}),
 		AppProvider(AppOptions{Name: "quick", Artifact: app, Quick: true}))
 
@@ -303,8 +303,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	// The domain a cluster had before is read, for the apps that answered under it, and never
 	// written again.
-	data["SHELF_DOMAIN"] = "tobile.ch"
-	if got := ParseSettings(data); got.LegacyDomain != "tobile.ch" {
+	data["SHELF_DOMAIN"] = "example.org"
+	if got := ParseSettings(data); got.LegacyDomain != "example.org" {
 		t.Errorf("legacy domain %q", got.LegacyDomain)
 	}
 	for _, obj := range ConfigObjects(ParseSettings(data)) {
@@ -346,9 +346,9 @@ func TestMovingApps(t *testing.T) {
 			name:     "the cluster's former domain pinned",
 			before:   dev,
 			after:    Settings{HostSuffix: "-test", Chart: chart},
-			apps:     PinDomain([]AppState{{Name: "notes", Tunnel: "t-3"}}, "tobile.ch"),
+			apps:     PinDomain([]AppState{{Name: "notes", Tunnel: "t-3"}}, "example.org"),
 			want:     []string{"notes"},
-			wantText: []string{"notes-dev.tobile.ch (now notes-test.tobile.ch)"},
+			wantText: []string{"notes-dev.example.org (now notes-test.example.org)"},
 		},
 		{name: "nothing changed", before: dev, after: dev, apps: apps},
 		{name: "no apps yet", before: dev, after: Settings{Chart: chart}},

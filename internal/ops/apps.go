@@ -140,6 +140,11 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		cloudflare, quick = opts.Access.Cloudflare, false
 		rep.Report(progress.Info("Cloudflare connection: %s", cloudflare))
 	}
+	// Before anything is written, here or in Cloudflare: without the platform the app would never
+	// be deployed, and the wait for it would only end at the timeout.
+	if err := o.Cluster.CheckPlatform(ctx, o.config(), quick); err != nil {
+		return err
+	}
 	domain := cmp.Or(opts.Access.Domain, current.Domain)
 	if cloudflare != "" && domain == "" {
 		return noDomain(opts.Name, cloudflare)
@@ -240,6 +245,9 @@ func (o *Ops) SetAccess(ctx context.Context, name string, access Access, timeout
 // what to do when a tag was moved, or when something failed and is worth another try.
 func (o *Ops) Redeploy(ctx context.Context, name string, timeout time.Duration,
 	report progress.Reporter) error {
+	if err := o.Cluster.CheckPlatform(ctx, o.config(), false); err != nil {
+		return err
+	}
 	return o.Cluster.Redeploy(ctx, o.config(), name, timeout, progress.OrDiscard(report))
 }
 
