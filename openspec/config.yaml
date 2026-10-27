@@ -45,8 +45,11 @@ context: |
     the wrapper.
   - Three separate states per app and preview: build (built, scanned, signed), deployment (which
     digest runs where) and exposure (cluster only, port-forward, tunnel). Exposure is the
-    operator's decision, never part of app.yaml. Previews are reached by port-forward through
-    the API server to Traefik (`shelf app open`, Phase 9); LAN access stays rejected.
+    operator's decision, never part of app.yaml. Apps, and from Phase 10 previews, are reached by
+    port-forward through the API server to Traefik (`shelf app open`); LAN access stays rejected.
+  - Agents read the platform through `--json` documents and `shelf app status --wait --commit`,
+    which only reads: the commit comes from the deploy artifact's revision annotation, never
+    from a forge API.
   - Test levels: 1 is `just test` without a cluster (also CI), 2 the k3d cluster `shelf-dev` in
     the devcontainer (`just smoke-*`; in CI when a pull request is ready or labelled `level-2`,
     chosen by changed paths, and in full on main), 3 the mini and real Cloudflare.
