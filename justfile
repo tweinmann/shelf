@@ -13,7 +13,8 @@ default:
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    unformatted="$(gofmt -l .)"
+    # Only the repository's own files: CI keeps a Go cache under .cache in the workspace.
+    unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
     if [[ -n "$unformatted" ]]; then
       echo "gofmt needed:" >&2
       echo "$unformatted" >&2

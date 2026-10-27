@@ -1,40 +1,105 @@
 # Level-1 checks, and level-2 smoke tests against k3d. Both run inside the devcontainer image, so
 # CI uses exactly the tool versions pinned in .devcontainer/Dockerfile.
+#
+# Level 1 runs on every push. Level 2 is slow, so a pull request runs it when it is ready, not on
+# every push while it is being worked on:
+#   - when a pull request is opened or reopened as ready, or leaves draft;
+#   - on every push while it carries the label `level-2`, and when the label is added, also as a
+#     draft;
+#   - with the label `level-2-full`, the full set, as on main.
+# A pull request runs only the smoke tests its changed paths need (.github/scripts/
+# select-smokes.sh), and skips the slowest step of smoke-agent (SMOKE_FULL=0). main runs all of
+# them in full after every merge, and opens an issue when that fails; release.yml publishes only a
+# commit whose run on main succeeded.
 name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run it replaces. A label that has nothing to do with CI
+# gets a group of its own, so that adding it cancels nothing; runs on main are never cancelled.
+concurrency:
+  group: >-
+    ci-${{ github.event.pull_request.number || github.sha }}-${{
+    (github.event.action == 'labeled' && !startsWith(github.event.label.name, 'level-2')) && github.run_id || 'run' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
+    # A label that has nothing to do with CI changes no code. A level-2 label runs it again: its run
+    # may have cancelled the one of the push before it.
+    if: github.event.action != 'labeled' || startsWith(github.event.label.name, 'level-2')
     # The same architecture as the Mac and the mini.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # Go's build and module cache, kept in the workspace so the devcontainer sees it.
+      - uses: actions/cache@v4
+        with:
+          path: .cache/go
+          key: go-${{ runner.arch }}-${{ hashFiles('go.sum', '.devcontainer/Dockerfile') }}-${{ github.sha }}
+          restore-keys: go-${{ runner.arch }}-${{ hashFiles('go.sum', '.devcontainer/Dockerfile') }}-
       - name: just test (in the devcontainer)
         uses: devcontainers/ci@v0.3
         with:
           push: never
-          runCmd: just test
+          runCmd: |
+            export GOCACHE="$PWD/.cache/go/build" GOMODCACHE="$PWD/.cache/go/mod"
+            just test
+
+  # Which smoke tests to run, and how: none, those the changed paths need, or all in full.
+  plan:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    outputs:
+      smokes: ${{ steps.plan.outputs.smokes }}
+      full: ${{ steps.plan.outputs.full }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          LABEL: ${{ github.event.label.name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          all='["smoke-secrets","smoke-chart","smoke-init","smoke-apps","smoke-agent"]'
+          has() { jq -e --arg l "$1" 'index($l) != null' <<<"$LABELS" >/dev/null; }
+          smokes='[]' full=0
+          if [[ "$EVENT" == push ]]; then
+            smokes="$all" full=1
+          elif has level-2-full && [[ "$ACTION" != labeled || "$LABEL" == level-2-full ]]; then
+            smokes="$all" full=1
+          elif { has level-2 && [[ "$ACTION" == synchronize || "$LABEL" == level-2 ]]; } ||
+            { [[ "$DRAFT" != true && "$ACTION" =~ ^(opened|reopened|ready_for_review)$ ]]; }; then
+            smokes="$(git diff --name-only "$BASE" HEAD | .github/scripts/select-smokes.sh)"
+          fi
+          echo "smokes=$smokes" >>"$GITHUB_OUTPUT"
+          echo "full=$full" >>"$GITHUB_OUTPUT"
+          echo "level 2: $smokes (full=$full)" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Level-2 checks against a k3d cluster inside the devcontainer, as locally. Each smoke test
   # gets a fresh cluster of its own, so they run side by side; none depends on another's state.
-  # Pull requests only: main receives what a pull request already checked, so after a merge
-  # level 1 is enough.
   cluster:
-    if: github.event_name == 'pull_request'
+    needs: plan
+    if: needs.plan.outputs.smokes != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        smoke: [smoke-secrets, smoke-chart, smoke-init, smoke-apps, smoke-agent]
+        smoke: ${{ fromJSON(needs.plan.outputs.smokes) }}
     name: cluster (${{ matrix.smoke }})
     steps:
       - uses: actions/checkout@v7
@@ -45,4 +110,29 @@ jobs:
           runCmd: |
             set -e
             just cluster-up
-            just ${{ matrix.smoke }}
+            SMOKE_FULL=${{ needs.plan.outputs.full }} just ${{ matrix.smoke }}
+
+  # A failure on main is easy to miss in a mailbox: keep it as an issue until someone closes it.
+  # One open issue collects every failure; each one adds a comment.
+  report:
+    needs: [test, plan, cluster]
+    if: failure() && github.event_name == 'push'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="CI failed on main at ${GITHUB_SHA::12}: $RUN"
+          issue="$(gh issue list --label ci-main-red --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$issue" ]]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh label create ci-main-red --color B60205 --description "CI on main failed" 2>/dev/null || true
+            gh issue create --title "CI on main failed" --label ci-main-red \
+              --body "$body"$'\n\n'"Close this issue once main is green again."
+          fi

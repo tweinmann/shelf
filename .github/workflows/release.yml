@@ -13,7 +13,29 @@ permissions:
   packages: write
 
 jobs:
+  # A release ships what main tested in full: the CI run of the tagged commit on main, with every
+  # smoke test, must have succeeded. Pull requests skip the slowest checks; this is where they
+  # count.
+  gate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          conclusion="$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main" \
+            --jq '.workflow_runs | sort_by(.run_started_at) | last | .conclusion // .status // "none"')"
+          if [[ "$conclusion" != success ]]; then
+            echo "::error::CI on main for ${GITHUB_SHA::12} is '$conclusion', not success. Tag a commit of main whose CI run succeeded, or wait for it to finish."
+            exit 1
+          fi
+          echo "CI on main for ${GITHUB_SHA::12} succeeded"
+
   release:
+    needs: gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:

@@ -135,6 +135,14 @@ All development happens inside the devcontainer on Docker Desktop. It runs its o
 daemon (Docker-in-Docker), which also hosts the k3d cluster. Nothing is installed on the host
 Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 
+CI runs level 1 on every push. Level 2 runs when a pull request is opened or reopened as ready
+or leaves draft, and on every push while it carries the label `level-2`; only the smoke tests its
+changed paths need (`.github/scripts/select-smokes.sh`), with `SMOKE_FULL=0`. The label
+`level-2-full` and every merge to main run all of them in full. A red main opens an issue
+labelled `ci-main-red`, and `release.yml` publishes only a commit whose CI run on main succeeded.
+A new path that is neither documentation nor listed in `select-smokes.sh` runs everything; list
+it there when it belongs to one smoke test.
+
 | Command | Run from | Purpose |
 |---|---|---|
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, `go test -race`, helm lint, kubeconform, examples) |
@@ -154,7 +162,7 @@ Mac. Tool versions are pinned in `.devcontainer/Dockerfile`.
 | `just smoke-chart` | devcontainer | install `examples/hello` with the chart, check the Phase 2 acceptance criteria (needs Docker Hub) |
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
-| `just smoke-agent` | devcontainer | Phase 9: `--json` documents, `--wait --commit` (Ready only after the commit rolled out, Failed for an image that cannot be pulled, TimedOut for a commit that never arrives, Ready again for a fix after a failure; takes up to 10 minutes because Helm times out the broken upgrade first) and `shelf app open` with the app's Host and `stripPrefix` (needs Docker Hub) |
+| `just smoke-agent` | devcontainer | Phase 9: `--json` documents, `--wait --commit` (Ready only after the commit rolled out, Failed for an image that cannot be pulled, TimedOut for a commit that never arrives; with `SMOKE_FULL=1`, the default, also Ready again for a fix after a failure, which takes about 5 more minutes because Helm times out the broken upgrade first) and `shelf app open` with the app's Host and `stripPrefix` (needs Docker Hub) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
 | `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token (set `CF_ACCOUNT_ID` if it sees several accounts); needs a cluster with a host suffix |
 | `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |

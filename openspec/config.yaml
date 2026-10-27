@@ -48,7 +48,8 @@ context: |
     operator's decision, never part of app.yaml. Previews are reached by port-forward through
     the API server to Traefik (`shelf app open`, Phase 9); LAN access stays rejected.
   - Test levels: 1 is `just test` without a cluster (also CI), 2 the k3d cluster `shelf-dev` in
-    the devcontainer (`just smoke-*`, in CI on pull requests), 3 the mini and real Cloudflare.
+    the devcontainer (`just smoke-*`; in CI when a pull request is ready or labelled `level-2`,
+    chosen by changed paths, and in full on main), 3 the mini and real Cloudflare.
     The rules are in the spec `dev-environment`.
 
   ## Rules for proposals

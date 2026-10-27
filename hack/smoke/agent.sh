@@ -3,7 +3,13 @@
 # for GHCR: `shelf app status --json`, `--wait --commit` that returns Ready only after the
 # awaited commit rolled out, Failed (exit 1) for an image that cannot be pulled, TimedOut
 # (exit 2) for a commit that never arrives, and `shelf app open` with the app's Host and
-# stripPrefix through Traefik.
+# stripPrefix through Traefik. With SMOKE_FULL=1 (the default) it also checks that a fixed commit
+# after the failed one is Ready again, which waits for Helm to time out the broken upgrade
+# (about 5 minutes). CI runs that part on main only; pull requests set SMOKE_FULL=0, leave the
+# broken app in place and discard the cluster.
+#
+# The script asks Flux to fetch each new artifact at once instead of waiting for its poll: what
+# it checks is how `--wait` follows a rollout, not Flux's interval. `--wait` itself only reads.
 #
 # Installs or updates the platform first (idempotent). Needs network access for images.
 set -euo pipefail
@@ -15,14 +21,15 @@ work="$(mktemp -d)"
 app=agent-smoke
 artifact="oci://$SHELF_REGISTRY_HOST/smoke/$app-deploy"
 open_pid=""
+full="${SMOKE_FULL:-1}"
 export SHELF_HOME="$work/home"
 
 shelf() { "$work/shelf" "$@"; }
 
 cleanup() {
   [[ -n "$open_pid" ]] && kill "$open_pid" 2>/dev/null || true
-  if [[ "${KEEP:-}" == 1 ]]; then
-    echo "KEEP=1: leaving app $app in place; its secret backup is in $SHELF_HOME"
+  if [[ "${KEEP:-}" == 1 || "$full" != 1 ]]; then
+    echo "leaving app $app in place (KEEP=1 or SMOKE_FULL=0); its secret backup is in $SHELF_HOME"
     return
   fi
   shelf app rm "$app" --yes >/dev/null 2>&1 || true
@@ -35,10 +42,12 @@ step() { echo "--- $*"; }
 commit() { head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
 # publish <dir> <commit>: pushes the files in dir as the deploy artifact, tag main, built from
-# commit.
+# commit, and asks Flux to fetch it once the app exists.
 publish() {
   flux push artifact "$artifact:main" --path "$1" --source local --revision "main@sha1:$2" \
     --insecure-registry >/dev/null 2>&1 || die "push failed"
+  kubectl -n "$app" annotate ocirepository deploy --overwrite \
+    "reconcile.fluxcd.io/requestedAt=$(date +%s%N)" >/dev/null 2>&1 || true
 }
 
 # render <app.yaml> <dir>: writes the deploy manifest of an app.yaml into dir.
@@ -140,6 +149,12 @@ shelf app status "$app" --wait --commit deadbeef --timeout 5s --json >"$work/wai
   || die "unknown commit: exit $code, $(cat "$work/wait4.json")"
 verdict "$work/wait4.json" .stage.message | grep -q "waiting for commit deadbee" \
   || die "the timeout does not say what it waited for: $(cat "$work/wait4.json")"
+
+if [[ "$full" != 1 ]]; then
+  echo "SMOKE_FULL=0: skipping the fix after the failure; the broken app stays (its upgrade holds up removal)"
+  echo "smoke-agent passed"
+  exit 0
+fi
 
 # The agent's loop ends with a fix: a working commit after the broken one is Ready again. It
 # also leaves no release stuck in an upgrade, which would hold up the removal.
