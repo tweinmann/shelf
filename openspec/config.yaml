@@ -6,11 +6,20 @@ context: |
   Keep OpenSpec structural headings and SHALL/MUST keywords in English.
 
   ## The product
-  shelf is a self-hosted app platform for a single Apple Silicon Mac mini, written in Go. Tenants
-  build images in their own CI and push a deploy artifact to GHCR; shelf watches it and deploys
-  it. It is an appliance: one binary that is a CLI (`shelf`) and, as `shelf serve`, an admin UI on
-  the LAN with a login. One-command install and a browser wizard are planned. Learning project for
-  platform engineering, not for production.
+  shelf is a self-hosted GitOps platform, written in Go, for running parallel coding-agent
+  branches as isolated, verified previews on your own hardware, with a path to production through
+  standard artefacts. Tenants build images in their own CI and push a deploy artifact to GHCR;
+  shelf watches it and deploys it. One binary is a CLI (`shelf`) and, as `shelf serve`, an admin
+  UI with a login. Target users: experienced developers and small teams who run coding agents
+  (Claude Code first) in several worktrees at once, not people who never want to see Kubernetes.
+
+  The target, as re-cut on 2026-10-27: every branch gets its own isolated preview, only a verified
+  artefact becomes reachable beyond a preview, and the same verified state goes to any Kubernetes
+  cloud as a pull request (eject), without depending on shelf. shelf runs on any Linux host with
+  k3s, with a one-step install on a Mac (Colima). Today it runs against any kubecontext, developed
+  on the dev cluster; previews, verification, the host setup and eject are planned. shelf is
+  pre-production: an app's "main" is its stable, verified state, not production. Learning and
+  reference project for platform engineering.
 
   OpenSpec is the only planning source: `openspec/specs/` is what shelf does today,
   `openspec/changes/` what it is about to do (the roadmap is the `phase-<n>-<slug>` changes), and
@@ -20,18 +29,24 @@ context: |
   proposing, it wins over this summary.
 
   ## Architecture
-  - On the mini (from Phase 9): macOS runs Colima, Colima runs k3s. `shelf serve` runs as the
-    logged-in user under a LaunchAgent, never as root; its state is plain files under `~/.shelf`
-    (0700, files 0600): config, admin file, secret backups, Cloudflare connections, audit log. No
-    keychain: an unsigned, self-updating binary would re-prompt.
+  - On the host (from Phase 13): a Linux host runs k3s directly; on macOS (Apple Silicon) Colima
+    runs a Linux VM with k3s, and the same Linux bootstrap follows. Tier 1: macOS with Colima,
+    Ubuntu/Debian on arm64 and amd64. `shelf serve` runs as the logged-in user, never as root (a
+    LaunchAgent on macOS); its state is plain files under `~/.shelf` (0700, files 0600): config,
+    admin file, secret backups, Cloudflare connections, audit log. No keychain: an unsigned,
+    self-updating binary would re-prompt.
   - In the cluster: Flux, installed through the Flux Operator (`FluxInstance`), syncs the platform
     artifact (`platform/`: Traefik as ClusterIP in `traefik`, the ResourceSet `apps` in
     `shelf-system`). Each app is a `ResourceSetInputProvider`; the ResourceSet renders its
     namespace, the deploy artifact source and the HelmRelease of the generic chart `shelf-app`.
     An exposed app has cloudflared in its namespace with one rule to Traefik, which routes by Host.
-  - `shelf init` is split into idempotent layers: `init host` (the Mac only, Phase 9),
-    `init cluster` (any kubecontext, no Colima assumptions) and the wrapper. The wizard (Phase 11)
-    calls the same operations, so re-running it changes nothing.
+  - `shelf init` is split into idempotent layers: `init host` (Phase 13: provide the environment,
+    macOS or Linux), `init cluster` (any kubecontext, no Colima or distribution assumptions) and
+    the wrapper.
+  - Three separate states per app and preview: build (built, scanned, signed), deployment (which
+    digest runs where) and exposure (cluster only, port-forward, tunnel). Exposure is the
+    operator's decision, never part of app.yaml. Previews are reached by port-forward through
+    the API server to Traefik (`shelf app open`, Phase 9); LAN access stays rejected.
   - Test levels: 1 is `just test` without a cluster (also CI), 2 the k3d cluster `shelf-dev` in
     the devcontainer (`just smoke-*`, in CI on pull requests), 3 the mini and real Cloudflare.
     The rules are in the spec `dev-environment`.
@@ -59,18 +74,23 @@ context: |
     that checks them.
 
   ## Not in the MVP
-  Per-branch environments, scale-to-zero, supply-chain security (signatures, scans, policies), an
-  own registry, backups, seed data, devcontainer integration for tenant apps, a catalog of managed
+  Scale-to-zero, an own registry, backups, devcontainer integration for tenant apps, a catalog of managed
   services; more than one user or roles, admin access from the internet, TLS on the LAN, a stable
   public HTTP API (`/api/` serves the UI and may change), code signing, notarization, `.pkg`
   installers, metrics history and graphs, log retention and search, editing app.yaml in the UI,
   apps without a tenant repository, Prometheus. LAN access to apps (proxy plus mDNS) was
-  considered and rejected in 8d.
+  considered and rejected in 8d, and LAN access with wildcard DNS and DNS-01 certificates again
+  in the re-cut of 2026-10-27; apps and previews are reached by port-forward or a tunnel.
 
   ## Later (no phase yet)
   Packages of a GitHub organisation in the form choices; a short 504 seen once during a rollout of
   a single-instance app; MongoDB with auth and a replica set (secrets as file mounts); builds via
-  `path`, CronJobs, init and migration jobs, `${app.url}`, secret rotation.
+  `path`, CronJobs, init and migration jobs, `${app.url}`, secret rotation. From the re-cut of
+  2026-10-27: identity-protected previews through Cloudflare Access; the setup wizard (formerly
+  Phase 11; re-cut or dropped, its roadmap text is in git history); `--existing-cluster` (install
+  only shelf's components into an existing cluster, with the eject target preflight); further eject
+  targets; a go-live check; optional opinionated providers (e.g. `resources: db: {type:
+  postgres}`); seed data for previews.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

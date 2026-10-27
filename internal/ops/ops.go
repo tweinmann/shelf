@@ -88,6 +88,8 @@ type Cluster interface {
 	AppStates(ctx context.Context, cfg *rest.Config) ([]cluster.AppState, error)
 	AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]cluster.Component, error)
 	AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error)
+	AppRollout(ctx context.Context, cfg *rest.Config, app string) (cluster.Rollout, error)
+	ForwardTraefik(ctx context.Context, cfg *rest.Config) (*cluster.Forward, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
 	// AppConfig returns how an app is registered, or nil when there is no such app.
 	AppConfig(ctx context.Context, cfg *rest.Config, app string) (*cluster.AppConfig, error)
@@ -142,6 +144,14 @@ func (liveCluster) AppComponents(ctx context.Context, cfg *rest.Config, app stri
 
 func (liveCluster) AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error) {
 	return cluster.AppDiagnosis(ctx, cfg, app)
+}
+
+func (liveCluster) AppRollout(ctx context.Context, cfg *rest.Config, app string) (cluster.Rollout, error) {
+	return cluster.AppRollout(ctx, cfg, app)
+}
+
+func (liveCluster) ForwardTraefik(ctx context.Context, cfg *rest.Config) (*cluster.Forward, error) {
+	return cluster.ForwardTraefik(ctx, cfg)
 }
 
 func (liveCluster) Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error) {

@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        smoke: [smoke-secrets, smoke-chart, smoke-init, smoke-apps]
+        smoke: [smoke-secrets, smoke-chart, smoke-init, smoke-apps, smoke-agent]
     name: cluster (${{ matrix.smoke }})
     steps:
       - uses: actions/checkout@v7

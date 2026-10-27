@@ -1,6 +1,12 @@
 # shelf
 
-**A small, self-hosted app platform for a single Apple Silicon Mac mini.**
+**Build and verify on your hardware, ship to any cloud, with the same verified artefact.**
+
+shelf is a self-hosted GitOps platform for developers who let several coding agents work in
+parallel. It runs on any Linux host with k3s, or with one command on a Mac (Colima). The goal is
+that every branch gets its own isolated preview, only verified artefacts become reachable beyond
+it, and the same verified state reaches any Kubernetes cloud as a pull request, without depending
+on shelf.
 
 Describe your app in one short `app.yaml`, build your images in your own CI, and shelf runs
 them on Kubernetes: with persistent volumes, generated secrets and health checks. An app stays
@@ -8,16 +14,20 @@ inside the cluster until you give it a public address: `https://<app>.<your-doma
 your own Cloudflare account, or a temporary `*.trycloudflare.com` name that needs no account.
 
 > [!WARNING]
-> shelf is a learning project for platform engineering. It is **not meant for production**,
-> and it is **still under construction**: a push to your repository deploys your app, and an
-> admin UI in the browser adds, changes and removes apps. The Mac mini setup, the background
-> service, the installer and the setup wizard are still missing. See [Status](#status).
+> shelf is a learning and reference project for platform engineering, and it is
+> **pre-production**: production is a separate cluster reached through eject (planned). It is
+> **still under construction**: today a push to your repository deploys your app, and the CLI or
+> an admin UI in the browser adds, changes and removes apps. Branch previews, the verification
+> chain, the host setup, the installer and eject are planned, not built. See [Status](#status).
 
-Where this is going: shelf installs on the mini with one command, and everything after that
-happens in an admin UI in your browser — adding an app, changing which version runs, removing it
-again, later logs and resource usage. You do not need to know that Kubernetes is underneath. The
-command line stays the expert interface for everything the UI can do, and the cluster stays open
-to `kubectl` if you want it.
+Where this is going: you run Claude Code (other agents later) in several worktrees at once. Every
+branch your agents push gets its own preview of the complete stack, database included, in a
+namespace of its own, reachable from your machine with `shelf app open` and from nowhere else.
+Your agents push, wait for the rollout and read a machine-readable verdict. Only an artefact that
+CI signed and scanned can be put on the internet, and the operator decides that, never the
+repository. When an app is ready, `shelf eject` hands the same verified digest to your production
+cluster as a pull request of plain Flux and Helm objects. shelf is for developers who are
+willing to see Kubernetes; the cluster stays open to `kubectl`.
 
 ## Contents
 
@@ -59,7 +69,7 @@ flowchart LR
     end
     B --> R[(GHCR)]
     I --> R
-    subgraph mini["Mac mini (k3s)"]
+    subgraph host["Your host (k3s)"]
         F[Flux] --> H[Helm chart shelf-app]
         H --> K[Deployments, StatefulSets,<br/>Services, Ingress, PVCs]
         K --> X[Traefik]
@@ -71,10 +81,10 @@ flowchart LR
 1. Your workflow builds the images and runs `shelf render` on your `app.yaml`. This pins every
    image to a digest, fills in host names and ports, and checks your file.
 2. It pushes the result to GHCR as a small deploy artifact.
-3. Flux on the Mac mini notices the new artifact and hands it to the generic `shelf-app` Helm
+3. Flux on your host notices the new artifact and hands it to the generic `shelf-app` Helm
    chart, which creates the Kubernetes objects.
 4. Traefik routes requests by host name. An app you put on the internet gets a Cloudflare
-   Tunnel of its own, with cloudflared in its namespace, so no port on the mini is opened.
+   Tunnel of its own, with cloudflared in its namespace, so no port on the host is opened.
 
 What shelf does is specified in [openspec/specs/](openspec/specs); the roadmap and the work in
 progress are the changes in [openspec/changes/](openspec/changes).
@@ -99,14 +109,19 @@ one starts.
 | 8 | Adding, changing and removing apps from the browser | ✅ done |
 | 8b | Connections instead of platform credentials: registry logins and Cloudflare accounts chosen per app, one tunnel per app | ✅ done |
 | 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | ✅ done |
-| 9 | Mac mini: host setup, Colima, `shelf doctor`, `shelf destroy` | planned |
-| 10 | Service and one-command installer | planned |
-| 11 | Setup wizard | planned |
-| 12 | Logs, resource usage, self-update | planned |
-| 13 | Reference apps | planned |
+| 9 | Agent interface: `--json`, `shelf app status --wait`, `shelf app open` | planned |
+| 10 | Branch previews: one isolated preview per branch, discovered from the registry | planned |
+| 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | planned |
+| 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | planned |
+| 13 | Host: macOS with Colima and Linux with k3s, `shelf doctor`, `shelf destroy` | planned |
+| 14 | Service and one-command installer | planned |
+| 15 | Logs, resource usage, self-update | planned |
+| 16 | Eject and promotion to a production cluster | planned |
 
 Phases 6 to 13 were re-cut on 2026-09-20, when the target product changed from a command-line
-tool to an appliance with an admin UI. Every phase from here on is an
+tool to an appliance with an admin UI. On 2026-10-27 the roadmap was re-cut again: shelf became
+a platform for parallel agent branches, the previews and the verification chain moved ahead of
+the host setup, the Mac lock-in was dropped, and the setup wizard was deferred. Every phase from here on is an
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) change in [openspec/changes/](openspec/changes);
 the decisions and results of Phases 0 to 8d, with their reasons, are in
 [the baseline archive](openspec/changes/archive/2026-10-20-baseline).
@@ -114,10 +129,9 @@ the decisions and results of Phases 0 to 8d, with their reasons, are in
 ## Quick start
 
 > [!NOTE]
-> On the finished product this becomes one command on the mini —
-> `curl -fsSL https://raw.githubusercontent.com/tweinmann/shelf/v0/install.sh | sh` — followed by
-> a setup wizard in the browser. That installer arrives in Phase 10. Until then, install the
-> binary yourself:
+> On the finished product this becomes one command on the host —
+> `curl -fsSL https://raw.githubusercontent.com/tweinmann/shelf/v0/install.sh | sh`. That
+> installer arrives in Phase 14. Until then, install the binary yourself:
 
 Download the latest release for your platform (linux or darwin, amd64 or arm64):
 
@@ -230,8 +244,14 @@ shelf app add <app> oci://ghcr.io/<owner>/<name>:main --registry ghcr
 same artifact can be added under several names, for instance `shop` and `shop-staging`; each
 gets a namespace and secrets of its own. A public artifact needs no `--registry`.
 
-The app now answers at `<app>.shelf.internal`, inside the cluster only. To reach it from the
-internet, choose one of two ways:
+The app now answers at `<app>.shelf.internal`, inside the cluster only. To look at it from a
+browser on your machine, without putting it anywhere else:
+
+```sh
+shelf app open <app> --browser
+```
+
+To reach it from the internet, choose one of two ways:
 
 - **Your own domain** through your Cloudflare account. Define the connection once; the token
   needs Account:Cloudflare Tunnel:Edit and Zone:DNS:Edit, and stays on your machine in
@@ -252,6 +272,11 @@ internet, choose one of two ways:
 takes the app off the internet again.
 
 From then on, every push to `main` reaches the cluster by itself, usually within two minutes.
+A coding agent working in the repository waits for its own commit with
+`shelf app status <app> --wait --commit "$(git rev-parse HEAD)" --json` and reads the verdict
+(see [Output for scripts and agents](#output-for-scripts-and-agents));
+[examples/tenant](examples/tenant) ships a Claude Code skill and a `CLAUDE.md` that explain the
+loop.
 `shelf app rm <app>` removes the app with all its data, its tunnel and its DNS record.
 
 ## Writing an `app.yaml`
@@ -331,7 +356,7 @@ stays as it is. So `sh -c 'echo $HOME'` works without escaping.
 
 ### Things to know
 
-- **Volume sizes are not enforced.** The local storage on the Mac mini does not limit
+- **Volume sizes are not enforced.** The local storage on the host does not limit
   capacity, so `size` is documentation. A component can fill the disk.
 - **Plan volumes up front.** Kubernetes does not allow changing the volumes of a StatefulSet in
   place, and the local storage cannot grow, so changing an existing volume later needs manual
@@ -391,13 +416,58 @@ drift.
 | `shelf connection packages <name>` / `zones <name>` | Lists the deploy artifacts a registry connection can pull, or the zones of a Cloudflare connection's account. |
 | `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. `--registry` picks the registry connection; `--cloudflare` with `--domain` puts the app on the internet under its own domain, `--quick` through a quick tunnel; without either it stays inside the cluster. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Refuses at once if the cluster has no platform. Waits until the app is ready. Safe to run again, e.g. after adding a secret. |
 | `shelf app credentials <app>` | Changes the app's connections or domain and deploys it again: `--registry`, `--no-registry`, `--cloudflare`, `--domain`, `--quick`, `--private`. |
+| `shelf app open <app>` | Makes the app reachable from a browser on this machine at `http://127.0.0.1:<port>/`, for as long as it runs: requests go through the Kubernetes API server to the cluster's Traefik with the app's own Host header, so routes and `stripPrefix` behave as through a tunnel. Works for apps that stay inside the cluster. Listens on 127.0.0.1 only; `--port` picks the port, `--browser` opens it. It is not an exposure and changes nothing about the app. |
 | `shelf app tags <app>` | Lists the tags of the app's deploy artifact, newest first. |
 | `shelf app redeploy <app>` | Fetches the app's artifact again under the tag it is registered with and rolls out what it finds. For a tag that moved, or a deploy worth another try. |
 | `shelf app secrets <app>` | Lists the names of the generated secrets; `--reveal` prints the values. |
-| `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also names its components and where each of them answers. Same chain as the admin UI shows. |
+| `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also shows the git commit the running artifact was built from, and names its components and where each of them answers. Same chain as the admin UI shows. `--wait` waits until the app is Ready or a step failed and prints the verdict; `--commit <sha>` first waits until the app runs the artifact built from that commit. Exit status 0 Ready, 1 failed, 2 timed out (`--timeout`, default 10m). |
 | `shelf serve` | Runs the admin UI on port 7654 of the local network (`--listen 127.0.0.1:7654` keeps it off the network). The first start prints a setup code that claims the instance; after that a password protects it. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets, tunnel and DNS record, after asking. The secret backup stays. |
 | `shelf version` | Prints the version. |
+
+### Output for scripts and agents
+
+`shelf app status`, `shelf app tags`, `shelf connection list` and `shelf version` take `--json`
+and then print one JSON document on stdout and nothing else there:
+
+```console
+$ shelf app status hello --json
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "AppStatus",
+  "name": "hello",
+  "phase": "Ready",
+  "artifact": "oci://ghcr.io/o/hello:main",
+  "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+  "stages": [ ... ],
+  ...
+}
+```
+
+Every document has `apiVersion` and `kind` (`AppList`, `AppStatus`, `WaitResult`, `TagList`,
+`ConnectionList`, `Version`). A command that fails prints a document of kind `Error` with a
+`message`, and exits with status 1. Within one `apiVersion`, no field is removed, renamed or
+given another meaning; new fields may appear, so ignore the ones you do not know. Empty fields
+are left out rather than `null`. `shelf app secrets` has no `--json`, so that secret values never
+end up in an agent's transcript.
+
+An agent that pushed a commit waits for it like this:
+
+```console
+$ shelf app status hello --wait --commit "$(git rev-parse HEAD)"
+hello: Failed, running commit 42a964eb0b4b
+  the pods: ImagePullBackOff: Back-off pulling image
+  the image cannot be pulled; check the reference and whether the cluster may read that registry
+$ echo $?
+1
+```
+
+The wait reads the commit from the deploy artifact the cluster holds, which the reusable workflow
+stamps with the commit it was built from, and is Ready only once every step has caught up with
+that artifact. It never changes anything: the platform notices a new artifact within a minute
+by itself. With `--json` the verdict is a `WaitResult` with `outcome` (`Ready`, `Failed` or
+`TimedOut`) and, unless Ready, the `stage` that holds the app up, with its `reason`, `message`
+and `hint`.
 
 Example of an error message:
 
@@ -406,7 +476,7 @@ app.yaml:12: error: components.web.route: route needs a port; add port or ports 
 ```
 
 `shelf service`, which installs the admin UI as a background service, and the commands for the
-Mac mini (`shelf init host`, `shelf doctor`, `shelf destroy`) follow in later phases.
+host (`shelf init host`, `shelf doctor`, `shelf destroy`) follow in later phases.
 
 ## Developing shelf
 
@@ -434,7 +504,7 @@ Useful commands:
 | `just build` | Build `bin/shelf` |
 | `just cluster-up` / `cluster-stop` / `cluster-down` / `cluster-reset` | Manage the local k3d cluster `shelf-dev` |
 | `just platform-push`, `just chart-push`, `just init-cluster` | Push `platform/` and the chart to the local registry; `init-cluster` pushes both and installs them with `shelf init cluster` |
-| `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, and `shelf app add`/`rm` with rollouts from the local registry |
+| `just smoke-secrets`, `just smoke-chart`, `just smoke-init`, `just smoke-apps`, `just smoke-agent` | Smoke tests against the local cluster, also run in CI: secret expansion, the chart, `shelf init cluster` with routing through Traefik, `shelf app add`/`rm` with rollouts from the local registry, and the agent interface (`--json`, `--wait --commit`, `shelf app open`) |
 | `just smoke-registry <image>`, `just smoke-tenant <app> <artifact>`, `just smoke-expose <app> <domain>` | Smoke tests that need credentials: a private image pull, a real tenant repository end to end, and an app's own Cloudflare tunnel (needs a cluster with a host suffix) |
 | `just smoke-quick` | A quick tunnel for `examples/hello`; puts it on the internet for a few minutes |
 | `hack/nuke.sh` | **Run in a terminal on your machine, not in the container.** Removes every Docker object shelf created. |

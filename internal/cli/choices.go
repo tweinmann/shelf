@@ -78,7 +78,10 @@ func newConnectionZonesCmd(o Options) *cobra.Command {
 }
 
 func newAppTagsCmd(o Options) *cobra.Command {
-	var target clusterFlags
+	var (
+		target clusterFlags
+		asJSON bool
+	)
 	cmd := &cobra.Command{
 		Use:   "tags <name>",
 		Short: "List the tags of an app's deploy artifact, newest first",
@@ -103,6 +106,9 @@ one with ` + "`shelf app add <name> <artifact>:<tag>`" + `.`,
 				return err
 			}
 			out := cmd.OutOrStdout()
+			if asJSON {
+				return printJSON(out, tagList(app.Name, app.Artifact.Tag, tags))
+			}
 			if len(tags) == 0 {
 				fmt.Fprintln(out, "No tags.")
 				return nil
@@ -119,6 +125,7 @@ one with ` + "`shelf app add <name> <artifact>:<tag>`" + `.`,
 		},
 	}
 	target.registerTarget(cmd.Flags())
+	registerJSON(cmd, &asJSON)
 	return cmd
 }
 

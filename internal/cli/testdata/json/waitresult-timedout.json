@@ -1,0 +1,14 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "WaitResult",
+  "outcome": "TimedOut",
+  "app": "hello",
+  "commit": "9956993c371777310050f0c10d4f9b90aebcb969",
+  "revision": "main@sha256:old",
+  "stage": {
+    "name": "the deploy artifact",
+    "object": "OCIRepository hello/deploy",
+    "phase": "Working",
+    "message": "waiting for commit 42a964e; running 9956993"
+  }
+}

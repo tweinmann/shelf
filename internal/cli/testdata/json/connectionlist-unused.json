@@ -1,0 +1,12 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "ConnectionList",
+  "items": [
+    {
+      "kind": "cloudflare",
+      "name": "home",
+      "account": "acc-1",
+      "apps": []
+    }
+  ]
+}

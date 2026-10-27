@@ -1,0 +1,23 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "ConnectionList",
+  "items": [
+    {
+      "kind": "registry",
+      "name": "ghcr",
+      "user": "o",
+      "registry": "ghcr.io",
+      "apps": [
+        "greeter"
+      ]
+    },
+    {
+      "kind": "cloudflare",
+      "name": "home",
+      "account": "acc-1",
+      "apps": [
+        "greeter"
+      ]
+    }
+  ]
+}

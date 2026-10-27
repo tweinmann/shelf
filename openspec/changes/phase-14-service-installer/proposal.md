@@ -26,7 +26,17 @@ To be decided at `/opsx:propose`.
 
 ## Impact
 
-CLI, `install.sh`, `internal/host`. Level 3: needs the mini.
+CLI, `install.sh`, `internal/host`. Level 3: needs the mini and a Linux host.
+
+## Re-cut of 2026-10-27
+
+Formerly Phase 10. The installer stays one step on a Mac and also has to cover Linux hosts
+(Phase 13): internally it is split into "provide the environment" and "install shelf's
+components".
+
+**Open:** the service on Linux (a systemd user unit next to the LaunchAgent, or a system unit),
+and how `install.sh` tells the two platforms apart. The setup wizard (formerly Phase 11) is no
+longer the target of this phase's acceptance; the installer ends with the URL and the setup code.
 
 ## Roadmap text (from the plan before OpenSpec)
 
