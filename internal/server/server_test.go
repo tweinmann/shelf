@@ -484,6 +484,19 @@ func TestPages(t *testing.T) {
 		golden(t, "new", get(h, "/apps/new", cookie))
 	})
 
+	// A cluster with a dev registry offers to pull without TLS, but never ticks it: the
+	// artifacts most apps come from are on GHCR, which speaks nothing but TLS.
+	t.Run("add form, cluster with a dev registry", func(t *testing.T) {
+		t.Parallel()
+		dev := runningPlatform()
+		dev.status.Settings.InsecureRegistry = true
+		h, cookie := claimed(t, dev)
+		body := get(h, "/apps/new", cookie).Body.String()
+		if !strings.Contains(body, `<input type="checkbox" name="insecure" >`) {
+			t.Errorf("the form does not offer an unticked registry without TLS:\n%s", body)
+		}
+	})
+
 	t.Run("quick tunnels", func(t *testing.T) {
 		t.Parallel()
 		h, cookie := claimed(t, quickPlatform())

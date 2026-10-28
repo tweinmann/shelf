@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tweinmann/shelf/internal/hostcfg"
+	"github.com/tweinmann/shelf/internal/ops"
 	"github.com/tweinmann/shelf/internal/server"
 )
 
@@ -41,6 +42,9 @@ shows nothing but the page that asks for it.`,
 			if err != nil {
 				return err
 			}
+			// A server outlives the cluster it started with: after a reset the kubeconfig holds
+			// a new certificate authority, and the old one would fail every request.
+			shelf.Reload = func() (ops.Target, error) { return ops.LoadTarget(target.kubeconfig, target.context) }
 			home, err := o.shelfHome()
 			if err != nil {
 				return err

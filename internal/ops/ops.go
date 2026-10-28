@@ -196,6 +196,10 @@ type FetchFunc func(ctx context.Context, ref string, auth authn.Authenticator, i
 // interfere with each other.
 type Ops struct {
 	Target Target
+	// Reload, when set, reads the target again before every operation, so that a server that
+	// runs for days follows a kubeconfig rewritten under it, as when the cluster was recreated
+	// with a new certificate authority. When it fails, Target is used.
+	Reload func() (Target, error)
 	Env    Env
 
 	Cluster       Cluster
@@ -216,8 +220,18 @@ func New(t Target, env Env) *Ops {
 	}
 }
 
+// target is the cluster the next operation works on.
+func (o *Ops) target() Target {
+	if o.Reload != nil {
+		if t, err := o.Reload(); err == nil {
+			return t
+		}
+	}
+	return o.Target
+}
+
 // config is the cluster connection every operation hands to internal/cluster.
-func (o *Ops) config() *rest.Config { return o.Target.Config }
+func (o *Ops) config() *rest.Config { return o.target().Config }
 
 var appNameRE = regexp.MustCompile(schema.AppNamePattern)
 

@@ -104,7 +104,17 @@ in its own namespace `<app>--<slug>` with a quota, limits and generated secrets,
 a new branch reached a Ready preview in about 1 min 45 s (CI 93 s, then 11 s), deleting it
 removed the preview within a minute with the workflow's `GITHUB_TOKEN`. Results in
 `openspec/changes/archive/2026-10-28-phase-10-branch-previews`.
-Next: Phase 11 (verification chain).
+Phase 11 complete (2026-10-28): the verification chain. The reusable workflow signs every built
+image and the deploy artifact keyless with cosign and scans every image with Trivy (summary in
+the annotation `dev.shelf.scan`); the release signs chart and platform. Flux verifies every
+OCIRepository against the cluster's signer (`shelf init cluster`, keyless by default or
+`--signer-key`), the Sigstore policy-controller admits an app's built images only when signed,
+and `--cloudflare`/`--quick` refuse an app that is not verified; `shelf app status`, `--json` and
+the app page show the chain. Release v0.8.0. Accepted with `tweinmann/shelf-hello`: the build takes
+2 min 36 s (Phase 10: 1 min 33 s), an unsigned artifact and an unsigned image were refused, and
+`gretter` was exposed only once verified. `shelf serve` now follows a rewritten kubeconfig.
+Results in `openspec/changes/archive/2026-10-28-phase-11-verification-chain`.
+Next: Phase 12 (hardening).
 
 ## Working agreements
 

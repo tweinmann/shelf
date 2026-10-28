@@ -1,8 +1,11 @@
 package ops
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"k8s.io/client-go/rest"
 
 	"github.com/tweinmann/shelf/internal/cluster"
 )
@@ -148,5 +151,27 @@ func TestAppAddress(t *testing.T) {
 				t.Errorf("component URL %q, want %q", comps[0].URL, want)
 			}
 		})
+	}
+}
+
+// TestReloadTarget covers a server whose kubeconfig is rewritten under it: every operation takes
+// the target as it reads now, and the one it started with only while the file cannot be read.
+func TestReloadTarget(t *testing.T) {
+	t.Parallel()
+	started := Target{Context: "k3d-shelf-dev", Config: &rest.Config{Host: "https://127.0.0.1:6445"}}
+	o := &Ops{Target: started}
+	if got := o.config(); got != started.Config {
+		t.Errorf("without Reload: got %v, want the started target", got)
+	}
+
+	reset := Target{Context: "k3d-shelf-dev", Config: &rest.Config{Host: "https://127.0.0.1:6445"}}
+	var err error
+	o.Reload = func() (Target, error) { return reset, err }
+	if got := o.config(); got != reset.Config {
+		t.Errorf("after a reset: got %v, want the reloaded target", got)
+	}
+	err = errors.New("kubeconfig: half written")
+	if got := o.config(); got != started.Config {
+		t.Errorf("unreadable kubeconfig: got %v, want the started target", got)
 	}
 }

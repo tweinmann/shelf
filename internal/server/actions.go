@@ -51,7 +51,6 @@ func (s *Server) newAppForm(w http.ResponseWriter, r *http.Request) {
 		base:        s.base(r, "Add an app"),
 		Status:      status,
 		Connections: s.connections(ctx),
-		Insecure:    status.Settings.InsecureRegistry,
 	})
 }
 

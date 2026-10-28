@@ -466,3 +466,39 @@ Deviations found while implementing:
   registry)`: nothing scans in level 2, and the summary only lets a dev app count as verified.
 - **`smoke-tenant`.** It installs a released platform with keyless verification, because the
   tenant's artifacts are signed keyless and a cluster accepts one signer.
+
+Level 3 with the private tenant `tweinmann/shelf-hello` and release v0.8.0 on 2026-10-28; the dev
+cluster runs the released platform with the default keyless signer:
+
+| Check | Result |
+|---|---|
+| Platform `v0.8.0` and chart `0.8.0` | keyless signatures of `release.yml`, accepted by `cosign verify` and by the cluster (`SourceVerified=True`) |
+| First tenant build with the new workflow (commit `47c927b`) | CI run 2 min 36 s (Phase 10: 1 min 33 s, cache empty both times); artifact and built images signed, all four components scanned |
+| `gretter` added from it | verified; built images admitted; exposure allowed |
+| Unsigned artifact of the day before (`sha-f4a77c7`, built with v0.7.0) as a new app | `shelf app add` fails after 7 s with reason and hint; no pod ever ran |
+| Unsigned built image of the day before | denied by the admission policy; the signed one of the same component admitted |
+| `--cloudflare tobile` for that unverified app | refused before any Cloudflare call; no tunnel, no cloudflared |
+| `--cloudflare tobile` for the verified `gretter` | deployed, verified, then tunnel and record created; `https://gretter.tobile.ch/` answers |
+
+Signing, scanning and attesting add about a minute to a tenant build. Most of it is Trivy and its
+database on a cold cache; later runs restore the DB from the cache.
+
+Two things differ from the plan:
+- **Unsigned artifact.** Task 9.1 planned an unsigned artifact pushed by hand under a branch tag.
+  The check used an unsigned artifact that already existed, as a whole app, which needs no
+  registry write access from here. The preview path is covered by `smoke-verify`.
+- **Branch push.** No branch push was timed at level 3. A branch build runs the same steps as
+  `main`, and the cluster side was measured at level 2.
+
+Two follow-ups from the acceptance, fixed in this change:
+- **`shelf serve` after a cluster reset.** The server kept the kubeconfig it started with, so a
+  recreated cluster with a new certificate authority failed every page with `x509: certificate
+  signed by unknown authority` until a restart. `ops.Ops` now has an optional `Reload`, which only
+  `shelf serve` sets: every operation reads the kubeconfig again, and keeps the one it started with
+  while the file cannot be read. client-go caches the transport by its TLS settings, so an
+  unchanged kubeconfig costs a file read, not a new connection. Alternatives: reload only after a
+  TLS error (needs a retry inside every call and still misses a changed server address), or watch
+  the file (a goroutine and a lock for what one read per request does).
+- **"Registry without TLS" on the add form.** The form ticked it on every cluster installed with
+  `--insecure-registry`, as the dev cluster is, so an app added from GHCR there failed. It is now
+  offered unticked, as `--insecure-registry` of `shelf app add` defaults to off.

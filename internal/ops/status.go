@@ -108,11 +108,12 @@ type Status struct {
 
 // Status reads how the cluster is doing.
 func (o *Ops) Status(ctx context.Context) Status {
-	s := Status{Context: o.Target.Context}
-	if o.Target.Config != nil {
-		s.Server = o.Target.Config.Host
+	t := o.target()
+	s := Status{Context: t.Context}
+	if t.Config != nil {
+		s.Server = t.Config.Host
 	}
-	settings, err := o.Cluster.Settings(ctx, o.config())
+	settings, err := o.Cluster.Settings(ctx, t.Config)
 	if err != nil {
 		s.Error = err.Error()
 		return s

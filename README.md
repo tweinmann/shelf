@@ -17,8 +17,9 @@ your own Cloudflare account, or a temporary `*.trycloudflare.com` name that need
 > shelf is a learning and reference project for platform engineering, and it is
 > **pre-production**: production is a separate cluster reached through eject (planned). It is
 > **still under construction**: today a push to your repository deploys your app, and the CLI or
-> an admin UI in the browser adds, changes and removes apps. Branch previews, the verification
-> chain, the host setup, the installer and eject are planned, not built. See [Status](#status).
+> an admin UI in the browser adds, changes and removes apps, every branch runs as a preview, and
+> only a signed and scanned app can be exposed. The host setup, the installer and eject are
+> planned, not built. See [Status](#status).
 
 Where this is going: you run Claude Code (other agents later) in several worktrees at once. Every
 branch your agents push gets its own preview of the complete stack, database included, in a
@@ -111,7 +112,7 @@ one starts.
 | 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | ✅ done |
 | 9 | Agent interface: `--json`, `shelf app status --wait`, `shelf app open` | ✅ done |
 | 10 | Branch previews: one isolated preview per branch, discovered from the registry | ✅ done |
-| 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | planned |
+| 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | ✅ done |
 | 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | planned |
 | 13 | Host: macOS with Colima and Linux with k3s, `shelf doctor`, `shelf destroy` | planned |
 | 14 | Service and one-command installer | planned |

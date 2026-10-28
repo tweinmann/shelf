@@ -13,7 +13,7 @@ shelf reads it, generates the secrets it declares, and keeps the app on that tag
 <input id="artifact" name="artifact" value="{{.Artifact}}" placeholder="oci://ghcr.io/owner/greeter:main" required data-registry-from="registry">
 {{if .Status.Settings.InsecureRegistry}}
 <label class="check"><input type="checkbox" name="insecure" {{if .Insecure}}checked{{end}}>
-Registry without TLS (this cluster uses one)</label>
+Registry without TLS (a dev registry; leave off for GHCR)</label>
 {{end}}
 <fieldset>
 <legend>Connections</legend>
