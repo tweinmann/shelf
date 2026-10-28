@@ -17,8 +17,9 @@ your own Cloudflare account, or a temporary `*.trycloudflare.com` name that need
 > shelf is a learning and reference project for platform engineering, and it is
 > **pre-production**: production is a separate cluster reached through eject (planned). It is
 > **still under construction**: today a push to your repository deploys your app, and the CLI or
-> an admin UI in the browser adds, changes and removes apps. Branch previews, the verification
-> chain, the host setup, the installer and eject are planned, not built. See [Status](#status).
+> an admin UI in the browser adds, changes and removes apps, every branch runs as a preview, and
+> only a signed and scanned app can be exposed. The host setup, the installer and eject are
+> planned, not built. See [Status](#status).
 
 Where this is going: you run Claude Code (other agents later) in several worktrees at once. Every
 branch your agents push gets its own preview of the complete stack, database included, in a
@@ -111,7 +112,7 @@ one starts.
 | 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | ✅ done |
 | 9 | Agent interface: `--json`, `shelf app status --wait`, `shelf app open` | ✅ done |
 | 10 | Branch previews: one isolated preview per branch, discovered from the registry | ✅ done |
-| 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | planned |
+| 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | ✅ done |
 | 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | planned |
 | 13 | Host: macOS with Colima and Linux with k3s, `shelf doctor`, `shelf destroy` | planned |
 | 14 | Service and one-command installer | planned |
@@ -365,6 +366,27 @@ get no new deploys until they are built again.
 A cluster that tests shelf verifies with a cosign key instead (`shelf init cluster --signer-key
 cosign.pub`), as the dev cluster does.
 
+### Isolation
+
+A preview runs code an agent wrote, so every app and every preview is fenced in:
+
+- **Network.** Its pods reach each other, the cluster DNS and the internet, and nothing else:
+  not other apps, not the Kubernetes API, not your LAN, not a cloud metadata address. Only
+  Traefik reaches in, which is how routes, `shelf app open` and tunnels get there.
+- **Pod Security.** Its namespace enforces the level `baseline`: no privileged containers, host
+  namespaces or `hostPath`. Images that start as root, such as `postgres:16`, still run.
+  `shelf app status` lists the pods that the stricter level `restricted` would refuse, without
+  refusing them.
+- **LAN exceptions.** An app that needs a NAS or a printer gets it from you, never from its
+  `app.yaml`: `shelf app credentials <app> --allow-lan 192.168.1.10/32`. Its previews never do.
+  `--deny-lan` takes it away.
+
+An app that relied on reaching another app or the LAN loses that path when the cluster gets this
+platform; give it an exception, or talk to the other app through its public address.
+
+A preview counts as green only when its [tests](#tests) pass, and `shelf app report <app>
+--preview <branch>` writes the report for its pull request.
+
 ## Writing an `app.yaml`
 
 A complete example with a web frontend, an API and a Postgres database:
@@ -403,6 +425,11 @@ components:
     volumes:
       data: { path: /var/lib/postgresql/data, size: 20Gi }
 
+tests:
+  smoke:                         # runs after every rollout; exit 0 means it passed
+    image: curlimages/curl:8.10.1
+    args: [-fsS, --retry, "5", --retry-connrefused, "http://${web.host}:${web.port}/healthz"]
+
 secrets:
   db-password: { generate: true }
 ```
@@ -426,9 +453,27 @@ and other editors that support JSON Schema. `shelf schema` prints the same schem
 | `health` | HTTP probe: `{ path, port?, initialDelay? }`, with `initialDelay` in seconds. It tells Kubernetes (and your deploy) when the component is ready. |
 | `resources` | `{ cpu, memory }` requests. Memory is also the hard limit, which protects the other apps on the machine. |
 
+### Tests
+
+`tests` declares containers that check the app after every rollout, of the app and of each of
+its previews. Each test has `image` or `build`, and may have `command`, `args`, `env` and
+`resources`, as a component does; it has no ports, route, volumes or health. Test names follow
+the rules of component names and must differ from them, since a built test is published as
+`ghcr.io/<owner>/<package>/<test>` next to the components.
+
+A test passes when its container exits with 0. It runs inside the app's namespace and reaches
+the components by their references (`http://${web.host}:${web.port}/`), not through a route,
+and it can read the app's secrets. Let it retry its first connection (`curl --retry 5
+--retry-connrefused`): for a moment after a pod starts, the network policy may not know it yet,
+and refuses it. Until every test passed, the app is not Ready:
+
+- on the app, a failing test fails the upgrade, so the previous version comes back;
+- on a preview, the failing version keeps running, so you can look at it with
+  `shelf app open --preview`.
+
 ### References
 
-Inside `env`, `command` and `args` you can use:
+Inside `env`, `command` and `args` of components and tests you can use:
 
 | Reference | Becomes |
 |---|---|
@@ -495,28 +540,29 @@ drift.
 | Command | What it does |
 |---|---|
 | `shelf validate <app.yaml>...` | Checks one or more files without network access. Errors and warnings show file, line and field. Exits with 1 on errors. |
-| `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <component>=<reference>` supplies the image of a component with a `build` directory. Registry credentials come from `docker login`. |
+| `shelf render <app.yaml>` | Validates, resolves images and prints the deploy manifest (a ConfigMap). `-o app` prints the resolved `app.yaml` instead. `--image <name>=<reference>` supplies the image of a component or test with a `build` directory. Registry credentials come from `docker login`. |
 | `shelf schema` | Prints the JSON Schema for `app.yaml`. |
-| `shelf build-plan <app.yaml>` | Prints the package name (`name` in `app.yaml`) and the components with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. `--branch <name>` adds `tag`, the tag a push to that branch publishes the deploy artifact under (`branch-<slug>`). |
+| `shelf build-plan <app.yaml>` | Prints the package name (`name` in `app.yaml`) and the components and tests with a `build` directory as JSON. The workflow uses it to name the packages and to know what to build. `--branch <name>` adds `tag`, the tag a push to that branch publishes the deploy artifact under (`branch-<slug>`). |
 | `shelf init cluster` | Installs Flux and the platform (Traefik, the Sigstore policy-controller, app management) into the cluster of the current kubecontext, and waits until everything is ready. The cluster verifies everything it runs: by default keyless signatures of shelf's own workflows (`--signer-issuer`, `--signer-subject`), or with `--signer-key <file>` a cosign public key, for clusters that test shelf. The confirmation lists apps that do not run a verified artifact. `--host-suffix -dev` separates clusters that share a DNS zone: apps with a domain are then reachable at `<app>-dev.<domain>`. Shows the target cluster and asks before changing anything (`--yes` skips the question); `--context` and `--kubeconfig` pick another cluster. Safe to run again. |
 | `shelf connection add registry <name>` | Defines a registry login for `ghcr.io` from `GHCR_USERNAME` and `GHCR_TOKEN`. It is stored in the cluster and copied only into the namespaces of the apps that chose it. |
 | `shelf connection add cloudflare <name>` | Defines a Cloudflare account from `CF_API_TOKEN` (and `CF_ACCOUNT_ID` when the token sees several). shelf checks the token and keeps it in `~/.shelf/connections/cloudflare/`, never in the cluster. |
 | `shelf connection list` / `rm <kind> <name>` | Lists the connections and the apps that use them; removes one no app uses. |
 | `shelf connection packages <name>` / `zones <name>` | Lists the deploy artifacts a registry connection can pull, or the zones of a Cloudflare connection's account. |
-| `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. `--registry` picks the registry connection; `--cloudflare` with `--domain` puts the app on the internet under its own domain, `--quick` through a quick tunnel, both only once it runs a [verified](#verification-chain) artifact; without either it stays inside the cluster. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Refuses at once if the cluster has no platform. Waits until the app is ready. `--previews[=N]` runs a [preview](#previews-of-branches) of each published branch, at most N (default 3). Safe to run again, e.g. after adding a secret. |
-| `shelf app credentials <app>` | Changes the app's connections, domain or previews and deploys it again: `--registry`, `--no-registry`, `--cloudflare`, `--domain`, `--quick`, `--private`, `--previews[=N]`, `--no-previews`. |
+| `shelf app add <app> <oci://…:tag>` | Deploys an app from a deploy artifact under the name `<app>` and keeps it updated. The name is independent of the package, so one artifact can be added under several names. `--registry` picks the registry connection; `--cloudflare` with `--domain` puts the app on the internet under its own domain, `--quick` through a quick tunnel, both only once it runs a [verified](#verification-chain) artifact; without either it stays inside the cluster. Generates the app's secrets, stores them in the cluster and in `~/.shelf/apps/<app>/secrets.yaml`, and restores them from there after a cluster rebuild. Refuses at once if the cluster has no platform. Waits until the app is ready. `--previews[=N]` runs a [preview](#previews-of-branches) of each published branch, at most N (default 3). `--allow-lan <cidr>` lets the app reach a private address range such as a NAS, which an app otherwise never reaches; its previews never do. Safe to run again, e.g. after adding a secret. |
+| `shelf app credentials <app>` | Changes the app's connections, domain or previews and deploys it again: `--registry`, `--no-registry`, `--cloudflare`, `--domain`, `--quick`, `--private`, `--previews[=N]`, `--no-previews`, `--allow-lan <cidr>` (repeatable, replaces the ranges), `--deny-lan`. |
 | `shelf app open <app>` | Makes the app reachable from a browser on this machine at `http://127.0.0.1:<port>/`, for as long as it runs: requests go through the Kubernetes API server to the cluster's Traefik with the app's own Host header, so routes and `stripPrefix` behave as through a tunnel. Works for apps that stay inside the cluster. Listens on 127.0.0.1 only; `--port` picks the port, `--browser` opens it. It is not an exposure and changes nothing about the app. `--preview <branch>` opens that branch's preview. |
+| `shelf app report <app>` | Prints a report for a pull request as Markdown: the commit, whether it is Ready or which step is not, the [tests](#tests), the signature and scan per component, and the isolation. `--preview <branch>` reports on that branch's preview instead, with what it runs differently from the app: every component with another image, and the findings of both. Read-only. `shelf app report hello --preview "$(git branch --show-current)" \| gh pr comment --body-file -` posts it. |
 | `shelf app tags <app>` | Lists the tags of the app's deploy artifact, newest first. |
 | `shelf app redeploy <app>` | Fetches the app's artifact again under the tag it is registered with and rolls out what it finds. For a tag that moved, or a deploy worth another try. |
 | `shelf app secrets <app>` | Lists the names of the generated secrets; `--reveal` prints the values. |
-| `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also shows the git commit the running artifact was built from, names its components and where each of them answers, and shows the [verification chain](#verification-chain): source, signer, verified or why not, findings per component, and whether the app may be exposed. Same chain as the admin UI shows. `--wait` waits until the app is Ready or a step failed and prints the verdict; `--commit <sha>` first waits until the app runs the artifact built from that commit. Exit status 0 Ready, 1 failed, 2 timed out (`--timeout`, default 10m). For an app with previews it lists them; `--preview <branch>` shows, or waits for, that preview instead. |
+| `shelf app status [app]` | Lists the apps with their state, or walks one app from its deploy artifact to its running pods and says which step is not ready. For one app it also shows the git commit the running artifact was built from, names its components and where each of them answers, and shows the [verification chain](#verification-chain): source, signer, verified or why not, findings per component, and whether the app may be exposed; then the isolation: the Pod Security level, the pods the level `restricted` would refuse, and the private ranges it may reach. The chain ends with the app's [tests](#tests), with the end of the log of one that failed. Same chain as the admin UI shows. `--wait` waits until the app is Ready or a step failed and prints the verdict; `--commit <sha>` first waits until the app runs the artifact built from that commit. Exit status 0 Ready, 1 failed, 2 timed out (`--timeout`, default 10m). For an app with previews it lists them; `--preview <branch>` shows, or waits for, that preview instead. |
 | `shelf serve` | Runs the admin UI on port 7654 of the local network (`--listen 127.0.0.1:7654` keeps it off the network). The first start prints a setup code that claims the instance; after that a password protects it. |
 | `shelf app rm <app>` | Removes an app with its namespace, volumes, secrets, tunnel and DNS record, after asking. The secret backup stays. |
 | `shelf version` | Prints the version. |
 
 ### Output for scripts and agents
 
-`shelf app status`, `shelf app tags`, `shelf connection list` and `shelf version` take `--json`
+`shelf app status`, `shelf app report`, `shelf app tags`, `shelf connection list` and `shelf version` take `--json`
 and then print one JSON document on stdout and nothing else there:
 
 ```console
@@ -533,8 +579,8 @@ $ shelf app status hello --json
 }
 ```
 
-Every document has `apiVersion` and `kind` (`AppList`, `AppStatus`, `WaitResult`, `TagList`,
-`ConnectionList`, `Version`). A command that fails prints a document of kind `Error` with a
+Every document has `apiVersion` and `kind` (`AppList`, `AppStatus`, `WaitResult`, `Report`,
+`TagList`, `ConnectionList`, `Version`). A command that fails prints a document of kind `Error` with a
 `message`, and exits with status 1. Within one `apiVersion`, no field is removed, renamed or
 given another meaning; new fields may appear, so ignore the ones you do not know. Empty fields
 are left out rather than `null`. `shelf app secrets` has no `--json`, so that secret values never

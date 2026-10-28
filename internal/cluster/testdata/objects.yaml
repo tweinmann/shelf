@@ -113,6 +113,7 @@ spec:
     cloudflare: home
     domain: example.com
     insecure: false
+    lan: []
     name: hello
     quick: false
     registry: ghcr
@@ -133,6 +134,7 @@ spec:
     cloudflare: ""
     domain: ""
     insecure: false
+    lan: []
     name: empty
     quick: false
     registry: ""
@@ -153,8 +155,31 @@ spec:
     cloudflare: ""
     domain: ""
     insecure: false
+    lan: []
     name: quick
     quick: true
+    registry: ""
+    tag: main
+    tunnel: ""
+    url: oci://ghcr.io/tweinmann/hello-deploy
+  type: Static
+---
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  labels:
+    shelf.dev/app: nas
+  name: nas
+  namespace: shelf-system
+spec:
+  defaultValues:
+    cloudflare: ""
+    domain: ""
+    insecure: false
+    lan:
+    - 192.168.1.10/32
+    name: nas
+    quick: false
     registry: ""
     tag: main
     tunnel: ""

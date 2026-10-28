@@ -177,6 +177,23 @@ func TestDiagnose(t *testing.T) {
 			wantStage: "the pods",
 		},
 		{
+			name: "a privileged pod is refused",
+			objects: func(o *appObjects) {
+				o.pods = nil
+				o.refusals = []*unstructured.Unstructured{{Object: map[string]any{
+					"metadata":       map[string]any{"namespace": "shop"},
+					"involvedObject": map[string]any{"kind": "ReplicaSet", "name": "web-5d8f"},
+					"message":        `Error creating: pods "web-5d8f-x" is forbidden: violates PodSecurity "baseline:latest": privileged`,
+					"lastTimestamp":  "2026-10-28T12:00:00Z",
+				}}}
+			},
+			wantPhase:   PhaseFailed,
+			wantStage:   "the pods",
+			wantMessage: `Error creating: pods "web-5d8f-x" is forbidden: violates PodSecurity "baseline:latest": privileged`,
+			wantHint: "the pod breaks the namespace's Pod Security level baseline (privileged containers, " +
+				"host namespaces, hostPath volumes or added capabilities); shelf does not run such pods",
+		},
+		{
 			name:      "no pods yet",
 			objects:   func(o *appObjects) { o.pods = nil },
 			wantPhase: PhaseMissing,
@@ -190,7 +207,7 @@ func TestDiagnose(t *testing.T) {
 			tt.objects(objects)
 			d := diagnose("shop", objects)
 
-			if len(d.Stages) != 5 {
+			if len(d.Stages) != 6 {
 				t.Fatalf("%d stages, want the whole chain", len(d.Stages))
 			}
 			if got := d.Phase(); got != tt.wantPhase {

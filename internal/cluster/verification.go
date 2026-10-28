@@ -163,8 +163,9 @@ func signatureReason(what string, source *unstructured.Unstructured) string {
 	return ""
 }
 
-// valueImages returns the image of every component in the app values, sorted by component.
-// shelf render pins each one as <reference>@sha256:<digest>.
+// valueImages returns the image of every component and test in the app values, sorted by name;
+// test names never clash with component names. shelf render pins each one as
+// <reference>@sha256:<digest>.
 func valueImages(values *unstructured.Unstructured) ([]ScannedImage, error) {
 	if values == nil {
 		return nil, fmt.Errorf("the app values (%s) are not there yet", render.ConfigMapName)
@@ -174,14 +175,23 @@ func valueImages(values *unstructured.Unstructured) ([]ScannedImage, error) {
 		Components map[string]struct {
 			Image string `json:"image"`
 		} `json:"components"`
+		Tests map[string]struct {
+			Image string `json:"image"`
+		} `json:"tests"`
 	}
 	if err := yaml.Unmarshal([]byte(data), &app); err != nil {
 		return nil, fmt.Errorf("the app values cannot be read: %w", err)
 	}
 	var out []ScannedImage
+	add := func(name, image string) {
+		_, digest, _ := strings.Cut(image, "@")
+		out = append(out, ScannedImage{Component: name, Image: image, Digest: digest})
+	}
 	for name, comp := range app.Components {
-		_, digest, _ := strings.Cut(comp.Image, "@")
-		out = append(out, ScannedImage{Component: name, Image: comp.Image, Digest: digest})
+		add(name, comp.Image)
+	}
+	for name, test := range app.Tests {
+		add(name, test.Image)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Component < out[j].Component })
 	return out, nil

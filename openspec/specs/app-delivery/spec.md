@@ -86,9 +86,9 @@ branch.
 
 ### Requirement: Reusable tenant workflow
 The reusable workflow `.github/workflows/build.yml` SHALL validate the app.yaml, build every
-`build:` component for `linux/arm64` as `ghcr.io/<owner>/<package>/<component>`, render the
-app.yaml, and push the deploy artifact `ghcr.io/<owner>/<package>` tagged `sha-<shortsha>` and
-`main` for the default branch or `branch-<slug>` for another branch, annotated with
+`build:` component for the platforms of its input `platforms` (default `linux/arm64`) as
+`ghcr.io/<owner>/<package>/<component>`, and push the rendered deploy artifact
+`ghcr.io/<owner>/<package>` tagged `sha-<shortsha>` and `main` or `branch-<slug>`, annotated with
 `dev.shelf.package=<package>` and the commit's source and revision. When a branch is deleted, it
 SHALL delete that branch's artifact.
 
@@ -114,6 +114,10 @@ SHALL delete that branch's artifact.
 - **WHEN** the caller sets the input `shelf-version`
 - **THEN** the workflow installs that release's linux/arm64 binary after checking its checksum, and otherwise the latest release
 
+#### Scenario: Two platforms
+- **WHEN** the caller sets `platforms: linux/arm64,linux/amd64`
+- **THEN** every built image is a multi-arch index of both, and the rendered values pin the index digest
+
 ### Requirement: Build cache in the tenant workflow
 The reusable workflow SHALL reuse image layers between runs through a build cache in the
 registry, `ghcr.io/<owner>/<package>/<component>:buildcache`, which only runs that publish write.
@@ -124,12 +128,17 @@ registry, `ghcr.io/<owner>/<package>/<component>:buildcache`, which only runs th
 
 ### Requirement: Release publication
 Pushing a `v*` tag MUST publish a shelf release: CLI binaries for linux and darwin (amd64 and
-arm64) with checksums, the `shelf-app` chart, and the platform artifact, all at the release
-version, and then move the major tag (for example `v0`) before marking the release as latest.
+arm64) with checksums, the `shelf-app` chart and the platform artifact, both signed with keyless
+cosign by `release.yml`, all at the release version, and then move the major tag (for example
+`v0`) before marking the release as latest.
 
 #### Scenario: Tenant on the major tag
 - **WHEN** a tenant uses `tweinmann/shelf/.github/workflows/build.yml@v0` and a new v0 release is published
 - **THEN** the tenant's next build uses the new workflow together with the matching latest binary
+
+#### Scenario: Signed chart and platform
+- **WHEN** release `v0.8.0` is published
+- **THEN** `ghcr.io/tweinmann/shelf/charts/shelf-app:0.8.0` and the platform artifact `v0.8.0` carry a signature whose subject is `release.yml` of `tweinmann/shelf` at that tag
 
 ### Requirement: App naming
 The system SHALL name an app at `shelf app add <app>`, independent of app.yaml's `name`, and MUST
@@ -321,9 +330,9 @@ state is that of the first stage that is not Ready.
 ### Requirement: App status command
 `shelf app status` SHALL list every app with its state and, when not Ready, the failing stage and
 reason in one line; `shelf app status <app>` SHALL print the app's address, artifact, registry
-connection, running revision, the git commit that revision was built from, deploy time,
-components, every stage with its message and, if not Ready, its hint, and the app's previews with
-their branch tag, state and commit; `--preview <branch>` SHALL print the same for one preview.
+connection, running revision and commit, deploy time, components, its verification, every stage
+with its message and, if not Ready, its hint, and its previews with tag, state and commit;
+`--preview <branch>` SHALL print the same for one preview.
 
 #### Scenario: No apps
 - **WHEN** the cluster has no registered apps

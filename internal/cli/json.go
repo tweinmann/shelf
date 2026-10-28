@@ -138,6 +138,33 @@ type appStatusDocument struct {
 	PreviewLimitReached *bool             `json:"previewLimitReached,omitempty"`
 	// Verification is whether the app runs what the cluster's signer signed and CI scanned.
 	Verification *verificationDocument `json:"verification,omitempty"`
+	// Tests are the app's tests for the values the release last tried, left out without any.
+	Tests []testDocument `json:"tests,omitempty"`
+	// Isolation is how the app is fenced in.
+	Isolation *isolationDocument `json:"isolation,omitempty"`
+}
+
+type testDocument struct {
+	Name  string        `json:"name"`
+	Phase cluster.Phase `json:"phase"`
+	// ExitCode and Log, the end of its log, only for a test that failed.
+	ExitCode *int   `json:"exitCode,omitempty"`
+	Log      string `json:"log,omitempty"`
+}
+
+type isolationDocument struct {
+	// PodSecurity is the level the namespace enforces, empty on a platform from before.
+	PodSecurity string `json:"podSecurity,omitempty"`
+	// RestrictedViolations are the pods that would break the level restricted, which is warned
+	// about but admitted.
+	RestrictedViolations []violationDocument `json:"restrictedViolations,omitempty"`
+	// LAN are the private ranges the app may reach; always empty for a preview.
+	LAN []string `json:"lan"`
+}
+
+type violationDocument struct {
+	Pod    string `json:"pod"`
+	Reason string `json:"reason"`
 }
 
 type verificationDocument struct {
@@ -275,6 +302,15 @@ func appStatus(a ops.App, d cluster.Diagnosis) appStatusDocument {
 		doc.Components = append(doc.Components, componentDocument{
 			Name: c.Name, Phase: c.Phase, Path: c.Path, Address: c.Address, URL: c.URL, Internal: c.Internal,
 		})
+	}
+	for _, t := range d.Tests {
+		doc.Tests = append(doc.Tests, testDocument{Name: t.Name, Phase: t.Phase, ExitCode: t.ExitCode, Log: t.Log})
+	}
+	if iso := a.Isolation; iso != nil {
+		doc.Isolation = &isolationDocument{PodSecurity: iso.PodSecurity, LAN: append([]string{}, iso.LAN...)}
+		for _, v := range iso.Restricted {
+			doc.Isolation.RestrictedViolations = append(doc.Isolation.RestrictedViolations, violationDocument(v))
+		}
 	}
 	if v := a.Verification; v != nil {
 		doc.Verification = &verificationDocument{Verified: v.Verified, Reason: v.Reason, Hint: v.Hint,

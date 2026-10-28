@@ -26,7 +26,9 @@ func TestTenantAgentInstructions(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, m := range shelfCommand.FindAllStringSubmatch(string(data), -1) {
-			fields := strings.Fields(m[1])[1:]
+			// What a shelf command is piped into is not shelf's.
+			command, _, _ := strings.Cut(m[1], " | ")
+			fields := strings.Fields(command)[1:]
 			cmd, rest, err := root.Find(fields)
 			if err != nil || cmd == root {
 				t.Errorf("%s: %q is not a shelf command", file, m[1])

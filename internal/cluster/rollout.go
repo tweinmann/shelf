@@ -34,6 +34,9 @@ type Rollout struct {
 	// Reconciling means helm-controller is in the middle of an install, upgrade, rollback or
 	// retry, so its Ready condition is about to change.
 	Reconciling bool
+	// TestedDigest is the configDigest the tests stage reports on, empty while it has no result
+	// for any values.
+	TestedDigest string
 }
 
 // AppRollout reads one app's chain and its progress, without changing anything.
@@ -54,11 +57,13 @@ func AppRollout(ctx context.Context, cfg *rest.Config, app string) (Rollout, err
 	if err != nil {
 		return Rollout{}, err
 	}
-	return rollout(app, objs, values), nil
+	r := rollout(app, objs, values)
+	return r, c.addTestLogs(ctx, app, &r.Diagnosis)
 }
 
 func rollout(app string, o *appObjects, values *unstructured.Unstructured) Rollout {
 	r := Rollout{Diagnosis: diagnose(app, o)}
+	r.TestedDigest = r.Diagnosis.testedDigest
 	if o.source != nil {
 		r.Revision, _, _ = unstructured.NestedString(o.source.Object, "status", "artifact", "revision")
 		r.Commit = artifactCommit(o.source)

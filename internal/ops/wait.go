@@ -134,11 +134,12 @@ func (o *Ops) Wait(ctx context.Context, app string, opts WaitOptions) (WaitResul
 // on an older artifact, Ready or Failed, is still on its way. The deploy artifact has to be the
 // awaited commit, the values have to be those of that artifact, and the release has to hold
 // those values. Before the awaited commit has arrived, only a failing deploy artifact ends the
-// wait: the later stages are still about the previous one.
+// wait: the later stages are still about the previous one. Last, the app's tests have to have
+// passed for those values.
 func Verdict(app string, r cluster.Rollout, commit string) (WaitResult, bool) {
 	result := WaitResult{App: app, Commit: r.Commit, Revision: r.Revision}
 	stages := r.Diagnosis.Stages
-	if len(stages) < 5 {
+	if len(stages) < 6 {
 		return result, false
 	}
 	failed := func(s cluster.Stage) (WaitResult, bool) {
@@ -154,7 +155,7 @@ func Verdict(app string, r cluster.Rollout, commit string) (WaitResult, bool) {
 		return pending(s)
 	}
 
-	source, values, chart, release, pods := stages[0], stages[1], stages[2], stages[3], stages[4]
+	source, values, chart, release, pods, tests := stages[0], stages[1], stages[2], stages[3], stages[4], stages[5]
 	switch {
 	case source.Phase == cluster.PhaseFailed:
 		return failed(source)
@@ -184,6 +185,13 @@ func Verdict(app string, r cluster.Rollout, commit string) (WaitResult, bool) {
 		return pending(chart)
 	}
 
+	// A failed test is about the values it ran with, whatever the release went back to since: on
+	// an app the rollback follows at once, and the retries before it change nothing.
+	tested := r.ValuesDigest != "" && r.TestedDigest == r.ValuesDigest
+	if tested && tests.Phase == cluster.PhaseFailed {
+		return failed(tests)
+	}
+
 	// Which values a release holds only its digest says: after a failed upgrade, the failure
 	// and the rollback both happen after newer values arrived, and still belong to the older.
 	current := r.ValuesDigest != "" && r.ReleasedDigest == r.ValuesDigest && !r.Reconciling
@@ -209,6 +217,16 @@ func Verdict(app string, r cluster.Rollout, commit string) (WaitResult, bool) {
 		return failed(pods)
 	default:
 		return pending(pods)
+	}
+
+	// A tests stage without a digest is one that has nothing to wait for: a platform that runs
+	// no tests. With one, it has to be about the awaited values.
+	switch {
+	case tests.Phase == cluster.PhaseReady && (tested || r.TestedDigest == ""):
+	case tests.Phase == cluster.PhaseReady:
+		return working(tests, "waiting for the tests of the new values")
+	default:
+		return pending(tests)
 	}
 	result.Outcome = OutcomeReady
 	return result, true

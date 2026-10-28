@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/tweinmann/shelf/internal/cluster"
 	"github.com/tweinmann/shelf/internal/ops"
@@ -51,7 +52,6 @@ func (s *Server) newAppForm(w http.ResponseWriter, r *http.Request) {
 		base:        s.base(r, "Add an app"),
 		Status:      status,
 		Connections: s.connections(ctx),
-		Insecure:    status.Settings.InsecureRegistry,
 	})
 }
 
@@ -111,6 +111,16 @@ func accessFromForm(r *http.Request) (ops.Access, error) {
 		a.Quick = true
 	default:
 		a.Cloudflare = choice
+	}
+	// The access form shows the LAN exceptions the app has, so what it sends is the whole list:
+	// an empty field takes them away. The add form has no such field and keeps them.
+	if _, ok := r.PostForm["lan"]; ok {
+		lan := strings.FieldsFunc(r.PostFormValue("lan"), func(c rune) bool { return c == ',' || unicode.IsSpace(c) })
+		if len(lan) == 0 {
+			a.DenyLAN = true
+		} else {
+			a.LAN = lan
+		}
 	}
 	return a, a.Check()
 }

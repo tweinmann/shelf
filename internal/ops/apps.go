@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -56,6 +59,68 @@ type Access struct {
 	Previews int
 	// NoPreviews removes the app's previews, with their namespaces and volumes.
 	NoPreviews bool
+	// LAN replaces the private address ranges the app may reach, as CIDRs; nil leaves them as
+	// they are. Its previews never get them.
+	LAN []string
+	// DenyLAN takes every LAN exception away again.
+	DenyLAN bool
+}
+
+// privateRanges are the addresses the isolation keeps every app away from: the LAN, carrier-grade
+// NAT (where Tailscale puts home devices) and link-local, which holds cloud metadata. A LAN
+// exception has to lie inside one of them; anything else is reachable anyway.
+var privateRanges = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fc00::/7"),
+	netip.MustParsePrefix("fe80::/10"),
+}
+
+// CheckLAN parses the LAN exceptions of an app and returns them in canonical form, such as
+// 192.168.1.0/24 for 192.168.1.7/24.
+func CheckLAN(cidrs []string) ([]string, error) {
+	out := make([]string, 0, len(cidrs))
+	for _, c := range cidrs {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(c))
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a CIDR; a LAN exception must be a private CIDR such as 192.168.1.10/32", c)
+		}
+		prefix = prefix.Masked()
+		private := false
+		for _, r := range privateRanges {
+			private = private || (r.Bits() <= prefix.Bits() && r.Contains(prefix.Addr()))
+		}
+		if !private {
+			return nil, fmt.Errorf("%s is not a private range; a LAN exception must be a private CIDR "+
+				"(inside 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 or 169.254.0.0/16), "+
+				"and every other address is reachable anyway", prefix)
+		}
+		if !slices.Contains(out, prefix.String()) {
+			out = append(out, prefix.String())
+		}
+	}
+	return out, nil
+}
+
+// checkPodRanges refuses LAN exceptions that overlap the address ranges of the cluster's pods:
+// those would let the app reach the pods of every other app.
+func checkPodRanges(lan, pods []string) error {
+	for _, c := range lan {
+		exception := netip.MustParsePrefix(c)
+		for _, p := range pods {
+			pod, err := netip.ParsePrefix(p)
+			if err != nil {
+				continue
+			}
+			if exception.Overlaps(pod) {
+				return fmt.Errorf("%s overlaps %s, where the cluster runs its pods; it would reach other apps", c, p)
+			}
+		}
+	}
+	return nil
 }
 
 // MaxPreviews is the most previews an app may have at once.
@@ -104,6 +169,12 @@ func (a Access) Check() error {
 		return errors.New("previews cannot be switched on and off at once")
 	case a.Previews < 0 || a.Previews > MaxPreviews:
 		return fmt.Errorf("an app may have between 1 and %d previews, not %d", MaxPreviews, a.Previews)
+	}
+	if a.DenyLAN && len(a.LAN) > 0 {
+		return errors.New("LAN exceptions cannot be given and taken away at once")
+	}
+	if _, err := CheckLAN(a.LAN); err != nil {
+		return err
 	}
 	return nil
 }
@@ -165,6 +236,22 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	case opts.Access.Previews > 0:
 		previews = opts.Access.Previews
 		rep.Report(progress.Info("previews: up to %d branches, inside the cluster only", previews))
+	}
+	lan := current.LAN
+	switch {
+	case opts.Access.DenyLAN:
+		lan = nil
+		rep.Report(progress.Info("LAN: none"))
+	case opts.Access.LAN != nil:
+		lan, _ = CheckLAN(opts.Access.LAN)
+		pods, err := o.Cluster.NodePodCIDRs(ctx, o.config())
+		if err != nil {
+			return err
+		}
+		if err := checkPodRanges(lan, pods); err != nil {
+			return err
+		}
+		rep.Report(progress.Info("LAN: may reach %s; its previews never do", strings.Join(lan, ", ")))
 	}
 	// Before anything is written, here or in Cloudflare: without the platform the app would never
 	// be deployed, and the wait for it would only end at the timeout.
@@ -235,6 +322,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		Domain:   domain,
 		Registry: registry,
 		Previews: previews,
+		LAN:      lan,
 		Secrets:  values,
 		Timeout:  opts.Timeout,
 		Report:   rep,

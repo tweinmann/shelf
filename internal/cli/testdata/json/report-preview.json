@@ -1,0 +1,75 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "Report",
+  "name": "hello--feature-login",
+  "previewOf": "hello",
+  "branch": "feature-login",
+  "phase": "Ready",
+  "host": "hello--feature-login.shelf.internal",
+  "open": "shelf app open hello --preview feature-login",
+  "commit": "3f2a9c1e5b7d9f1a3c5e7b9d1f3a5c7e9b1d3f5a",
+  "tests": [
+    {
+      "name": "smoke",
+      "phase": "Ready"
+    }
+  ],
+  "verification": {
+    "verified": true,
+    "source": "https://github.com/acme/hello",
+    "signer": "keyless, issuer https://token.actions.githubusercontent.com, subject ^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$",
+    "exposable": false,
+    "scan": [
+      {
+        "component": "smoke",
+        "digest": "sha256:c0ff",
+        "scanned": true,
+        "critical": 0,
+        "high": 0,
+        "scanner": "trivy 0.75.0",
+        "scannedAt": "2026-10-28T13:00:00Z"
+      },
+      {
+        "component": "web",
+        "digest": "sha256:3f2a",
+        "scanned": true,
+        "critical": 0,
+        "high": 4,
+        "scanner": "trivy 0.75.0",
+        "scannedAt": "2026-10-28T13:00:00Z"
+      }
+    ]
+  },
+  "isolation": {
+    "podSecurity": "baseline",
+    "lan": []
+  },
+  "comparison": {
+    "app": "hello",
+    "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+    "comparable": true,
+    "changed": [
+      {
+        "component": "smoke",
+        "digest": "sha256:c0ff",
+        "critical": 0,
+        "high": 0,
+        "appCritical": 0,
+        "appHigh": 0
+      },
+      {
+        "component": "web",
+        "digest": "sha256:3f2a",
+        "appDigest": "sha256:2006",
+        "critical": 0,
+        "high": 4,
+        "appCritical": 1,
+        "appHigh": 26
+      }
+    ],
+    "critical": 0,
+    "high": 4,
+    "appCritical": 1,
+    "appHigh": 26
+  }
+}

@@ -55,6 +55,20 @@ components:
   web: { build: ./web, port: 8080, route: / }
   api: { build: services/api }
 `,
+		"test against a component": head + `
+components:
+  web: { image: nginx, port: 80 }
+tests:
+  smoke: { image: curlimages/curl:8.10.1, args: [-fsS, "http://${web.host}:${web.port}/"] }
+`,
+		"built test with a secret": head + `
+components:
+  web: { image: nginx, port: 80, env: { TOKEN: "${secrets.token}" } }
+tests:
+  e2e: { build: ./e2e, env: { TOKEN: "${secrets.token}", URL: "http://${web.host}" }, resources: { memory: 64Mi } }
+secrets:
+  token: { generate: true }
+`,
 		"digest-pinned image": head + `
 components:
   web: { image: "ghcr.io/o/web:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000" }
@@ -242,6 +256,15 @@ func TestErrors(t *testing.T) {
 		{"named port on single-port component", head + "components:\n  web: { image: nginx, env: { A: '${db.ports.main}' } }\n  db: { image: postgres, port: 5432 }\n", "components.web.env.A", "use ${db.port}"},
 		{"unknown named port", head + "components:\n  web: { image: nginx, env: { A: '${api.ports.c}' } }\n  api: { image: nginx, ports: { a: 80 } }\n", "components.web.env.A", `unknown port "c"`},
 		{"unknown secret", head + "components:\n  web: { image: nginx, env: { A: '${secrets.pw}' } }\n", "components.web.env.A", `unknown secret "pw"`},
+
+		// tests
+		{"test named like a component", head + "components:\n  web: { image: nginx }\ntests:\n  web: { image: curl }\n", "tests.web", "already the name of a component"},
+		{"empty test", head + "components:\n  web: { image: nginx }\ntests:\n  smoke:\n", "tests.smoke", "test is empty"},
+		{"test without image", head + "components:\n  web: { image: nginx }\ntests:\n  smoke: { args: [a] }\n", "tests.smoke", "needs image or build"},
+		{"test name with underscore", head + "components:\n  web: { image: nginx }\ntests:\n  my_test: { image: curl }\n", "tests.my_test", "test name"},
+		{"test name too long", head + "components:\n  web: { image: nginx }\ntests:\n  " + strings.Repeat("t", 41) + ": { image: curl }\n", "tests." + strings.Repeat("t", 41), "at most 40"},
+		{"test refers to an unknown component", head + "components:\n  web: { image: nginx }\ntests:\n  smoke: { image: curl, args: ['${api.host}'] }\n", "tests.smoke.args.0", `unknown component "api"`},
+		{"test with an invalid memory", head + "components:\n  web: { image: nginx }\ntests:\n  smoke: { image: curl, resources: { memory: lots } }\n", "tests.smoke.resources.memory", "invalid quantity"},
 
 		// secrets
 		{"secret without generate", head + "components:\n  web: { image: nginx, env: { A: '${secrets.pw}' } }\nsecrets:\n  pw: {}\n", "secrets.pw", "generate: true"},

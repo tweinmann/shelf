@@ -125,7 +125,8 @@ hashes="$(printf '%s\n' "$(password "$app")" "$(password "$app--alpha")" "$(pass
 
 step "shelf app open --preview reaches the preview with its own Host"
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
-shelf app open "$app" --preview alpha --port "$port" >"$work/open.txt" 2>&1 &
+# The binary itself, not the function shelf: $! has to be its PID, or kill leaves it running.
+"$work/shelf" app open "$app" --preview alpha --port "$port" >"$work/open.txt" 2>&1 &
 open_pid=$!
 up() { curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1; }
 for _ in $(seq 30); do up && break; sleep 1; done

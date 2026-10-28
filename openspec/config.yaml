@@ -17,9 +17,9 @@ context: |
   artefact becomes reachable beyond a preview, and the same verified state goes to any Kubernetes
   cloud as a pull request (eject), without depending on shelf. shelf runs on any Linux host with
   k3s, with a one-step install on a Mac (Colima). Today it runs against any kubecontext, developed
-  on the dev cluster; previews, verification, the host setup and eject are planned. shelf is
-  pre-production: an app's "main" is its stable, verified state, not production. Learning and
-  reference project for platform engineering.
+  on the dev cluster, with branch previews and the verification chain; the host setup and eject
+  are planned. shelf is pre-production: an app's "main" is its stable, verified state, not
+  production. Learning and reference project for platform engineering.
 
   OpenSpec is the only planning source: `openspec/specs/` is what shelf does today,
   `openspec/changes/` what it is about to do (the roadmap is the `phase-<n>-<slug>` changes), and
@@ -52,6 +52,13 @@ context: |
     policy-controller admits a built image of an app's package only with its signature, in app
     and preview namespaces. Third-party images are pinned by digest in the signed artifact.
     The dev cluster verifies with a dev key; there is no setting that turns verification off.
+  - Hardening: app and preview namespaces enforce Pod Security `baseline` (warn and audit
+    `restricted`), and the NetworkPolicy `shelf-isolation` lets pods reach their namespace, the
+    cluster DNS and the internet only; only Traefik reaches in, and only cloudflared reaches
+    Traefik. The operator may give one app LAN ranges (`--allow-lan`), never its previews. Tests
+    from `tests:` in app.yaml are Helm test hooks run by helm-controller after every rollout; a
+    failing test rolls an app back and leaves a preview on the failing version, and the wait is
+    Ready only once they pass. `shelf app report` is the per-branch report for a pull request.
   - `shelf init` is split into idempotent layers: `init host` (Phase 13: provide the environment,
     macOS or Linux), `init cluster` (any kubecontext, no Colima or distribution assumptions) and
     the wrapper.
@@ -81,7 +88,9 @@ context: |
   - The registry is the only interface between build and platform; the cluster never talks to
     Git or forge APIs.
   - Every admin UI action exists as a CLI command; both call the same function in internal/ops.
-  - The platform is generic (everything is a component) and apps are isolated from each other.
+  - The platform is generic (everything is a component) and apps are isolated from each other,
+    enforced by Pod Security and a NetworkPolicy per namespace; LAN access is per app and an
+    operator decision.
   - Layering: internal/cluster talks to the API server only (client-go, server-side apply);
     orchestration in internal/ops, flags in internal/cli, routes and templates in internal/server;
     progress through progress.Reporter; test seams are fields of ops.Ops / ops.Env, never

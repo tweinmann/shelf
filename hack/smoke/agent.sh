@@ -84,7 +84,7 @@ step "shelf app status --json"
 shelf app status "$app" --json >"$work/status.json"
 [[ "$(jq -r .kind "$work/status.json")" == AppStatus ]] || die "not an AppStatus: $(cat "$work/status.json")"
 [[ "$(jq -r .commit "$work/status.json")" == "$c1" ]] || die "status does not name commit $c1"
-[[ "$(jq '.stages | length' "$work/status.json")" == 5 ]] || die "status does not hold five stages"
+[[ "$(jq '.stages | length' "$work/status.json")" == 6 ]] || die "status does not hold six stages"
 shelf app status --json | jq -e --arg app "$app" '.kind == "AppList" and any(.items[]; .name == $app)' >/dev/null \
   || die "the AppList lacks $app"
 shelf app status nope --json >"$work/error.json" 2>/dev/null && die "an unknown app was found"
@@ -112,7 +112,8 @@ kubectl -n "$app" rollout status deploy/web --timeout=10s >/dev/null || die "Rea
 
 step "shelf app open reaches the app with its own Host and stripPrefix"
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
-shelf app open "$app" --port "$port" >"$work/open.txt" 2>&1 &
+# The binary itself, not the function shelf: $! has to be its PID, or kill leaves it running.
+"$work/shelf" app open "$app" --port "$port" >"$work/open.txt" 2>&1 &
 open_pid=$!
 up() { curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1; }
 for _ in $(seq 30); do up && break; sleep 1; done

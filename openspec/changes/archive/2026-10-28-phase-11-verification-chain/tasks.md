@@ -141,7 +141,7 @@
   - prints the policy-controller's RAM.
 
   Run it on the dev cluster (level 2) and record the RAM in design.md under "Results".
-- [ ] 7.4 CI: add `smoke-verify` to the full set in `ci.yml` and to `select-smokes.sh`
+- [x] 7.4 CI: add `smoke-verify` to the full set in `ci.yml` and to `select-smokes.sh`
   (`platform/*`, `internal/cluster/*`, `hack/lib.sh`, `hack/smoke/verify.sh`); every smoke job
   creates its own key pair. Verify the selection on example paths and in the PR run.
 
@@ -170,16 +170,23 @@
 
 ## 9. Acceptance (level 3, after release v0.8.0)
 
-- [ ] 9.1 With `tweinmann/shelf-hello`:
+- [x] 9.1 With `tweinmann/shelf-hello`:
   - add `id-token: write`, push, and check the keyless signatures and the attestation with
     `cosign verify`;
   - upgrade the dev cluster with the release platform: the confirmation lists `gretter`, and
     `gretter` keeps running unverified until the next push, then is verified;
   - push an unsigned artifact by hand under a branch tag: no preview applies it.
-- [ ] 9.2 Exposure gate against the real Cloudflare connection:
+- [x] 9.2 Exposure gate against the real Cloudflare connection:
   - `shelf app credentials gretter --private`, then `--cloudflare tobile` succeeds while
     `gretter` is verified;
   - the same for an app whose artifact has no scan is refused.
 
   Record the CI time and push-to-Ready of a branch against Phase 10 (design decision 15) in
   design.md under "Results".
+
+## 10. Follow-ups from the acceptance
+
+- [x] 10.1 `shelf serve` reads the kubeconfig again before every operation (`ops.Ops.Reload`), so
+  a cluster reset needs no restart of the server; test in `internal/ops`.
+- [x] 10.2 The add form offers "Registry without TLS" unticked on a cluster with a dev registry;
+  test in `internal/server`.

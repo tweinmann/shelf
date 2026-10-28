@@ -40,9 +40,9 @@ container's own host name.
 ### Requirement: Dev cluster
 `just cluster-up` SHALL create, or start if it exists, the k3d cluster `shelf-dev` with the k3s
 image pinned in the Dockerfile, without k3s's own Traefik and without k3d's load balancer, its API
-server on the container's loopback, and the plain-HTTP registry `shelf-registry:5000`, reachable
-by that name from pods and from the devcontainer, which allows deleting manifests. It MUST write the kubeconfig only to
-`KUBECONFIG` and never change a default kubeconfig or switch a context.
+server on the container's loopback, the plain-HTTP registry `shelf-registry.local:5000` that allows
+deleting manifests, and a dev cosign key pair under `.local/cosign/`. It MUST write the
+kubeconfig only to `KUBECONFIG` and never change a default kubeconfig or switch a context.
 
 #### Scenario: After a container restart
 - **WHEN** the devcontainer was rebuilt or restarted and `just cluster-up` runs
@@ -53,8 +53,12 @@ by that name from pods and from the devcontainer, which allows deleting manifest
 - **THEN** cluster and registry are deleted and created empty, and `just init-cluster` pushes the platform and chart again before installing them
 
 #### Scenario: Deleting a tag
-- **WHEN** a smoke test deletes a branch tag from `shelf-registry:5000`
+- **WHEN** a smoke test deletes a branch tag from `shelf-registry.local:5000`
 - **THEN** the registry accepts the deletion, so a preview can be removed at level 2 as on GHCR
+
+#### Scenario: Dev artifacts are signed
+- **WHEN** `just init-cluster`, `just platform-push`, `just chart-push` or a smoke test pushes an artifact or a built image to `shelf-registry.local:5000`
+- **THEN** it is signed with the dev key without a transparency log entry, and the cluster, installed with `--signer-key .local/cosign/cosign.pub`, verifies it
 
 ### Requirement: Three test levels
 Checks SHALL be split into level 1 (no cluster: `just test`, which runs gofmt, `go vet`,
@@ -76,7 +80,7 @@ Cloudflare), and a task that needs level 2 or 3 MUST say so.
 
 #### Scenario: Level 2 in full
 - **WHEN** a commit is pushed to `main`, or a pull request carries the label `level-2-full`
-- **THEN** CI runs `smoke-secrets`, `smoke-chart`, `smoke-init`, `smoke-apps`, `smoke-agent` and `smoke-previews` with `SMOKE_FULL=1`
+- **THEN** CI runs `smoke-secrets`, `smoke-chart`, `smoke-init`, `smoke-apps`, `smoke-agent`, `smoke-previews` and `smoke-verify` with `SMOKE_FULL=1`
 
 #### Scenario: main fails
 - **WHEN** CI fails on `main`

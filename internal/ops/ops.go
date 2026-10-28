@@ -92,6 +92,10 @@ type Cluster interface {
 	// AppVerification reads whether an app or a preview, by its namespace, runs a verified
 	// deploy artifact.
 	AppVerification(ctx context.Context, cfg *rest.Config, name string) (cluster.Verification, error)
+	// AppIsolation reads how an app or a preview, by its namespace, is fenced in; lan are the
+	// exceptions it has.
+	AppIsolation(ctx context.Context, cfg *rest.Config, namespace string, lan []string) (cluster.Isolation, error)
+	NodePodCIDRs(ctx context.Context, cfg *rest.Config) ([]string, error)
 	ForwardTraefik(ctx context.Context, cfg *rest.Config) (*cluster.Forward, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
 	// AppConfig returns how an app is registered, or nil when there is no such app.
@@ -135,6 +139,14 @@ func (liveCluster) AppSecrets(ctx context.Context, cfg *rest.Config, app string)
 
 func (liveCluster) AppVerification(ctx context.Context, cfg *rest.Config, name string) (cluster.Verification, error) {
 	return cluster.AppVerification(ctx, cfg, name)
+}
+
+func (liveCluster) AppIsolation(ctx context.Context, cfg *rest.Config, namespace string, lan []string) (cluster.Isolation, error) {
+	return cluster.AppIsolation(ctx, cfg, namespace, lan)
+}
+
+func (liveCluster) NodePodCIDRs(ctx context.Context, cfg *rest.Config) ([]string, error) {
+	return cluster.NodePodCIDRs(ctx, cfg)
 }
 
 func (liveCluster) AppNames(ctx context.Context, cfg *rest.Config) ([]string, error) {
@@ -196,6 +208,10 @@ type FetchFunc func(ctx context.Context, ref string, auth authn.Authenticator, i
 // interfere with each other.
 type Ops struct {
 	Target Target
+	// Reload, when set, reads the target again before every operation, so that a server that
+	// runs for days follows a kubeconfig rewritten under it, as when the cluster was recreated
+	// with a new certificate authority. When it fails, Target is used.
+	Reload func() (Target, error)
 	Env    Env
 
 	Cluster       Cluster
@@ -216,8 +232,18 @@ func New(t Target, env Env) *Ops {
 	}
 }
 
+// target is the cluster the next operation works on.
+func (o *Ops) target() Target {
+	if o.Reload != nil {
+		if t, err := o.Reload(); err == nil {
+			return t
+		}
+	}
+	return o.Target
+}
+
 // config is the cluster connection every operation hands to internal/cluster.
-func (o *Ops) config() *rest.Config { return o.Target.Config }
+func (o *Ops) config() *rest.Config { return o.target().Config }
 
 var appNameRE = regexp.MustCompile(schema.AppNamePattern)
 

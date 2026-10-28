@@ -59,15 +59,25 @@ func (App) JSONSchemaExtend(s *jsonschema.Schema) {
 	components.PropertyNames = namePattern(ComponentNamePattern, MaxComponentNameLength)
 	components.MinProperties = ptr(uint64(1))
 	prop(s, "secrets").PropertyNames = namePattern(SecretNamePattern, MaxSecretNameLength)
+	prop(s, "tests").PropertyNames = namePattern(ComponentNamePattern, MaxTestNameLength)
 }
 
-func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
-	// YAML users write `PORT: 8080`; the parser accepts any scalar and keeps its text.
-	env := prop(s, "env")
+// envSchema lets YAML users write `PORT: 8080`; the parser accepts any scalar and keeps its text.
+func envSchema(env *jsonschema.Schema) {
 	env.PropertyNames = namePattern(EnvNamePattern, 253)
 	env.AdditionalProperties = &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
 		{Type: "string"}, {Type: "number"}, {Type: "boolean"},
 	}}
+}
+
+// imageSource requires exactly one of image and build.
+func imageSource(s *jsonschema.Schema) {
+	prop(s, "build").Pattern = BuildPathPattern
+	s.OneOf = []*jsonschema.Schema{{Required: []string{"image"}}, {Required: []string{"build"}}}
+}
+
+func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
+	envSchema(prop(s, "env"))
 	port := prop(s, "port")
 	port.Minimum, port.Maximum = "1", "65535"
 	ports := prop(s, "ports")
@@ -77,8 +87,12 @@ func (Component) JSONSchemaExtend(s *jsonschema.Schema) {
 	prop(s, "instances").Minimum = "1"
 	prop(s, "volumes").PropertyNames = namePattern(VolumeNamePattern, MaxVolumeNameLength)
 	s.Not = &jsonschema.Schema{Required: []string{"port", "ports"}}
-	prop(s, "build").Pattern = BuildPathPattern
-	s.OneOf = []*jsonschema.Schema{{Required: []string{"image"}}, {Required: []string{"build"}}}
+	imageSource(s)
+}
+
+func (Test) JSONSchemaExtend(s *jsonschema.Schema) {
+	envSchema(prop(s, "env"))
+	imageSource(s)
 }
 
 func (Route) JSONSchema() *jsonschema.Schema {

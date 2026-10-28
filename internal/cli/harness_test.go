@@ -56,6 +56,8 @@ type fakeCluster struct {
 	states     []cluster.AppState
 	components []cluster.Component
 	stages     []cluster.Stage
+	// tests are the test results AppDiagnosis returns with the stages.
+	tests []cluster.TestResult
 	// rollouts are what AppRollout returns, one per call; the last one is repeated.
 	rollouts     []cluster.Rollout
 	rolloutCalls int
@@ -65,6 +67,11 @@ type fakeCluster struct {
 	// verifications are what AppVerification returns, by app or preview namespace; without an
 	// entry, the app is verified and its one component scanned.
 	verifications map[string]cluster.Verification
+	// isolations are what AppIsolation returns, by namespace; without an entry, the namespace
+	// enforces baseline and nothing violates restricted.
+	isolations map[string]cluster.Isolation
+	// podCIDRs are the address ranges of the cluster's pods; nil is k3s's default.
+	podCIDRs []string
 	// traefik is the address ForwardTraefik hands out, empty when no Traefik pod is ready.
 	traefik string
 	found   bool
@@ -113,7 +120,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	config := &cluster.AppConfig{
 		Artifact: o.Artifact, Insecure: o.Insecure, Domain: o.Domain, Registry: o.Registry,
 		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials, Quick: o.Quick,
-		Previews: o.Previews,
+		Previews: o.Previews, LAN: o.LAN,
 	}
 	if previous := f.configs[o.Name]; previous != nil && o.TunnelCredentials == nil && o.TunnelID != "" {
 		config.TunnelCredentials = previous.TunnelCredentials
@@ -157,7 +164,7 @@ func (f *fakeCluster) AppComponents(context.Context, *rest.Config, string) ([]cl
 }
 
 func (f *fakeCluster) AppDiagnosis(_ context.Context, _ *rest.Config, app string) (cluster.Diagnosis, error) {
-	return cluster.Diagnosis{Name: app, Stages: f.stages}, nil
+	return cluster.Diagnosis{Name: app, Stages: f.stages, Tests: f.tests}, nil
 }
 
 func (f *fakeCluster) AppRollout(_ context.Context, _ *rest.Config, app string) (cluster.Rollout, error) {
@@ -187,6 +194,21 @@ func (f *fakeCluster) AppVerification(_ context.Context, _ *rest.Config, name st
 			Scanned: true, Critical: 1, High: 26,
 		}}},
 	}, nil
+}
+
+func (f *fakeCluster) AppIsolation(_ context.Context, _ *rest.Config, namespace string, lan []string) (cluster.Isolation, error) {
+	if iso, ok := f.isolations[namespace]; ok {
+		iso.LAN = lan
+		return iso, nil
+	}
+	return cluster.Isolation{PodSecurity: "baseline", LAN: lan}, nil
+}
+
+func (f *fakeCluster) NodePodCIDRs(context.Context, *rest.Config) ([]string, error) {
+	if f.podCIDRs == nil {
+		return []string{"10.42.0.0/24"}, nil
+	}
+	return f.podCIDRs, nil
 }
 
 func (f *fakeCluster) ForwardTraefik(context.Context, *rest.Config) (*cluster.Forward, error) {

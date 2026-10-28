@@ -112,11 +112,16 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: ghcr-pull
       containers:
         - name: api
           image: "ghcr.io/example/api:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          securityContext:
+            allowPrivilegeEscalation: false
           command:
             - "/bin/api"
             - "--token=$(SHELF_SECRET_API_TOKEN)"
@@ -200,11 +205,16 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: ghcr-pull
       containers:
         - name: db
           image: "postgres:16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          securityContext:
+            allowPrivilegeEscalation: false
           ports:
             - name: main
               containerPort: 5432
@@ -273,11 +283,16 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: ghcr-pull
       containers:
         - name: worker
           image: "ghcr.io/example/worker:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          securityContext:
+            allowPrivilegeEscalation: false
           resources:
             requests:
               cpu: "250m"
@@ -339,3 +354,84 @@ spec:
   stripPrefix:
     prefixes:
       - "/api"
+---
+# Source: shelf-app/templates/tests.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: features-test-login
+  labels:
+    shelf.dev/app: features
+    shelf.dev/test: login
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  enableServiceLinks: false
+  automountServiceAccountToken: false
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  imagePullSecrets:
+    - name: ghcr-pull
+  containers:
+    - name: login
+      image: "ghcr.io/example/login-test:1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      securityContext:
+        allowPrivilegeEscalation: false
+      env:
+        - name: SHELF_SECRET_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: shelf-secrets
+              key: api-token
+        - name: DB
+          value: "db:5432"
+        - name: TOKEN
+          value: "$(SHELF_SECRET_API_TOKEN)"
+      resources:
+        requests:
+          cpu: "20m"
+          memory: "32Mi"
+        limits:
+          memory: "32Mi"
+
+---
+# Source: shelf-app/templates/tests.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: features-test-smoke
+  labels:
+    shelf.dev/app: features
+    shelf.dev/test: smoke
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: shelf-app-0.1.0
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  enableServiceLinks: false
+  automountServiceAccountToken: false
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  imagePullSecrets:
+    - name: ghcr-pull
+  containers:
+    - name: smoke
+      image: "curlimages/curl:8.10.1@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      securityContext:
+        allowPrivilegeEscalation: false
+      args:
+        - "-fsS"
+        - "http://api:8080/healthz"
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+

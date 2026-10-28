@@ -86,6 +86,20 @@ be exposed; how many findings it has is shown, never enforced.</p>
 
 
 
+<section class="card">
+<h2>Isolation</h2>
+<dl class="facts">
+<dt>Pod Security</dt><dd>baseline</dd>
+<dt>LAN</dt><dd><span class="muted">none</span></dd>
+</dl>
+
+<p class="muted">The app reaches its own components, the cluster DNS and the internet, and nothing
+else: not other apps, not the Kubernetes API, not the LAN, except the ranges given under Access.
+Only Traefik reaches in. Its previews never reach the LAN.</p>
+</section>
+
+
+
 
 <section class="card">
 <h2>Deploy</h2>
@@ -130,6 +144,8 @@ you come forward again.</p>
 </select>
 <label for="domain">A domain of its own</label>
 <input id="domain" name="domain" value="shop.ch" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="unchanged: shop.ch">
+<label for="lan">Private addresses it may reach</label>
+<input id="lan" name="lan" value="" placeholder="none, or 192.168.1.10/32 for a NAS">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
@@ -181,6 +197,14 @@ connection, a quick tunnel can give the app a random address that changes whenev
 <pre>1 running</pre>
 
 <p class="muted">Pods</p>
+</li>
+
+<li class="Failed">
+<div class="app-head"><span class="name">the tests</span><span class="pill Failed">Failed</span></div>
+<pre>test smoke failed with exit code 22:
+curl: (22) The requested URL returned error: 500</pre>
+<p>the app&#39;s own test smoke fails against this version; the previous version runs again. Its log says why</p>
+<p class="muted">Pod shop/shop-test-smoke · TestFailed</p>
 </li>
 
 </ol>

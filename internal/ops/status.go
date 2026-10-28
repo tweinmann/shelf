@@ -33,6 +33,8 @@ type App struct {
 	// Verification says whether the app runs what the cluster's signer signed and CI scanned,
 	// filled by App and Preview but not by Apps.
 	Verification *Verification `json:"verification,omitempty"`
+	// Isolation is how the app is fenced in, filled by App and Preview but not by Apps.
+	Isolation *cluster.Isolation `json:"isolation,omitempty"`
 }
 
 // Verification is the chain of an app or a preview from the commit to what runs, and whether
@@ -108,11 +110,12 @@ type Status struct {
 
 // Status reads how the cluster is doing.
 func (o *Ops) Status(ctx context.Context) Status {
-	s := Status{Context: o.Target.Context}
-	if o.Target.Config != nil {
-		s.Server = o.Target.Config.Host
+	t := o.target()
+	s := Status{Context: t.Context}
+	if t.Config != nil {
+		s.Server = t.Config.Host
 	}
-	settings, err := o.Cluster.Settings(ctx, o.config())
+	settings, err := o.Cluster.Settings(ctx, t.Config)
 	if err != nil {
 		s.Error = err.Error()
 		return s
@@ -170,9 +173,29 @@ func (o *Ops) App(ctx context.Context, name string) (App, error) {
 		if a.Verification, err = o.verify(ctx, name, settings, false); err != nil {
 			return App{}, err
 		}
+		config, err := o.Cluster.AppConfig(ctx, o.config(), name)
+		if err != nil {
+			return App{}, err
+		}
+		var lan []string
+		if config != nil {
+			lan = config.LAN
+		}
+		if a.Isolation, err = o.isolation(ctx, name, lan); err != nil {
+			return App{}, err
+		}
 		return a, nil
 	}
 	return App{}, &NotFoundError{Name: name}
+}
+
+// isolation reads how an app or a preview, by its namespace, is fenced in.
+func (o *Ops) isolation(ctx context.Context, namespace string, lan []string) (*cluster.Isolation, error) {
+	iso, err := o.Cluster.AppIsolation(ctx, o.config(), namespace, lan)
+	if err != nil {
+		return nil, err
+	}
+	return &iso, nil
 }
 
 // Diagnose returns the chain from the deploy artifact to the running pods, so that a caller can

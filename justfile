@@ -113,6 +113,10 @@ smoke-previews:
 smoke-verify:
     hack/smoke/verify.sh
 
+# Phase 12: isolation of app and preview, LAN exception, Pod Security, tests on app and preview, report
+smoke-hardening:
+    hack/smoke/hardening.sh
+
 # Phase 8b acceptance: expose an app through its own Cloudflare tunnel (asks for the API token)
 smoke-expose app domain:
     hack/smoke/expose.sh {{app}} {{domain}}

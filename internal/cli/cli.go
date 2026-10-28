@@ -249,7 +249,7 @@ images first. Registry credentials come from the Docker config (docker login).`,
 	cmd.Flags().StringVarP(&output, "output", "o", "configmap",
 		"what to print: configmap (the deploy manifest) or app (the resolved app.yaml)")
 	cmd.Flags().StringArrayVar(&images, "image", nil,
-		"image a built component was pushed as, <component>=<reference>; repeatable")
+		"image a built component or test was pushed as, <name>=<reference>; repeatable")
 	return cmd
 }
 

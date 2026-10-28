@@ -20,7 +20,7 @@ func newAppCmd(o Options) *cobra.Command {
 	cmd.AddCommand(
 		newAppAddCmd(o), newAppRmCmd(o), newAppStatusCmd(o),
 		newAppRedeployCmd(o), newAppSecretsCmd(o), newAppCredentialsCmd(o), newAppTagsCmd(o),
-		newAppOpenCmd(o),
+		newAppOpenCmd(o), newAppReportCmd(o),
 	)
 	return cmd
 }
@@ -34,7 +34,11 @@ needs --domain, a zone of that account. Connections are defined with ` + "`shelf
 Without a Cloudflare connection, an app answers inside the cluster only. --quick exposes it
 through a quick tunnel instead: Cloudflare gives it a random https://<words>.trycloudflare.com
 address, which needs no account and no domain, but changes whenever the tunnel restarts, and is
-meant for trying things out. ` + "`shelf app status`" + ` shows the current one.`
+meant for trying things out. ` + "`shelf app status`" + ` shows the current one.
+
+An app reaches its own components, the cluster DNS and the internet, and nothing else: not other
+apps, not the Kubernetes API, not the LAN. --allow-lan lets it reach a private address range,
+such as a NAS at 192.168.1.10/32; its previews never do. --deny-lan takes that away again.`
 
 // accessFlags choose what an app reaches its registry and the internet with.
 type accessFlags struct {
@@ -47,6 +51,8 @@ type accessFlags struct {
 	private      bool
 	previews     int
 	noPreviews   bool
+	allowLAN     []string
+	denyLAN      bool
 	// fs tells a --previews=0 that was given from one that was not.
 	fs *pflag.FlagSet
 }
@@ -66,6 +72,10 @@ func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 			"previews are reachable from this machine only, with --preview", ops.DefaultPreviews, ops.MaxPreviews))
 	fs.Lookup("previews").NoOptDefVal = strconv.Itoa(ops.DefaultPreviews)
 	fs.BoolVar(&f.noPreviews, "no-previews", false, "remove the app's previews, with their data")
+	fs.StringArrayVar(&f.allowLAN, "allow-lan", nil,
+		"let the app reach a private address range, such as 192.168.1.10/32 for a NAS; repeatable, "+
+			"replaces the ranges it had; its previews never reach any")
+	fs.BoolVar(&f.denyLAN, "deny-lan", false, "take away every private address range the app may reach")
 	if removable {
 		fs.BoolVar(&f.noRegistry, "no-registry", false, "pull without a login")
 		fs.BoolVar(&f.private, "private", false,
@@ -90,7 +100,7 @@ func exactArgs(n int) cobra.PositionalArgs {
 // changes reports whether any flag asks for a change.
 func (f *accessFlags) changes() bool {
 	return f.domain != "" || f.registry != "" || f.noRegistry || f.cloudflare != "" || f.noCloudflare ||
-		f.quick || f.private || f.previews != 0 || f.noPreviews
+		f.quick || f.private || f.previews != 0 || f.noPreviews || len(f.allowLAN) > 0 || f.denyLAN
 }
 
 func (f *accessFlags) access() (ops.Access, error) {
@@ -106,6 +116,8 @@ func (f *accessFlags) access() (ops.Access, error) {
 		Private:        f.private || f.noCloudflare,
 		Previews:       f.previews,
 		NoPreviews:     f.noPreviews,
+		LAN:            f.allowLAN,
+		DenyLAN:        f.denyLAN,
 	}
 	return a, a.Check()
 }
@@ -190,7 +202,7 @@ the internet.
 			}
 			if !access.changes() {
 				return fmt.Errorf("nothing to change; pass --domain, --registry, --cloudflare, " +
-					"--no-registry, --quick, --private, --previews or --no-previews")
+					"--no-registry, --quick, --private, --previews, --no-previews, --allow-lan or --deny-lan")
 			}
 			given, err := access.access()
 			if err != nil {

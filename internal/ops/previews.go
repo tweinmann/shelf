@@ -60,6 +60,10 @@ func (o *Ops) Preview(ctx context.Context, name, branch string) (App, error) {
 		if preview.Verification, err = o.verify(ctx, p.Name, settings, true); err != nil {
 			return App{}, err
 		}
+		// A preview never gets the app's LAN exceptions.
+		if preview.Isolation, err = o.isolation(ctx, p.Name, nil); err != nil {
+			return App{}, err
+		}
 		return preview, nil
 	}
 	missing := &PreviewNotFoundError{App: name, Branch: branch, Off: a.PreviewLimit == 0}

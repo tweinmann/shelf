@@ -230,7 +230,8 @@ func TestPlatformObjects(t *testing.T) {
 		AppProvider(AppOptions{Name: "hello", Artifact: app, Domain: "example.com", TunnelID: "t-1",
 			Registry: "ghcr", Cloudflare: "home"}),
 		AppProvider(AppOptions{Name: "empty", Artifact: app}),
-		AppProvider(AppOptions{Name: "quick", Artifact: app, Quick: true}))
+		AppProvider(AppOptions{Name: "quick", Artifact: app, Quick: true}),
+		AppProvider(AppOptions{Name: "nas", Artifact: app, LAN: []string{"192.168.1.10/32"}}))
 
 	var out []byte
 	for _, obj := range objs {
@@ -385,5 +386,39 @@ func TestMovingApps(t *testing.T) {
 				t.Errorf("shop is not exposed and has no record to leave behind:\n%s", text)
 			}
 		})
+	}
+}
+
+func TestPodCIDRs(t *testing.T) {
+	t.Parallel()
+	node := func(spec map[string]any) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"kind": "Node", "spec": spec}}
+	}
+	got := podCIDRs([]*unstructured.Unstructured{
+		node(map[string]any{"podCIDR": "10.42.0.0/24", "podCIDRs": []any{"10.42.0.0/24", "fd00:42::/64"}}),
+		node(map[string]any{"podCIDR": "10.42.1.0/24"}),
+		node(map[string]any{}),
+	})
+	if strings.Join(got, ",") != "10.42.0.0/24,fd00:42::/64,10.42.1.0/24" {
+		t.Errorf("pod ranges %v", got)
+	}
+}
+
+// TestViolations reads the warnings the API server gave for a dry run of enforce=restricted on
+// the dev cluster (2026-10-28).
+func TestViolations(t *testing.T) {
+	t.Parallel()
+	got := violations([]string{
+		`existing pods in namespace "shop" violate the new PodSecurity enforce level "restricted:latest"`,
+		`db-0: allowPrivilegeEscalation != false, runAsNonRoot != true`,
+		`web-5d8f (and 2 other pods): allowPrivilegeEscalation != false, unrestricted capabilities, runAsNonRoot != true, seccompProfile`,
+		`something else entirely`,
+	})
+	want := []Violation{
+		{Pod: "db-0", Reason: "allowPrivilegeEscalation != false, runAsNonRoot != true"},
+		{Pod: "web-5d8f (and 2 other pods)", Reason: "allowPrivilegeEscalation != false, unrestricted capabilities, runAsNonRoot != true, seccompProfile"},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("violations %+v, want %+v", got, want)
 	}
 }

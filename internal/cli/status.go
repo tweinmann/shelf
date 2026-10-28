@@ -6,6 +6,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -109,6 +110,7 @@ This is what the admin UI shows on its pages, in text.`,
 			printApp(out, app)
 			printComponents(out, app.Components, app.Public || app.Quick)
 			printVerification(out, app.Verification, preview != "")
+			printIsolation(out, app.Isolation)
 			printChain(out, diagnosis)
 			printPreviews(out, app)
 			return nil
@@ -311,10 +313,37 @@ func componentAddress(c ops.Component, public bool) string {
 	return c.Address + " (" + note + ")"
 }
 
+// printIsolation says how the app is fenced in: the Pod Security level, the pods the level
+// restricted would refuse, and the private ranges it may reach.
+func printIsolation(out io.Writer, iso *cluster.Isolation) {
+	if iso == nil {
+		return
+	}
+	if iso.PodSecurity == "" {
+		fmt.Fprintln(out, "  pod security  none: the platform predates it; `shelf init cluster` installs the current one")
+	} else {
+		fmt.Fprintf(out, "  pod security  %s\n", iso.PodSecurity)
+	}
+	for _, v := range iso.Restricted {
+		fmt.Fprintf(out, "    restricted would refuse %s: %s\n", v.Pod, v.Reason)
+	}
+	lan := "none"
+	if len(iso.LAN) > 0 {
+		lan = strings.Join(iso.LAN, ", ")
+	}
+	fmt.Fprintf(out, "  lan           %s\n", lan)
+}
+
 func printChain(out io.Writer, d cluster.Diagnosis) {
 	for _, stage := range d.Stages {
 		fmt.Fprintf(out, "  %-9s %s\n", stage.Phase, stage.Name)
-		if stage.Message != "" {
+		switch {
+		// A failed test brings the end of its log, which is the point of showing it.
+		case stage.Name == "the tests" && stage.Phase == cluster.PhaseFailed:
+			for _, line := range strings.Split(stage.Message, "\n") {
+				fmt.Fprintf(out, "            %s\n", line)
+			}
+		case stage.Message != "":
 			fmt.Fprintf(out, "            %s\n", firstLine(stage.Message))
 		}
 		if stage.Hint != "" && stage.Phase != cluster.PhaseReady {

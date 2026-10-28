@@ -76,6 +76,27 @@ be exposed; how many findings it has is shown, never enforced.</p>
 </section>
 {{end}}
 
+{{with .App.Isolation}}
+<section class="card">
+<h2>Isolation</h2>
+<dl class="facts">
+<dt>Pod Security</dt><dd>{{with .PodSecurity}}{{.}}{{else}}<span class="muted">none: the platform predates it; install the current one with <code>shelf init cluster</code></span>{{end}}</dd>
+<dt>LAN</dt><dd>{{if .LAN}}{{range $i, $c := .LAN}}{{if $i}}, {{end}}{{$c}}{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
+</dl>
+{{if .Restricted}}
+<p>The stricter level restricted would refuse:</p>
+<ul class="components">
+{{range .Restricted}}
+<li><div class="app-head"><span class="name">{{.Pod}}</span><span class="muted">{{.Reason}}</span></div></li>
+{{end}}
+</ul>
+{{end}}
+<p class="muted">The app reaches its own components, the cluster DNS and the internet, and nothing
+else: not other apps, not the Kubernetes API, not the LAN, except the ranges given under Access.
+Only Traefik reaches in. Its previews never reach the LAN.</p>
+</section>
+{{end}}
+
 {{if .Running}}
 <p class="notice">A change is running: <a href="/jobs/{{.Running.ID}}">{{.Running.Title}}</a>.
 The buttons below wait until it is done.</p>
@@ -125,6 +146,8 @@ you come forward again.</p>
 {{end}}</select>
 <label for="domain">A domain of its own</label>
 <input id="domain" name="domain" value="{{.App.Domain}}" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="{{with .App.Domain}}unchanged: {{.}}{{else}}none{{end}}">
+<label for="lan">Private addresses it may reach</label>
+<input id="lan" name="lan" value="{{with .App.Isolation}}{{range $i, $c := .LAN}}{{if $i}}, {{end}}{{$c}}{{end}}{{end}}" placeholder="none, or 192.168.1.10/32 for a NAS">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections

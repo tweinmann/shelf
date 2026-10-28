@@ -75,3 +75,21 @@ initialDelaySeconds: {{ . }}
 periodSeconds: 10
 failureThreshold: {{ .failureThreshold }}
 {{- end -}}
+
+{{/*
+The security settings every pod gets. They are what Pod Security restricted asks for that no
+image depends on: the runtime's default seccomp profile, and no gaining privileges through setuid
+binaries (an entrypoint that switches from root to a user with gosu or su-exec still works). What
+restricted asks beyond that, a user other than root and no capabilities, depends on the image, so
+it is left to it; the namespace warns about it.
+*/}}
+{{- define "shelf-app.podSecurity" -}}
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+{{- end -}}
+
+{{- define "shelf-app.containerSecurity" -}}
+securityContext:
+  allowPrivilegeEscalation: false
+{{- end -}}

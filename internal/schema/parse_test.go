@@ -63,6 +63,8 @@ func TestParse(t *testing.T) {
 		{name: "comment only", yaml: "# nothing\n", wantErr: "file is empty"},
 		{name: "unknown top-level field", yaml: "nmae: a\n", wantErr: "field nmae not found"},
 		{name: "unknown component field", yaml: "components:\n  web:\n    replicas: 2\n", wantErr: "field replicas not found"},
+		{name: "route on a test", yaml: "tests:\n  smoke:\n    image: curl\n    route: /\n", wantErr: "field route not found"},
+		{name: "port on a test", yaml: "tests:\n  smoke:\n    image: curl\n    port: 80\n", wantErr: "field port not found"},
 		{name: "unknown route field", yaml: "components:\n  web:\n    route: { path: /, strip: true }\n", wantErr: "field strip not found in route"},
 		{name: "route of wrong type", yaml: "components:\n  web:\n    route: [/]\n", wantErr: "route must be a path or a mapping"},
 		{name: "route as number", yaml: "components:\n  web:\n    route: 80\n", wantErr: "route must be a path or a mapping"},

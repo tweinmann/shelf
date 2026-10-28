@@ -104,7 +104,17 @@ in its own namespace `<app>--<slug>` with a quota, limits and generated secrets,
 a new branch reached a Ready preview in about 1 min 45 s (CI 93 s, then 11 s), deleting it
 removed the preview within a minute with the workflow's `GITHUB_TOKEN`. Results in
 `openspec/changes/archive/2026-10-28-phase-10-branch-previews`.
-Next: Phase 11 (verification chain).
+Phase 11 complete (2026-10-28): the verification chain. The reusable workflow signs every built
+image and the deploy artifact keyless with cosign and scans every image with Trivy (summary in
+the annotation `dev.shelf.scan`); the release signs chart and platform. Flux verifies every
+OCIRepository against the cluster's signer (`shelf init cluster`, keyless by default or
+`--signer-key`), the Sigstore policy-controller admits an app's built images only when signed,
+and `--cloudflare`/`--quick` refuse an app that is not verified; `shelf app status`, `--json` and
+the app page show the chain. Release v0.8.0. Accepted with `tweinmann/shelf-hello`: the build takes
+2 min 36 s (Phase 10: 1 min 33 s), an unsigned artifact and an unsigned image were refused, and
+`gretter` was exposed only once verified. `shelf serve` now follows a rewritten kubeconfig.
+Results in `openspec/changes/archive/2026-10-28-phase-11-verification-chain`.
+Next: Phase 12 (hardening).
 
 ## Working agreements
 
@@ -146,7 +156,15 @@ Next: Phase 11 (verification chain).
 - The platform is generic: no knowledge of databases or specific services. Everything is a
   component.
 - Apps are isolated from each other. The only thing apps share is a connection the user assigned
-  to several of them; namespace, secret values, tunnel and cloudflared are every app's own.
+  to several of them; namespace, secret values, tunnel and cloudflared are every app's own. The
+  platform enforces it: every app and preview namespace enforces Pod Security `baseline` (and
+  warns about `restricted`), and its NetworkPolicy `shelf-isolation` lets pods reach their own
+  namespace, the cluster DNS and the internet only — not other apps, the Kubernetes API, the LAN
+  or a metadata address — and only Traefik reach in. Only cloudflared may reach Traefik, which
+  routes by Host header and so could reach any app.
+- What an app may reach beyond that is an operator decision too: `--allow-lan <cidr>` on
+  `shelf app add` / `shelf app credentials` (CLI or UI), never `app.yaml`, never for a preview,
+  and never a range that overlaps the cluster's pods.
 - Prefer standard building blocks used by larger platforms (Flux, Helm, Traefik,
   Cloudflare Tunnel) over custom code.
 - `shelf init cluster` must work against any kubecontext. No Colima, macOS or Linux
@@ -188,6 +206,7 @@ it there when it belongs to one smoke test.
 | `just smoke-agent` | devcontainer | Phase 9: `--json` documents, `--wait --commit` (Ready only after the commit rolled out, Failed for an image that cannot be pulled, TimedOut for a commit that never arrives; with `SMOKE_FULL=1`, the default, also Ready again for a fix after a failure, which takes about 5 more minutes because Helm times out the broken upgrade first) and `shelf app open` with the app's Host and `stripPrefix` (needs Docker Hub) |
 | `just smoke-previews` | devcontainer | Phase 10: `examples/hello` with `--previews=2`; two branch tags run as isolated previews with their own database, volume and password; `open --preview`; a new commit keeps the data; the limit holds; a deleted tag removes its preview; `--no-previews` keeps the app; prints push-to-Ready times and RAM per preview (needs Docker Hub) |
 | `just smoke-verify` | devcontainer | Phase 11: a signed and scanned artifact with a signed built image is verified and exposable; the admission policy admits it and denies an unsigned image, in the app's and a preview's namespace; a preview is verified; an artifact without a scan runs but is not verified; an unsigned artifact is not applied and the wait fails with a hint; `rm` removes the image policy; prints the policy-controller's RAM (needs Docker Hub) |
+| `just smoke-hardening` | devcontainer | Phase 12: from the app's and a preview's namespace, its own service, DNS and the internet are reachable, another namespace, the Kubernetes API and a private address (the dev registry's container) are not, and only Traefik reaches in; a LAN exception reaches its range but never the preview; a privileged pod is refused, postgres runs and is listed for `restricted`; a passing test gives Ready, a failing one keeps the app on the previous version and the preview on the failing one, both ending the wait with Failed at "the tests"; `shelf app report` names the changed image; prints push-to-Ready with and without a test (needs Docker Hub) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; installs a released platform and chart (`SHELF_RELEASE`, default the newest tag, v0.8.0 or later) with keyless verification, since the tenant's artifacts are signed keyless; asks for the GHCR login, waits for a push |
 | `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token (set `CF_ACCOUNT_ID` if it sees several accounts); needs a cluster with a host suffix |
 | `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |
@@ -249,7 +268,8 @@ it there when it belongs to one smoke test.
   resort. A machine running shelf as a service has no Docker config
 - Per app in `shelf-system`, all labelled `shelf.dev/app`: the provider `<app>` (inputs `name`,
   `url`, `tag`, `insecure`, `domain`, `tunnel`, `quick`, `registry`, `cloudflare` — the last two
-  are connection names; `tunnel` and `quick` never both), `app-<app>` (secret values),
+  are connection names; `tunnel` and `quick` never both — and `lan`, a list of CIDRs, read with
+  `index` because older providers lack it), `app-<app>` (secret values),
   `tunnel-<app>` (named tunnels only), and with previews `<app>--previews` (label
   `shelf.dev/previews=<app>`). A preview runs in namespace `<app>--<slug>` (labels
   `shelf.dev/app`, `shelf.dev/preview`), so an app name never contains `--`; the slug is
@@ -299,6 +319,16 @@ it there when it belongs to one smoke test.
   the deploy artifact's annotation `dev.shelf.scan` (per image digest the CRITICAL and HIGH
   counts), written before the artifact is signed. What "verified" means is decided in
   `cluster.verification` alone
+- Tests: `tests:` in app.yaml become Helm test hooks, Pods `<app>-test-<test>` labelled
+  `shelf.dev/test` (never `shelf.dev/component`, so the pods stage leaves them out), run by
+  helm-controller after every install and upgrade (`test.enable`; `ignoreFailures` on previews
+  only). Their result is read from the HelmRelease history entry whose `configDigest` is the
+  last attempted one, by pod name; a rollback is an entry without tests. The stage "the tests" is
+  the sixth stage of the diagnosis, and the wait is Ready only when the awaited values' tests
+  passed. A test name never equals a component name, since a built test is
+  `ghcr.io/<owner>/<package>/<test>`
+- Pod Security violations of `restricted` are read with a server-side dry run of the namespace
+  label (`cluster.AppIsolation`, warnings collected by a `WarningHandler`), never by changing it
 - Which values a Helm release holds is decided by its `configDigest`, which `cluster.ConfigDigest`
   computes as helm-controller does, never by timestamps: after a failed upgrade, its failure and
   its rollback are both newer than the values that replaced it

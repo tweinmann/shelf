@@ -1,0 +1,102 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "AppStatus",
+  "name": "hello",
+  "phase": "Failed",
+  "host": "hello.shelf.internal",
+  "artifact": "oci://ghcr.io/o/hello:main",
+  "registry": "ghcr",
+  "exposure": {
+    "kind": "none"
+  },
+  "revision": "main@sha256:abc",
+  "commit": "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+  "deployed": "2026-10-27T13:03:00Z",
+  "components": [
+    {
+      "name": "web",
+      "phase": "Ready",
+      "path": "/",
+      "address": "hello.shelf.internal/"
+    }
+  ],
+  "stages": [
+    {
+      "name": "the deploy artifact",
+      "object": "OCIRepository hello/deploy",
+      "phase": "Ready",
+      "reason": "Succeeded",
+      "message": "stored artifact for digest 'main@sha256:abc'"
+    },
+    {
+      "name": "the app values",
+      "object": "Kustomization hello/deploy",
+      "phase": "Ready",
+      "reason": "ReconciliationSucceeded",
+      "message": "Applied revision: main@sha256:abc"
+    },
+    {
+      "name": "the chart",
+      "object": "OCIRepository hello/shelf-app",
+      "phase": "Ready",
+      "reason": "Succeeded",
+      "message": "stored artifact for digest '0.6.0@sha256:def'"
+    },
+    {
+      "name": "the app",
+      "object": "HelmRelease hello/hello",
+      "phase": "Ready",
+      "reason": "UpgradeSucceeded",
+      "message": "Helm upgrade succeeded"
+    },
+    {
+      "name": "the pods",
+      "object": "Pods",
+      "phase": "Ready",
+      "message": "2 running"
+    },
+    {
+      "name": "the tests",
+      "object": "Pod hello/hello-test-smoke",
+      "phase": "Failed",
+      "reason": "TestFailed",
+      "message": "test smoke failed with exit code 22:\ncurl: (22) The requested URL returned error: 500\nretrying would not help",
+      "hint": "the app's own test smoke fails against this version; the previous version runs again. Its log says why"
+    }
+  ],
+  "verification": {
+    "verified": true,
+    "source": "https://github.com/acme/hello",
+    "signer": "keyless, issuer https://token.actions.githubusercontent.com, subject ^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$",
+    "exposable": true,
+    "scan": [
+      {
+        "component": "web",
+        "digest": "sha256:2006",
+        "scanned": true,
+        "critical": 1,
+        "high": 26,
+        "scanner": "trivy 0.75.0",
+        "scannedAt": "2026-10-28T12:00:00Z"
+      }
+    ]
+  },
+  "tests": [
+    {
+      "name": "smoke",
+      "phase": "Failed",
+      "exitCode": 22,
+      "log": "curl: (22) The requested URL returned error: 500\nretrying would not help"
+    }
+  ],
+  "isolation": {
+    "podSecurity": "baseline",
+    "restrictedViolations": [
+      {
+        "pod": "db-0",
+        "reason": "allowPrivilegeEscalation != false, runAsNonRoot != true"
+      }
+    ],
+    "lan": []
+  }
+}

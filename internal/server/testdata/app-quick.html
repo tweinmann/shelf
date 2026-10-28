@@ -66,6 +66,8 @@ reaches them.</p>
 
 
 
+
+
 <section class="card">
 <h2>Deploy</h2>
 <form method="post" action="/apps/notes/deploy" class="inline">
@@ -109,6 +111,8 @@ you come forward again.</p>
 </select>
 <label for="domain">A domain of its own</label>
 <input id="domain" name="domain" value="" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="none">
+<label for="lan">Private addresses it may reach</label>
+<input id="lan" name="lan" value="" placeholder="none, or 192.168.1.10/32 for a NAS">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
@@ -160,6 +164,13 @@ connection, a quick tunnel can give the app a random address that changes whenev
 <pre>2 running</pre>
 
 <p class="muted">Pods</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the tests</span><span class="pill Ready">Ready</span></div>
+<pre>1 passed: smoke</pre>
+
+<p class="muted">Pods greeter/greeter-test-*</p>
 </li>
 
 </ol>
