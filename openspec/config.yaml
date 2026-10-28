@@ -45,12 +45,21 @@ context: |
     `previews` runs each tag in a namespace `<app>--<slug>` with a quota, limits and secrets the
     chart generates, never exposed. A branch build publishes the tag, deleting the branch deletes
     it, and the platform only reads the registry.
+  - Verification chain: the reusable workflow signs every built image and the deploy artifact
+    with keyless cosign (identity: shelf's build.yml) and writes a Trivy summary into the
+    artifact (`dev.shelf.scan`) before signing it; releases sign chart and platform. Flux
+    verifies every OCIRepository against the cluster's signer, and the Sigstore
+    policy-controller admits a built image of an app's package only with its signature, in app
+    and preview namespaces. Third-party images are pinned by digest in the signed artifact.
+    The dev cluster verifies with a dev key; there is no setting that turns verification off.
   - `shelf init` is split into idempotent layers: `init host` (Phase 13: provide the environment,
     macOS or Linux), `init cluster` (any kubecontext, no Colima or distribution assumptions) and
     the wrapper.
   - Three separate states per app and preview: build (built, scanned, signed), deployment (which
     digest runs where) and exposure (cluster only, port-forward, tunnel). Exposure is the
-    operator's decision, never part of app.yaml. Apps and previews are reached by
+    operator's decision, never part of app.yaml, and only a verified app can be exposed: the
+    gate in `ops.AddApp` refuses a tunnel to an app whose running artifact is not signed and
+    scanned. Apps and previews are reached by
     port-forward through the API server to Traefik (`shelf app open`); LAN access stays rejected.
   - Agents read the platform through `--json` documents and `shelf app status --wait --commit`,
     which only reads: the commit comes from the deploy artifact's revision annotation, never

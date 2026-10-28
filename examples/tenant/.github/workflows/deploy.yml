@@ -10,9 +10,12 @@ on:
   pull_request:
   delete:
 
+# id-token lets the workflow sign the images and the deploy artifact with keyless cosign; the
+# cluster runs nothing without that signature.
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 jobs:
   shelf:

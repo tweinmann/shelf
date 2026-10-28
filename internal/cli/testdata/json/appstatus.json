@@ -61,5 +61,22 @@
       "phase": "Ready",
       "message": "2 running"
     }
-  ]
+  ],
+  "verification": {
+    "verified": true,
+    "source": "https://github.com/acme/hello",
+    "signer": "keyless, issuer https://token.actions.githubusercontent.com, subject ^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$",
+    "exposable": true,
+    "scan": [
+      {
+        "component": "web",
+        "digest": "sha256:2006",
+        "scanned": true,
+        "critical": 1,
+        "high": 26,
+        "scanner": "trivy 0.75.0",
+        "scannedAt": "2026-10-28T12:00:00Z"
+      }
+    ]
+  }
 }

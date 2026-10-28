@@ -11,6 +11,8 @@ ARG JUST_VERSION=1.58.0
 ARG KUBECONFORM_VERSION=0.8.0
 ARG NODE_VERSION=24.21.0
 ARG OPENSPEC_VERSION=1.14.1
+ARG COSIGN_VERSION=3.1.3
+ARG CRANE_VERSION=0.20.6
 
 # OpenSpec (spec-driven changes, see openspec/) collects usage data unless told not to.
 ENV OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 NPM_CONFIG_UPDATE_NOTIFIER=false
@@ -21,8 +23,8 @@ ENV SHELF_K3S_IMAGE=rancher/k3s:v1.36.4-k3s1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-      arm64) just_arch=aarch64; node_arch=arm64 ;; \
-      amd64) just_arch=x86_64; node_arch=x64 ;; \
+      arm64) just_arch=aarch64; node_arch=arm64; crane_arch=arm64 ;; \
+      amd64) just_arch=x86_64; node_arch=x64; crane_arch=x86_64 ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
     tmp="$(mktemp -d)"; \
@@ -41,10 +43,15 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin kubeconform; \
     curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
       | tar -xJ -C /usr/local --strip-components=1 --exclude='*.md' --exclude=LICENSE; \
+    curl -fsSL -o /usr/local/bin/cosign \
+      "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${arch}"; \
+    curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_${crane_arch}.tar.gz" \
+      | tar -xz -C /usr/local/bin crane; \
     npm install -g "@fission-ai/openspec@${OPENSPEC_VERSION}"; \
     npm cache clean --force; \
     chmod 0755 /usr/local/bin/k3d /usr/local/bin/kubectl /usr/local/bin/helm \
-      /usr/local/bin/flux /usr/local/bin/just /usr/local/bin/kubeconform; \
+      /usr/local/bin/flux /usr/local/bin/just /usr/local/bin/kubeconform \
+      /usr/local/bin/cosign /usr/local/bin/crane; \
     rm -rf "$tmp"
 
 # A named volume copies ownership and mode from the image directory it is mounted over, but only

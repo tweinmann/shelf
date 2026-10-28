@@ -198,6 +198,21 @@ func failOnAuthError(ready readyFunc, hint string) readyFunc {
 	}
 }
 
+// failOnUnverified turns a failed signature check into an error: Flux retries it forever, but
+// the artifact will not get another signature by waiting.
+func failOnUnverified(ready readyFunc, hint string) readyFunc {
+	return func(obj *unstructured.Unstructured) (bool, string, error) {
+		ok, msg, err := ready(obj)
+		if err == nil && !ok {
+			if cond := condition(obj, sourceVerified); cond != nil && cond["status"] == "False" {
+				message, _ := cond["message"].(string)
+				return false, msg, fmt.Errorf("%s is not signed by the cluster's signer: %s\n%s", describe(obj), message, hint)
+			}
+		}
+		return ok, msg, err
+	}
+}
+
 // waitFor polls until ready reports true or the context ends. A missing object counts as not
 // ready yet, because controllers create some of the objects shelf waits for.
 func (c *client) waitFor(ctx context.Context, r ref, ready readyFunc) error {

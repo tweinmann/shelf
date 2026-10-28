@@ -208,6 +208,17 @@ func runningPlatform() *fakePlatform {
 				Public:            true,
 				URL:               "https://greeter-dev.example.com/",
 				CloudflareAccount: "acc-1",
+				Verification: &ops.Verification{
+					Verification: cluster.Verification{
+						Verified: true, Source: "https://github.com/tweinmann/shelf-hello",
+						Commit: "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+						Scan: &cluster.Scan{Scanner: "trivy 0.75.0", ScannedAt: "2026-10-28T12:00:00Z", Images: []cluster.ScannedImage{
+							{Component: "db", Scanned: true, Critical: 2, High: 86},
+							{Component: "web", Scanned: true, High: 3},
+						}},
+					},
+					Signer: "keyless, issuer https://token.actions.githubusercontent.com", Exposable: true,
+				},
 				Components: []ops.Component{
 					{
 						Component: cluster.Component{Name: "check", Phase: cluster.PhaseWorking},
@@ -242,7 +253,12 @@ func runningPlatform() *fakePlatform {
 				Host:              "shop-dev.shop.ch",
 				Public:            true,
 				CloudflareMissing: true,
-				URL:               "https://shop-dev.shop.ch/",
+				Verification: &ops.Verification{
+					Verification: cluster.Verification{Reason: "the deploy artifact has no scan (dev.shelf.scan)"},
+					Signer:       "keyless, issuer https://token.actions.githubusercontent.com",
+					Hint:         "push again with the current reusable workflow, which signs and scans every build",
+				},
+				URL: "https://shop-dev.shop.ch/",
 				Components: []ops.Component{
 					{
 						Component: cluster.Component{Name: "web", Phase: cluster.PhaseReady,

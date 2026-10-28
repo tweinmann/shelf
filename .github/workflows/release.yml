@@ -38,8 +38,15 @@ jobs:
     needs: gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    # id-token: keyless cosign signs the chart and the platform artifact with this workflow's
+    # identity, which clusters verify before they install either.
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     env:
       VERSION: ${{ github.ref_name }}
+      COSIGN_VERSION: v3.1.3
     steps:
       - uses: actions/checkout@v7
 
@@ -77,22 +84,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Push the chart
+      - name: Install cosign
+        run: |
+          tmp="$(mktemp -d)"
+          cosign=https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION
+          curl -fsSL -o "$tmp/cosign-linux-arm64" "$cosign/cosign-linux-arm64"
+          curl -fsSL -o "$tmp/cosign_checksums.txt" "$cosign/cosign_checksums.txt"
+          (cd "$tmp" && grep ' cosign-linux-arm64$' cosign_checksums.txt | sha256sum -c -)
+          sudo install "$tmp/cosign-linux-arm64" /usr/local/bin/cosign
+          cosign version
+
+      # Signatures use cosign's classic format, which both Flux and the Sigstore policy-controller
+      # read.
+      - name: Push and sign the chart
         run: |
           # Helm versions are semver without a leading v; shelf init cluster expects that.
           helm package charts/shelf-app --version "${VERSION#v}" --destination dist
-          helm push "dist/shelf-app-${VERSION#v}.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shelf/charts"
+          charts="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shelf/charts"
+          helm push "dist/shelf-app-${VERSION#v}.tgz" "oci://$charts" 2>&1 | tee "$RUNNER_TEMP/helm-push.txt"
+          digest="$(awk '/^Digest:/ {print $2}' "$RUNNER_TEMP/helm-push.txt")"
+          cosign sign --yes --use-signing-config=false --new-bundle-format=false "$charts/shelf-app@$digest"
 
       - uses: fluxcd/flux2/action@v2.9.5
         with:
           version: 2.9.5
 
-      - name: Push the platform artifact
+      - name: Push and sign the platform artifact
         run: |
-          flux push artifact "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shelf/platform:$VERSION" \
+          platform="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shelf/platform"
+          flux push artifact "oci://$platform:$VERSION" \
             --path platform \
             --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --revision "$VERSION@sha1:$GITHUB_SHA"
+            --revision "$VERSION@sha1:$GITHUB_SHA" \
+            --output json >"$RUNNER_TEMP/platform.json"
+          cosign sign --yes --use-signing-config=false --new-bundle-format=false \
+            "$platform@$(jq -r .digest "$RUNNER_TEMP/platform.json")"
 
       # Workflow and binary switch together: the major tag first, then the release becomes latest.
       # A tenant build that starts in the seconds between the two still gets matching versions

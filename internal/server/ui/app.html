@@ -52,6 +52,30 @@ app values have been applied; the chain below says how far that got.</p>
 {{end}}
 </section>
 
+{{with .App.Verification}}
+<section class="card">
+<h2>Verification</h2>
+<dl class="facts">
+{{if .Source}}<dt>Source</dt><dd>{{.Source}}{{with .Commit}} at <span title="{{.}}">{{printf "%.12s" .}}</span>{{end}}</dd>{{end}}
+<dt>Signer</dt><dd>{{.Signer}}</dd>
+<dt>Verified</dt><dd>{{if .Verified}}yes{{else}}no: {{.Reason}}{{end}}</dd>
+{{with .Scan}}<dt>Scan</dt><dd>{{.Scanner}}, {{.ScannedAt}}</dd>{{end}}
+<dt>Exposure</dt><dd>{{if .Exposable}}allowed{{else}}refused until it is verified{{end}}</dd>
+</dl>
+{{if not .Verified}}<p>{{.Hint}}</p>{{end}}
+{{with .Scan}}
+<ul class="components">
+{{range .Images}}
+<li><div class="app-head"><span class="name">{{.Component}}</span>
+<span class="muted">{{if .Scanned}}{{.Critical}} critical, {{.High}} high{{else}}not scanned{{end}}</span></div></li>
+{{end}}
+</ul>
+{{end}}
+<p class="muted">The cluster runs only what this signer signed. A scan must exist before the app can
+be exposed; how many findings it has is shown, never enforced.</p>
+</section>
+{{end}}
+
 {{if .Running}}
 <p class="notice">A change is running: <a href="/jobs/{{.Running.ID}}">{{.Running.Title}}</a>.
 The buttons below wait until it is done.</p>

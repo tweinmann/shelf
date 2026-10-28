@@ -27,6 +27,8 @@ else
     --wait
 fi
 
+ensure_signer_key
+
 # registry:2 refuses to delete manifests unless told to. Previews disappear when their branch tag
 # is deleted, so level 2 has to be able to delete one, as GHCR can. The config file lives in the
 # registry container, which keeps it across restarts; this runs on every cluster-up.
@@ -39,7 +41,7 @@ fi
 
 # The registry is published on this container's loopback; give it the name pods use. /etc/hosts
 # is recreated with the container, so this runs on every cluster-up.
-if ! grep -qE "^127\.0\.0\.1[[:space:]]+$SHELF_REGISTRY\$" /etc/hosts; then
+if ! grep -qE "^127\.0\.0\.1[[:space:]]+${SHELF_REGISTRY//./\\.}\$" /etc/hosts; then
   echo "127.0.0.1 $SHELF_REGISTRY" | sudo tee -a /etc/hosts >/dev/null
 fi
 

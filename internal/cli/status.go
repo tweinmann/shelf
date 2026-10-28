@@ -108,6 +108,7 @@ This is what the admin UI shows on its pages, in text.`,
 			}
 			printApp(out, app)
 			printComponents(out, app.Components, app.Public || app.Quick)
+			printVerification(out, app.Verification, preview != "")
 			printChain(out, diagnosis)
 			printPreviews(out, app)
 			return nil
@@ -247,6 +248,51 @@ func printComponents(out io.Writer, comps []ops.Component, public bool) {
 	fmt.Fprintln(out, "  components")
 	for _, c := range comps {
 		fmt.Fprintf(out, "    %-*s  %-7s  %s\n", width, c.Name, c.Phase, componentAddress(c, public))
+	}
+}
+
+// printVerification is the chain from the commit to what runs: where the deploy artifact says it
+// comes from, whether the cluster's signer signed it and CI scanned every image, and so whether
+// the app may be exposed.
+func printVerification(out io.Writer, v *ops.Verification, preview bool) {
+	if v == nil {
+		return
+	}
+	if v.Source != "" {
+		source := v.Source
+		if v.Commit != "" {
+			source += " at " + v.Commit[:min(len(v.Commit), 12)]
+		}
+		fmt.Fprintf(out, "  source    %s\n", source)
+	}
+	fmt.Fprintf(out, "  signer    %s\n", v.Signer)
+	if v.Verified {
+		fmt.Fprintln(out, "  verified  yes")
+	} else {
+		fmt.Fprintf(out, "  verified  no: %s\n", v.Reason)
+		fmt.Fprintf(out, "            %s\n", v.Hint)
+	}
+	if v.Scan != nil {
+		fmt.Fprintf(out, "  scan      %s, %s\n", v.Scan.Scanner, v.Scan.ScannedAt)
+		width := 0
+		for _, img := range v.Scan.Images {
+			width = max(width, len(img.Component))
+		}
+		for _, img := range v.Scan.Images {
+			findings := "not scanned"
+			if img.Scanned {
+				findings = fmt.Sprintf("%d critical, %d high", img.Critical, img.High)
+			}
+			fmt.Fprintf(out, "    %-*s  %s\n", width, img.Component, findings)
+		}
+	}
+	switch {
+	case preview:
+		fmt.Fprintln(out, "  exposure  never: a preview stays inside the cluster")
+	case v.Exposable:
+		fmt.Fprintln(out, "  exposure  allowed")
+	default:
+		fmt.Fprintln(out, "  exposure  refused until it is verified")
 	}
 }
 

@@ -46,6 +46,9 @@ type Settings struct {
 	// LegacyDomain is the domain a cluster had before clusters had none, read back and never
 	// written. `shelf init cluster` gives it to the apps that answered under it.
 	LegacyDomain string
+	// Signer is who must have signed what the cluster runs. Zero only in a cluster installed
+	// before Phase 11.
+	Signer Signer
 }
 
 // Installed reports whether `shelf init cluster` has run against the cluster.
@@ -57,7 +60,10 @@ type RegistryAuth struct {
 	Token    string
 }
 
-// ConfigObjects returns the system namespace and the ConfigMap with the cluster settings.
+// ConfigObjects returns the system namespace, the ConfigMap with the cluster settings and the
+// signer's key in shelf-system, for the app namespaces, and in flux-system, for the platform.
+// Besides the signer's own fields, the settings carry what the platform needs of it as JSON:
+// the verify block of an OCIRepository and the authority of a ClusterImagePolicy.
 func ConfigObjects(s Settings) []*unstructured.Unstructured {
 	return []*unstructured.Unstructured{
 		{Object: map[string]any{
@@ -79,8 +85,16 @@ func ConfigObjects(s Settings) []*unstructured.Unstructured {
 				"SHELF_CHART_URL":         s.Chart.URL,
 				"SHELF_CHART_TAG":         s.Chart.Tag,
 				"SHELF_INSECURE_REGISTRY": strconv.FormatBool(s.InsecureRegistry),
+				"SHELF_SIGNER_MODE":       s.Signer.Mode(),
+				"SHELF_SIGNER_ISSUER":     s.Signer.Issuer,
+				"SHELF_SIGNER_SUBJECT":    s.Signer.Subject,
+				"SHELF_SIGNER_KEY":        s.Signer.Key,
+				"SHELF_SIGNER_VERIFY":     compactJSON(s.Signer.verify(SignerSecretName)),
+				"SHELF_SIGNER_AUTHORITY":  compactJSON(s.Signer.authority()),
 			},
 		}},
+		signerSecret(SystemNamespace, signerKeySecret, s.Signer),
+		signerSecret(FluxNamespace, SignerSecretName, s.Signer),
 	}
 }
 
@@ -103,6 +117,11 @@ func ParseSettings(data map[string]string) Settings {
 		Chart:            Artifact{URL: data["SHELF_CHART_URL"], Tag: data["SHELF_CHART_TAG"]},
 		InsecureRegistry: insecure,
 		LegacyDomain:     data[legacyDomainKey],
+		Signer: Signer{
+			Issuer:  data["SHELF_SIGNER_ISSUER"],
+			Subject: data["SHELF_SIGNER_SUBJECT"],
+			Key:     data["SHELF_SIGNER_KEY"],
+		},
 	}
 }
 

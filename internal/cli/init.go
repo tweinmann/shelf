@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -98,6 +99,8 @@ func newInitClusterCmd(o Options) *cobra.Command {
 		hostSuffix string
 		insecure   bool
 		moveHosts  bool
+		signer     = cluster.DefaultSigner()
+		signerKey  string
 		target     clusterFlags
 	)
 	cmd := &cobra.Command{
@@ -110,6 +113,11 @@ A cluster has no domain: an app gets one of its own when it is added, and answer
 <app><host-suffix>.<domain>; without one, it answers at <app>.shelf.internal inside the cluster.
 Registry logins and Cloudflare tokens are connections (` + "`shelf connection`" + `), which each app
 chooses for itself.
+
+The cluster verifies every artifact and built image before it runs it: by default it accepts
+keyless signatures made by shelf's own build and release workflows (--signer-issuer,
+--signer-subject); --signer-key accepts a cosign public key instead, for clusters that test shelf.
+There is no setting that turns verification off.
 
 The command shows the target cluster and asks for confirmation, because it installs
 cluster-wide objects. It is idempotent; running it again updates what changed.`,
@@ -127,6 +135,18 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			if err := ops.CheckHostSuffix(hostSuffix); err != nil {
 				return fmt.Errorf("--host-suffix %w", err)
 			}
+			if signerKey != "" {
+				data, err := os.ReadFile(signerKey)
+				if err != nil {
+					return fmt.Errorf("--signer-key: %w", err)
+				}
+				if signer.Key, err = cluster.ParseSignerKey(data); err != nil {
+					return fmt.Errorf("--signer-key %s: %w", signerKey, err)
+				}
+			}
+			if err := signer.Check(); err != nil {
+				return fmt.Errorf("signer: %w", err)
+			}
 			shelf, err := target.load(o)
 			if err != nil {
 				return err
@@ -138,6 +158,7 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 				HostSuffix: hostSuffix,
 				Insecure:   insecure,
 				MoveHosts:  moveHosts,
+				Signer:     signer,
 				Timeout:    target.timeout,
 			}
 			plan := shelf.PlanCluster(opts)
@@ -147,6 +168,13 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 			fmt.Fprintf(out, "  platform  %s\n", plan.Platform)
 			fmt.Fprintf(out, "  chart     %s\n", plan.Chart)
 			fmt.Fprintf(out, "  hosts     %s, or <app>.%s without a domain\n", plan.Hosts, cluster.InternalDomain)
+			fmt.Fprintf(out, "  signer    %s\n", plan.Signer)
+			// Best effort: a cluster without shelf has no apps, and not even their types.
+			if unverified, err := shelf.UnverifiedApps(cmd.Context()); err == nil && len(unverified) > 0 {
+				fmt.Fprintf(out, "  unverified apps: %s\n", strings.Join(unverified, ", "))
+				fmt.Fprintln(out, "    each needs one build with the current workflow before it gets new deploys;")
+				fmt.Fprintln(out, "    what runs now keeps running")
+			}
 			if !target.yes {
 				ok, err := confirm(cmd.InOrStdin(), out)
 				if err != nil {
@@ -169,6 +197,12 @@ cluster-wide objects. It is idempotent; running it again updates what changed.`,
 	f.BoolVar(&insecure, "insecure-registry", false, "pull platform and chart without TLS (dev registry)")
 	f.BoolVar(&moveHosts, "move-hosts", false,
 		"allow a host suffix that moves the apps with a domain to different names")
+	f.StringVar(&signer.Issuer, "signer-issuer", cluster.DefaultSignerIssuer,
+		"OIDC issuer of the keyless signatures the cluster accepts")
+	f.StringVar(&signer.Subject, "signer-subject", cluster.DefaultSignerSubject,
+		"regular expression for the certificate subject of the keyless signatures the cluster accepts")
+	f.StringVar(&signerKey, "signer-key", "",
+		"cosign public key (PEM file) the cluster accepts instead of keyless signatures; for clusters that test shelf")
 	target.register(f)
 	return cmd
 }

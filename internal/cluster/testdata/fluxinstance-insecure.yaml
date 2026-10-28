@@ -32,6 +32,13 @@ spec:
         name: flux-system
     - patch: |
         - op: add
+          path: /spec/verify
+          value: {"provider":"cosign","secretRef":{"name":"shelf-signer"}}
+      target:
+        kind: OCIRepository
+        name: flux-system
+    - patch: |
+        - op: add
           path: /spec/insecure
           value: true
       target:
@@ -42,4 +49,4 @@ spec:
     kind: OCIRepository
     path: ./
     ref: dev
-    url: oci://shelf-registry:5000/shelf/platform
+    url: oci://shelf-registry.local:5000/shelf/platform

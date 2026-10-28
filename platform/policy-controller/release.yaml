@@ -1,0 +1,47 @@
+# The Sigstore policy-controller admits a pod only if every image a ClusterImagePolicy matches
+# is signed by the cluster's signer. The ResourceSet apps gives every app such a policy for its
+# built images (ghcr.io/<owner>/<package>/**); images no policy matches, such as postgres from
+# Docker Hub, are admitted: their digests are fixed in the signed deploy artifact.
+#
+# Only namespaces labelled policy.sigstore.dev/include=true are checked, which are the app and
+# preview namespaces. If the webhook does not answer, pods there are not created
+# (failurePolicy: Fail), so it runs twice; one replica uses about 35 Mi.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: sigstore
+  namespace: cosign-system
+spec:
+  interval: 1h
+  url: https://sigstore.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: policy-controller
+  namespace: cosign-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: policy-controller
+      version: 0.10.8
+      sourceRef:
+        kind: HelmRepository
+        name: sigstore
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  values:
+    webhook:
+      replicaCount: 2
+      failurePolicy: Fail
+      configData:
+        no-match-policy: allow
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 256Mi

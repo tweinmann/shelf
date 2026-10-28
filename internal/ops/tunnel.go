@@ -120,8 +120,7 @@ func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Se
 		return nil, noDomain(name, connection)
 	}
 	if !PublicDomain(domain) {
-		return nil, fmt.Errorf("%s cannot be exposed under %s, which is not a public domain; give it a public domain of its own",
-			name, domain)
+		return nil, notPublic(name, domain)
 	}
 	e.api = o.NewCloudflare(e.access.Token)
 	zone, err := e.api.ZoneFor(ctx, domain)
@@ -154,6 +153,11 @@ func (o *Ops) planExposure(ctx context.Context, name string, settings cluster.Se
 	}
 	rep.Report(progress.Applied(subject, action, ""))
 	return e, nil
+}
+
+func notPublic(app, domain string) error {
+	return fmt.Errorf("%s cannot be exposed under %s, which is not a public domain; give it a public domain of its own",
+		app, domain)
 }
 
 // finish points the app's name at its tunnel, and removes the record and the tunnel the cluster

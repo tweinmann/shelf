@@ -48,7 +48,7 @@ trap cleanup EXIT
 step "build shelf"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 init_cluster() {
-  "$work/shelf" init cluster --yes --insecure-registry --host-suffix "$(cluster_host_suffix)" \
+  "$work/shelf" init cluster --yes --signer-key "$SHELF_SIGNER_PUB" --insecure-registry --host-suffix "$(cluster_host_suffix)" \
     --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
     --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev"
 }

@@ -176,6 +176,9 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	if cloudflare != "" && domain == "" {
 		return noDomain(opts.Name, cloudflare)
 	}
+	if cloudflare != "" && !PublicDomain(domain) {
+		return notPublic(opts.Name, domain)
+	}
 	if opts.Access.Cloudflare != "" && opts.Access.Cloudflare != current.Cloudflare {
 		conn, err := o.Env.Connections.Cloudflare(opts.Access.Cloudflare)
 		if err != nil {
@@ -225,28 +228,56 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 	if err != nil {
 		return err
 	}
+	deployment := cluster.AppOptions{
+		Name:     opts.Name,
+		Artifact: opts.Artifact,
+		Insecure: opts.Insecure,
+		Domain:   domain,
+		Registry: registry,
+		Previews: previews,
+		Secrets:  values,
+		Timeout:  opts.Timeout,
+		Report:   rep,
+	}
+	// Only a verified app goes beyond a preview. An app that is not exposed yet is deployed
+	// privately first, and gets its tunnel only once it runs a verified artifact; until then
+	// nothing is asked of Cloudflare.
+	if (cloudflare != "" || quick) && current.TunnelID == "" && !current.Quick {
+		rep.Report(progress.Info("exposure: once %s runs a verified deploy artifact", opts.Name))
+		if err := o.Cluster.AddApp(ctx, o.config(), deployment); err != nil {
+			return err
+		}
+		v, err := o.verify(ctx, opts.Name, settings, false)
+		if err != nil {
+			return err
+		}
+		if !v.Exposable {
+			return &NotVerifiedError{App: opts.Name, Reason: v.Reason, Hint: v.Hint}
+		}
+		rep.Report(progress.Info("verified: signed by the cluster's signer, every image scanned"))
+	}
 	exposure, err := o.planExposure(ctx, opts.Name, settings, current, domain, cloudflare, rep)
 	if err != nil {
 		return err
 	}
-	if err := o.Cluster.AddApp(ctx, o.config(), cluster.AppOptions{
-		Name:              opts.Name,
-		Artifact:          opts.Artifact,
-		Insecure:          opts.Insecure,
-		Domain:            domain,
-		Registry:          registry,
-		Cloudflare:        cloudflare,
-		TunnelID:          exposure.tunnelID(),
-		TunnelCredentials: exposure.credentials,
-		Quick:             quick,
-		Previews:          previews,
-		Secrets:           values,
-		Timeout:           opts.Timeout,
-		Report:            rep,
-	}); err != nil {
+	deployment.Cloudflare, deployment.Quick = cloudflare, quick
+	deployment.TunnelID, deployment.TunnelCredentials = exposure.tunnelID(), exposure.credentials
+	if err := o.Cluster.AddApp(ctx, o.config(), deployment); err != nil {
 		return err
 	}
 	return o.finish(ctx, exposure, rep)
+}
+
+// NotVerifiedError means an app was not exposed because it does not run a verified deploy
+// artifact. The app is deployed and stays inside the cluster.
+type NotVerifiedError struct {
+	App, Reason, Hint string
+}
+
+func (e *NotVerifiedError) Error() string {
+	return fmt.Sprintf("%s is not exposed: it does not run a verified deploy artifact: %s\n%s\n"+
+		"%s is deployed and stays inside the cluster; `shelf app status %s` shows the chain.",
+		e.App, e.Reason, e.Hint, e.App, e.App)
 }
 
 // SetAccess changes how an app reaches its registry and the internet, and nothing else: it

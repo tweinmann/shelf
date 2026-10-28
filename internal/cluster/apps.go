@@ -300,7 +300,8 @@ func (c *client) rollOut(ctx context.Context, rep progress.Reporter, name string
 		if err != nil {
 			return "", err
 		}
-		obj, err := c.reconcileAndWait(ctx, repo, failOnAuthError(readyCondition, registryHint(name)))
+		obj, err := c.reconcileAndWait(ctx, repo, failOnUnverified(failOnAuthError(readyCondition, registryHint(name)),
+			"push again with the current reusable workflow, which signs every build (its caller needs `id-token: write`)"))
 		if err != nil {
 			return "", err
 		}
@@ -395,6 +396,25 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 	if err != nil {
 		if ctx.Err() != nil {
 			return found, fmt.Errorf("the previews of %s are still there; check the ResourceSet previews in the cluster", app)
+		}
+		return found, err
+	}
+
+	// The app's image policy is cluster-wide, so it does not go with the namespace. A cluster
+	// without the policy-controller has none.
+	policy := ref{gvk: imagePolicyGVK, name: ImagePolicyName(app)}
+	err = c.step(ctx, rep, "the image policy of "+app+" to be deleted", func(ctx context.Context) (string, error) {
+		return "", wait.PollUntilContextCancel(ctx, pollInterval, true, func(ctx context.Context) (bool, error) {
+			obj, err := c.get(ctx, policy)
+			if meta.IsNoMatchError(err) {
+				return true, nil
+			}
+			return obj == nil, err
+		})
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return found, fmt.Errorf("%s is still there; check the ResourceSet apps in the cluster", policy)
 		}
 		return found, err
 	}

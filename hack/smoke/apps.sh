@@ -45,11 +45,10 @@ retry() {
   return 1
 }
 
-# publish <dir>: pushes the files in dir as the deploy artifact, tag main, and prints its digest.
+# publish <dir>: pushes the files in dir as the deploy artifact, tag main, signed, and prints its
+# digest.
 publish() {
-  flux push artifact "$artifact:main" --path "$1" --source local \
-    --revision "main@sha1:$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
-    --insecure-registry 2>&1 | sed -n 's/.*pushed to .*@\(sha256:[0-9a-f]*\).*/\1/p'
+  push_artifact "$artifact:main" "$1" "main@sha1:$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 }
 
 # render <app.yaml> <dir>: writes the deploy manifest of an app.yaml into dir.
@@ -72,7 +71,7 @@ step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
+shelf init cluster --yes --signer-key "$SHELF_SIGNER_PUB" --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" >/dev/null
 

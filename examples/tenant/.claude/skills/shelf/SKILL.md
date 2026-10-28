@@ -67,11 +67,13 @@ The app's name on shelf is in `CLAUDE.md` (the operator chose it; it is not `nam
 ## What the stages mean
 
 The stages, in order:
-1. `the deploy artifact`: CI did not push, or the registry refuses the login.
+1. `the deploy artifact`: CI did not push, the registry refuses the login, or the artifact is not
+   signed by the cluster's signer (push again; `deploy.yml` needs `id-token: write`).
 2. `the app values`: the rendered app.yaml was rejected.
 3. `the chart`: a platform problem; report it.
 4. `the app`: the Helm release; often a bad `app.yaml`.
-5. `the pods`: image pull, crash loop, out of memory, missing secret, or a preview's quota.
+5. `the pods`: image pull, crash loop, out of memory, missing secret, a preview's quota, or a
+   built image the admission policy refused because it is not signed.
 
 The first stage that is not Ready is the cause; everything after it is a consequence.
 `shelf validate app.yaml` catches most app.yaml mistakes before a push.
