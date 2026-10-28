@@ -157,7 +157,7 @@ it there when it belongs to one smoke test.
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, `go test -race`, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
-| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry:5000` (added to `/etc/hosts`), write kubeconfig (run after every container restart or rebuild) |
+| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry:5000` (added to `/etc/hosts`, deletes enabled), write kubeconfig (run after every container restart or rebuild) |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
@@ -172,6 +172,7 @@ it there when it belongs to one smoke test.
 | `just smoke-init` | devcontainer | Phase 3 acceptance: init twice, re-push, routing and `stripPrefix` through Traefik (run `just cluster-reset` first; needs network) |
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-agent` | devcontainer | Phase 9: `--json` documents, `--wait --commit` (Ready only after the commit rolled out, Failed for an image that cannot be pulled, TimedOut for a commit that never arrives; with `SMOKE_FULL=1`, the default, also Ready again for a fix after a failure, which takes about 5 more minutes because Helm times out the broken upgrade first) and `shelf app open` with the app's Host and `stripPrefix` (needs Docker Hub) |
+| `just smoke-previews` | devcontainer | Phase 10: `examples/hello` with `--previews=2`; two branch tags run as isolated previews with their own database, volume and password; `open --preview`; a new commit keeps the data; the limit holds; a deleted tag removes its preview; `--no-previews` keeps the app; prints push-to-Ready times and RAM per preview (needs Docker Hub) |
 | `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
 | `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token (set `CF_ACCOUNT_ID` if it sees several accounts); needs a cluster with a host suffix |
 | `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |

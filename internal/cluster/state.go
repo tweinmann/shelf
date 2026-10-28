@@ -101,10 +101,18 @@ type AppState struct {
 	Reason string `json:"reason,omitempty"`
 	// Stage is the step that is not ready, empty when the app is healthy.
 	Stage string `json:"stage,omitempty"`
+	// PreviewLimit is how many previews the app may have, 0 when it has none switched on.
+	PreviewLimit int `json:"previewLimit,omitempty"`
+	// Previews are the app's previews that exist, ordered by name.
+	Previews []Preview `json:"previews,omitempty"`
 }
 
 // appObjects are the objects that carry one app.
 type appObjects struct {
+	// previewOf and slug are set for the namespace of a preview, which has no provider of its
+	// own: the provider of the app's previews stands for all of them.
+	previewOf     string
+	slug          string
 	provider      *unstructured.Unstructured
 	source        *unstructured.Unstructured
 	kustomization *unstructured.Unstructured
@@ -113,8 +121,17 @@ type appObjects struct {
 	pods          []*unstructured.Unstructured
 }
 
-// AppStates returns every registered app with its current state. It reads the whole cluster in
-// five list calls, however many apps there are, plus two for each app with a quick tunnel.
+// NotFoundError means there is no app, or no preview, of that name in the cluster.
+type NotFoundError struct{ Name string }
+
+func (e *NotFoundError) Error() string { return "app " + e.Name + " does not exist" }
+
+// isApp tells an app from a preview: only an app has a provider of its own.
+func (o *appObjects) isApp() bool { return o.provider != nil }
+
+// AppStates returns every registered app with its current state and its previews. It reads the
+// whole cluster in eight list calls, however many apps and previews there are, plus two for each
+// app with a quick tunnel.
 func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	c, err := newClient(cfg)
 	if err != nil {
@@ -124,9 +141,24 @@ func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	if err != nil {
 		return nil, err
 	}
+	limits, err := c.previewLimits(ctx)
+	if err != nil {
+		return nil, err
+	}
+	previews := map[string][]Preview{}
+	for _, name := range slices.Sorted(maps.Keys(apps)) {
+		if o := apps[name]; !o.isApp() {
+			previews[o.previewOf] = append(previews[o.previewOf],
+				Preview{AppState: previewState(name, o), App: o.previewOf, Slug: o.slug})
+		}
+	}
 	states := make([]AppState, 0, len(apps))
 	for _, name := range slices.Sorted(maps.Keys(apps)) {
+		if !apps[name].isApp() {
+			continue
+		}
 		state := appState(name, apps[name])
+		state.PreviewLimit, state.Previews = limits[name], previews[name]
 		if state.Quick {
 			// A quick tunnel's name exists only in its cloudflared. One that cannot be asked
 			// yet has no address, which the page says; it is not a reason to fail the list.
@@ -137,7 +169,8 @@ func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	return states, nil
 }
 
-// AppDiagnosis returns the whole chain of one app, including its pods.
+// AppDiagnosis returns the whole chain of one app, including its pods. app may also be the
+// namespace of a preview.
 func AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (Diagnosis, error) {
 	c, err := newClient(cfg)
 	if err != nil {
@@ -149,7 +182,7 @@ func AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (Diagnosis,
 	}
 	objs, ok := apps[app]
 	if !ok {
-		return Diagnosis{}, fmt.Errorf("app %s does not exist", app)
+		return Diagnosis{}, &NotFoundError{Name: app}
 	}
 	return diagnose(app, objs), nil
 }
@@ -165,6 +198,9 @@ func (c *client) appObjects(ctx context.Context) (map[string]*appObjects, error)
 	apps := map[string]*appObjects{}
 	for _, p := range providers {
 		apps[p.GetName()] = &appObjects{provider: p}
+	}
+	if err := c.previewNamespaces(ctx, apps); err != nil {
+		return nil, err
 	}
 	sources, err := c.list(ctx, ociRepositoryGVK, "", "")
 	if err != nil {
@@ -258,7 +294,13 @@ func appState(name string, o *appObjects) AppState {
 	if o.release != nil {
 		state.Deployed = lastDeployed(o.release)
 	}
-	d := diagnose(name, o)
+	applyDiagnosis(&state, diagnose(name, o))
+	return state
+}
+
+// applyDiagnosis puts the outcome of a diagnosis into a state: the phase, and for anything but
+// Ready the stage that is the cause and its reason in one line.
+func applyDiagnosis(state *AppState, d Diagnosis) {
 	state.Phase = d.Phase()
 	if t := d.Trouble(); t != nil {
 		state.Stage = t.Name
@@ -267,7 +309,6 @@ func appState(name string, o *appObjects) AppState {
 			state.Reason = t.Reason
 		}
 	}
-	return state
 }
 
 // revisionAnnotation is where `flux push artifact --revision` records the commit an artifact was

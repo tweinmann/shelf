@@ -29,6 +29,8 @@ func TestCheckAppName(t *testing.T) {
 		strings.Repeat("a", 40):        true,
 		strings.Repeat("a", 41):        false,
 		"a." + strings.Repeat("b", 10): false,
+		"hello--copy":                  false,
+		"hello-copy":                   true,
 	}
 	for name, valid := range tests {
 		err := ops.CheckAppName(name)

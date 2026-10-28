@@ -46,7 +46,9 @@ func TestTenantAgentInstructions(t *testing.T) {
 	}
 
 	skill, _ := os.ReadFile(filepath.Join(tenant, ".claude/skills/shelf/SKILL.md"))
-	for _, want := range []string{`--wait --commit "$(git rev-parse HEAD)" --json`, "| 0 |", "| 1 |", "| 2 |", "Make the app public"} {
+	for _, want := range []string{`--wait --commit "$(git rev-parse HEAD)" --json`, "| 0 |", "| 1 |", "| 2 |",
+		"Make the app or a preview public", "in the background", "gh run watch --exit-status",
+		"--preview <branch> --wait", "takes about a minute longer"} {
 		if !strings.Contains(string(skill), want) {
 			t.Errorf("the skill lacks %q", want)
 		}

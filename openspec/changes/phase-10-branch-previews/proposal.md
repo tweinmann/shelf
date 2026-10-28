@@ -1,66 +1,74 @@
 # Proposal
 
-> Draft. This change holds the roadmap text only and is marked `skip_specs: true`.
-> `/opsx:propose` turns it into a full change: it writes the delta specs, `design.md` and
-> `tasks.md`, revises this proposal, and removes `skip_specs` from `.openspec.yaml`.
-
 ## Why
 
 Parallel coding agents work on several branches of the same app at once. Each branch needs its
-own running, isolated copy of the app's complete stack to be tested against, on the user's own
-hardware, without a shared database and without becoming reachable from the internet.
+own running, isolated copy of the app's complete stack, its own database included, to be tested
+against on the user's own hardware. Today a branch is built in CI and then thrown away: nothing
+of it runs anywhere. Phase 9 gave agents a way to wait for a commit and read a verdict; this
+phase gives them something per branch to wait for.
 
 ## What Changes
 
-- `build.yml` pushes images and a deploy artifact also for non-default branches, tagged e.g.
-  `branch-<slug>` (today it builds there but pushes nothing), and deletes the tag when the branch
-  is deleted. Pull requests from forks never push.
-- In the cluster, previews are discovered from the deploy artifact's tags.
-- Each preview: its own namespace, its own secrets (generated, never copied from the app), its own
-  volumes, a resource quota, a limit of concurrent previews per app; deleted with its tag.
-- Previews are never exposed through a tunnel in this phase; they are reached with
-  `shelf app open <app> --preview <branch>`.
+- **Previews are an operator decision per app.** `shelf app add` and `shelf app credentials`
+  take `--previews[=N]` (at most N previews, default 3) and `--no-previews`; off by default.
+  A tenant repository cannot give itself previews.
+- **The reusable workflow publishes branches.** `build.yml` also pushes the images and the
+  deploy artifact for a push to a non-default branch, tagged `branch-<slug>`, and deletes that
+  tag when the branch is deleted. Pull requests, from forks or not, still push nothing. The
+  slug comes from `shelf build-plan --branch <name>`, the one implementation the CLI shares.
+  Tenants change their `deploy.yml` trigger to all branches plus `delete`.
+- **The cluster discovers previews from the registry.** An app with previews gets a second
+  provider, `<app>-previews`, of type `OCIArtifactTag` on the app's deploy artifact, filtered to
+  `branch-*`. A new ResourceSet `previews` in the platform artifact turns each tag into a
+  preview: namespace `<app>--<slug>`, host `<app>--<slug>.shelf.internal`, the app's registry
+  login, a ResourceQuota and LimitRange, and the same deploy chain as an app. A deleted tag
+  removes its preview with all its volumes. No forge API is involved.
+- **A preview has its own state.** The chart generates a preview's secrets itself (`lookup`,
+  otherwise random), never copied from the app; volumes and database are the preview's own.
+- **Previews are never exposed.** No tunnel, no quick tunnel, no DNS record; they are reached
+  with `shelf app open <app> --preview <branch>`.
+- **The agent interface covers previews.** `shelf app status <app>` lists the app's previews;
+  `--preview <branch>` selects one for status, `--wait --commit` and `open`, with the same JSON
+  documents. `shelf app rm` removes an app's previews with it.
+- **Short turnaround for agents.** `build.yml` caches image layers in the registry
+  (`:buildcache` per component), previews poll every 30 seconds instead of 60, and the tenant
+  skill tells an agent to wait in the background while it keeps working, and to check the CI run
+  of its push first, so that a broken build shows within seconds instead of at the timeout.
+  `smoke-previews` measures the time from push to Ready.
+- **App names may not contain `--`**, which separates an app from its previews.
+- **Dev registry allows deletes**, so that level 2 can delete a branch tag.
+- `just smoke-previews`: two branches side by side, each with its own database; deleting a
+  branch removes its preview; RAM per preview measured.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `branch-previews` (planned).
+- `branch-previews`: what a preview is, how it is discovered, named, isolated, limited, reached
+  and removed.
 
 ### Modified Capabilities
 
-To be decided at `/opsx:propose`; likely `app-delivery`, `app-chart` and the reusable workflow.
+- `app-delivery`: app naming reserves `--`; the build plan names a branch's tag; the reusable
+  workflow publishes and deletes branch artifacts; status lists previews; removal removes them.
+- `app-chart`: generated secrets in preview mode.
+- `app-exposure`: local access to a preview.
+- `agent-interface`: `--preview` on status, wait and the JSON documents; the tenant skill waits
+  in the background and checks CI first.
+- `cluster-init`: the platform artifact also holds the ResourceSet `previews`.
+- `dev-environment`: the dev registry allows deletes; `smoke-previews` in the full level-2 set.
 
 ## Impact
 
-`.github/workflows/build.yml`, `platform/apps`, `internal/cluster`, `internal/ops`, CLI. Level 2.
-
-## Roadmap text (from the re-cut of 2026-10-27)
-
-A preview gets the app's complete stack, including its own database instance, in its own
-namespace. The platform knows components, not databases; opinionated providers (e.g.
-`resources: db: {type: postgres}`) may come later as an optional layer.
-
-**To verify at propose:** the Flux Operator's input provider for OCI artifact tags (the embedded
-operator is v0.60.0), its tag filtering and polling interval. Fallback: the host service maintains
-one provider per preview, as long as no deploy path depends on a forge API.
-
-**Open:** naming of preview namespaces and hosts within the 40-character limit and without
-colliding with other app names (e.g. a reserved separator, or a label-based namespace name).
-
-Rejected alternatives, with their reasons:
-
-- Flux Operator `GitHubPullRequest` / `GitHubBranch` input providers: the cluster would talk to
-  the GitHub API, against the guardrail that the registry is the only interface between build and
-  platform. The workflow pushes an artifact per branch instead.
-- A shared Postgres instance for previews: cheaper, but opinionated, and against "everything is a
-  component" and independent environments.
-- A vcluster per preview: heavier than namespaces; only worth it for apps that bring CRDs or
-  cluster-scoped objects. Namespaces with quotas (and the NetworkPolicies of Phase 12) are the
-  default.
-- A local build path into the cluster for fast iteration: the devcontainer is the inner loop;
-  previews verify the built artefact.
-
-**Acceptance (level 2):** two branches run side by side, isolated, each with its own database;
-deleting a branch removes its preview; RAM per preview is measured and recorded. `examples/hello`
-and `examples/tenant` serve as the reference apps (formerly Phase 13).
+- `platform/previews` (new ResourceSet), `charts/shelf-app` (preview mode, generated secrets),
+  `.github/workflows/build.yml` (branches, delete), `.github/scripts/select-smokes.sh`.
+- `internal/cluster` (preview provider, preview discovery and diagnosis), `internal/ops`
+  (previews on add/credentials/rm, status, wait, open), `internal/cli` (`--previews`,
+  `--preview`, `build-plan --branch`), a slug function shared by CLI and workflow.
+- `examples/tenant` and the README (new `deploy.yml` trigger), `hack/cluster-up.sh` (registry
+  deletes), `hack/smoke/previews.sh`.
+- Platform and chart versions change; existing apps are unaffected until previews are switched
+  on for them. No admin UI change in this phase.
+- Level 1 for slug, chart and verdicts; level 2 for discovery, isolation and removal
+  (`just smoke-previews`); level 3 for branch deletion through GHCR with `tweinmann/shelf-hello`.

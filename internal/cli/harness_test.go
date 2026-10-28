@@ -59,6 +59,9 @@ type fakeCluster struct {
 	// rollouts are what AppRollout returns, one per call; the last one is repeated.
 	rollouts     []cluster.Rollout
 	rolloutCalls int
+	// rolloutMissing is how many reads of a rollout find nothing before it appears, as a preview
+	// that the platform has not created yet.
+	rolloutMissing int
 	// traefik is the address ForwardTraefik hands out, empty when no Traefik pod is ready.
 	traefik string
 	found   bool
@@ -81,11 +84,14 @@ func (f *fakeCluster) Install(_ context.Context, cfg *rest.Config, o cluster.Opt
 	return nil
 }
 
-func (f *fakeCluster) CheckPlatform(_ context.Context, _ *rest.Config, quick bool) error {
+func (f *fakeCluster) CheckPlatform(_ context.Context, _ *rest.Config, needs cluster.PlatformNeeds) error {
 	switch {
 	case f.noPlatform:
 		return errors.New("this cluster has no shelf platform; install it with `shelf init cluster`")
-	case f.oldPlatform && quick:
+	case f.oldPlatform && needs.Previews:
+		return errors.New("the platform in this cluster predates previews; install the platform of " +
+			"this shelf with `shelf init cluster` first, or leave out --previews")
+	case f.oldPlatform && needs.Quick:
 		return errors.New("the platform in this cluster does not run quick tunnels yet; " +
 			"install the platform of this shelf with `shelf init cluster` first, or add the app without --quick")
 	}
@@ -104,6 +110,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	config := &cluster.AppConfig{
 		Artifact: o.Artifact, Insecure: o.Insecure, Domain: o.Domain, Registry: o.Registry,
 		Cloudflare: o.Cloudflare, TunnelID: o.TunnelID, TunnelCredentials: o.TunnelCredentials, Quick: o.Quick,
+		Previews: o.Previews,
 	}
 	if previous := f.configs[o.Name]; previous != nil && o.TunnelCredentials == nil && o.TunnelID != "" {
 		config.TunnelCredentials = previous.TunnelCredentials
@@ -113,7 +120,7 @@ func (f *fakeCluster) AddApp(_ context.Context, _ *rest.Config, o cluster.AppOpt
 	f.states = slices.DeleteFunc(f.states, func(s cluster.AppState) bool { return s.Name == o.Name })
 	f.states = append(f.states, cluster.AppState{
 		Name: o.Name, Artifact: o.Artifact, Domain: o.Domain, Tunnel: o.TunnelID, Quick: o.Quick,
-		Registry: o.Registry, Cloudflare: o.Cloudflare,
+		Registry: o.Registry, Cloudflare: o.Cloudflare, PreviewLimit: o.Previews,
 	})
 	return nil
 }
@@ -151,8 +158,13 @@ func (f *fakeCluster) AppDiagnosis(_ context.Context, _ *rest.Config, app string
 }
 
 func (f *fakeCluster) AppRollout(_ context.Context, _ *rest.Config, app string) (cluster.Rollout, error) {
-	if !slices.ContainsFunc(f.states, func(s cluster.AppState) bool { return s.Name == app }) {
-		return cluster.Rollout{}, errors.New("app " + app + " does not exist")
+	if f.rolloutMissing > 0 {
+		f.rolloutMissing--
+		return cluster.Rollout{}, &cluster.NotFoundError{Name: app}
+	}
+	if !slices.ContainsFunc(f.states, func(s cluster.AppState) bool { return s.Name == app }) &&
+		!strings.Contains(app, "--") {
+		return cluster.Rollout{}, &cluster.NotFoundError{Name: app}
 	}
 	r := f.rollouts[min(f.rolloutCalls, len(f.rollouts)-1)]
 	f.rolloutCalls++

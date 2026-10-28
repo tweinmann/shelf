@@ -24,6 +24,7 @@ func newAppOpenCmd(o Options) *cobra.Command {
 		target  clusterFlags
 		port    int
 		browser bool
+		preview string
 	)
 	cmd := &cobra.Command{
 		Use:   "open <name>",
@@ -35,7 +36,10 @@ internet. This works for apps that stay inside the cluster, too.
 
 This is not an exposure: nothing about the app changes, nothing listens anywhere but on this
 machine's loopback interface, and the address works only for as long as this command runs. Stop
-it with Ctrl-C.`,
+it with Ctrl-C.
+
+With --preview, it opens the preview of that branch instead, at its own host
+<app>--<slug>.shelf.internal.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -50,7 +54,7 @@ it with Ctrl-C.`,
 				return err
 			}
 			ctx := cmd.Context()
-			proxy, err := shelf.OpenApp(ctx, name)
+			proxy, err := shelf.OpenApp(ctx, name, preview)
 			if err != nil {
 				return err
 			}
@@ -62,7 +66,11 @@ it with Ctrl-C.`,
 			local := ln.Addr().String()
 			url := "http://" + local + "/"
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "%s (%s) is at %s\n", name, proxy.Host, url)
+			label := name
+			if preview != "" {
+				label = ops.PreviewName(name, preview)
+			}
+			fmt.Fprintf(out, "%s (%s) is at %s\n", label, proxy.Host, url)
 			fmt.Fprintln(cmd.ErrOrStderr(), "Only this machine can reach it, and only while this runs. Press Ctrl-C to stop.")
 
 			srv := &http.Server{Handler: proxy.Handler(local), ReadHeaderTimeout: 30 * time.Second}
@@ -89,5 +97,6 @@ it with Ctrl-C.`,
 	target.registerTarget(cmd.Flags())
 	cmd.Flags().IntVar(&port, "port", 0, "the local port; a free one when not given")
 	cmd.Flags().BoolVar(&browser, "browser", false, "open the address in the default browser")
+	cmd.Flags().StringVar(&preview, "preview", "", "the preview of this branch (its name or its slug) instead of the app")
 	return cmd
 }

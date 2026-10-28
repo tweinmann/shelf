@@ -74,7 +74,7 @@ jobs:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          all='["smoke-secrets","smoke-chart","smoke-init","smoke-apps","smoke-agent"]'
+          all='["smoke-secrets","smoke-chart","smoke-init","smoke-apps","smoke-agent","smoke-previews"]'
           has() { jq -e --arg l "$1" 'index($l) != null' <<<"$LABELS" >/dev/null; }
           smokes='[]' full=0
           if [[ "$EVENT" == push ]]; then

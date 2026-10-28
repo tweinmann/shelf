@@ -6,8 +6,9 @@
 #
 #   on:
 #     push:
-#       branches: [main]
+#       branches: ['**']
 #     pull_request:
+#     delete:
 #   permissions:
 #     contents: read
 #     packages: write
@@ -17,9 +18,17 @@
 #
 # Everything the workflow publishes lives under the package name, which is app.yaml's `name`:
 # the deploy artifact is ghcr.io/<owner>/<package>, and every component with `build: ./web` is
-# pushed as ghcr.io/<owner>/<package>/<component>, each with the tags sha-<short> and main. Images are pinned
-# to the digest the build reported. On other branches and in pull requests the images are built
-# but nothing is pushed, so a change is checked without deploying it.
+# pushed as ghcr.io/<owner>/<package>/<component>. Images are pinned to the digest the build
+# reported. A push to the default branch publishes everything as sha-<short> and main; a push to
+# another branch as sha-<short> and branch-<slug> (`shelf build-plan --branch`), which an app with
+# previews runs as <app>--<slug>; never as main. Deleting the branch deletes its deploy
+# artifact, and the preview goes with it. Pull requests build the images but push nothing, so a
+# change is checked without deploying it, and a fork can never publish.
+#
+# Image layers are cached in the registry as <image>:buildcache: every run reads the cache, and
+# every run that publishes writes it back.
+#
+# A caller that keeps `branches: [main]` and no `delete` keeps working; it gets no previews.
 #
 # The package is not the app: shelf names an app when it is added (shelf app add <app> <artifact>),
 # so the same artifact can run as several apps.
@@ -33,16 +42,19 @@ on:
         type: string
         default: app.yaml
       shelf-version:
-        description: shelf release to use, e.g. v0.1.0. Defaults to the latest release.
+        description: >-
+          shelf release to use, e.g. v0.1.0. Defaults to the latest release. Publishing a branch
+          needs a release with `shelf build-plan --branch`.
         type: string
         default: latest
     outputs:
       artifact:
-        description: The deploy artifact, oci://ghcr.io/<owner>/<package>:main; empty unless published.
+        description: The deploy artifact, oci://ghcr.io/<owner>/<package>:<main or branch-slug>; empty unless published.
         value: ${{ jobs.build.outputs.artifact }}
 
 jobs:
   build:
+    if: github.event_name != 'delete'
     # The same architecture as the Mac mini, so images build natively.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -53,7 +65,8 @@ jobs:
       artifact: ${{ steps.publish.outputs.artifact }}
     env:
       APP_FILE: ${{ inputs.app-file }}
-      PUBLISH: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+      PUBLISH: ${{ github.event_name == 'push' }}
+      DEFAULT_BRANCH: ${{ github.ref_name == github.event.repository.default_branch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -90,19 +103,28 @@ jobs:
       - name: Build the images of this repository
         id: images
         run: |
-          plan="$(shelf build-plan "$APP_FILE")"
+          if [[ "$DEFAULT_BRANCH" == true || "$PUBLISH" != true ]]; then
+            plan="$(shelf build-plan "$APP_FILE")"
+            channel=main
+          else
+            plan="$(shelf build-plan "$APP_FILE" --branch "$GITHUB_REF_NAME")"
+            channel="$(jq -r .tag <<<"$plan")"
+          fi
           package="$(jq -r .package <<<"$plan")"
           echo "package=$package" >>"$GITHUB_ENV"
+          echo "channel=$channel" >>"$GITHUB_ENV"
           images=()
           while read -r component context; do
             image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$package/$component"
             args=(--platform linux/arm64
-              --tag "$image:sha-${GITHUB_SHA::7}" --tag "$image:main"
+              --tag "$image:sha-${GITHUB_SHA::7}" --tag "$image:$channel"
+              --cache-from "type=registry,ref=$image:buildcache"
               --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
               --label "org.opencontainers.image.revision=$GITHUB_SHA"
               --metadata-file "$RUNNER_TEMP/$component.json")
             if [[ "$PUBLISH" == true ]]; then
-              args+=(--push)
+              args+=(--push
+                --cache-to "type=registry,ref=$image:buildcache,mode=max,image-manifest=true,oci-mediatypes=true")
             fi
             echo "::group::$image from $context"
             docker buildx build "${args[@]}" "$context"
@@ -137,16 +159,85 @@ jobs:
             --source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --revision "$GITHUB_REF_NAME@sha1:$GITHUB_SHA" \
             --annotations "dev.shelf.package=$package"
-          flux tag artifact "oci://$repo:sha-${GITHUB_SHA::7}" --tag main
-          echo "artifact=oci://$repo:main" >>"$GITHUB_OUTPUT"
+          flux tag artifact "oci://$repo:sha-${GITHUB_SHA::7}" --tag "$channel"
+          echo "artifact=oci://$repo:$channel" >>"$GITHUB_OUTPUT"
           {
             echo "### Deploy artifact"
             echo
-            echo "\`oci://$repo:main\` (also \`sha-${GITHUB_SHA::7}\`)"
+            echo "\`oci://$repo:$channel\` (also \`sha-${GITHUB_SHA::7}\`)"
             echo
-            echo "Add it as an app once, under a name of your choice:"
-            echo
-            echo "\`\`\`"
-            echo "shelf app add $package oci://$repo:main"
-            echo "\`\`\`"
+            if [[ "$channel" == main ]]; then
+              echo "Add it as an app once, under a name of your choice:"
+              echo
+              echo "\`\`\`"
+              echo "shelf app add $package oci://$repo:main"
+              echo "\`\`\`"
+            else
+              echo "An app with previews (\`shelf app credentials <app> --previews\`) runs it as a preview:"
+              echo
+              echo "\`\`\`"
+              echo "shelf app status <app> --preview $GITHUB_REF_NAME --wait --commit $GITHUB_SHA"
+              echo "shelf app open <app> --preview $GITHUB_REF_NAME"
+              echo "\`\`\`"
+            fi
           } >>"$GITHUB_STEP_SUMMARY"
+
+  # A deleted branch takes its deploy artifact with it, and with it its preview: the platform
+  # follows the tags of the registry. GHCR deletes a tag only as the package version that carries
+  # it, through the GitHub API; the cluster never calls that API.
+  delete-branch:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      APP_FILE: ${{ inputs.app-file }}
+      BRANCH: ${{ github.event.ref }}
+      OWNER_TYPE: ${{ github.event.repository.owner.type }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The default branch's app.yaml names the package.
+      - uses: actions/checkout@v7
+
+      - name: Install shelf
+        env:
+          SHELF_VERSION: ${{ inputs.shelf-version }}
+        run: |
+          releases=https://github.com/tweinmann/shelf/releases
+          if [[ "$SHELF_VERSION" == latest ]]; then
+            url="$releases/latest/download"
+          else
+            url="$releases/download/$SHELF_VERSION"
+          fi
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "$tmp/shelf.tar.gz" "$url/shelf_linux_arm64.tar.gz"
+          curl -fsSL -o "$tmp/checksums.txt" "$url/checksums.txt"
+          (cd "$tmp" && mv shelf.tar.gz shelf_linux_arm64.tar.gz \
+            && grep ' ./shelf_linux_arm64.tar.gz$' checksums.txt | sha256sum -c -)
+          tar -xzf "$tmp/shelf_linux_arm64.tar.gz" -C "$tmp" shelf
+          sudo install "$tmp/shelf" /usr/local/bin/shelf
+
+      - name: Delete the branch's deploy artifact
+        run: |
+          plan="$(shelf build-plan "$APP_FILE" --branch "$BRANCH")"
+          package="$(jq -r .package <<<"$plan")"
+          tag="$(jq -r .tag <<<"$plan")"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          if [[ "$OWNER_TYPE" == Organization ]]; then
+            base="/orgs/$owner/packages/container/$package/versions"
+          else
+            base="/users/$owner/packages/container/$package/versions"
+          fi
+          ids="$(gh api --paginate "$base" \
+            --jq ".[] | select(.metadata.container.tags | index(\"$tag\")) | .id")"
+          if [[ -z "$ids" ]]; then
+            echo "ghcr.io/$owner/$package has no version tagged $tag; nothing to delete"
+            exit 0
+          fi
+          for id in $ids; do
+            gh api --method DELETE "$base/$id"
+            echo "deleted ghcr.io/$owner/$package:$tag (version $id)"
+          done
+          echo "Deleted \`ghcr.io/$owner/$package:$tag\`; its preview goes within a minute." >>"$GITHUB_STEP_SUMMARY"

@@ -2,10 +2,13 @@
 # ghcr.io/tweinmann/greeter-deploy. Nothing in here is specific to this app.
 name: deploy
 
+# Every branch publishes, so that an app with previews runs each one on its own; deleting a branch
+# deletes its artifact, and its preview with it. Pull requests only build.
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
+  delete:
 
 permissions:
   contents: read

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -44,10 +45,15 @@ type accessFlags struct {
 	noCloudflare bool
 	quick        bool
 	private      bool
+	previews     int
+	noPreviews   bool
+	// fs tells a --previews=0 that was given from one that was not.
+	fs *pflag.FlagSet
 }
 
 // register adds the flags; removable adds the ones that take a connection away again.
 func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
+	f.fs = fs
 	fs.StringVar(&f.domain, "domain", "",
 		"a domain of the app's own: it answers at <name><host-suffix>.<domain>, and without one at "+
 			"<name>.shelf.internal inside the cluster; needed with --cloudflare")
@@ -55,6 +61,11 @@ func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 	fs.StringVar(&f.cloudflare, "cloudflare", "", "the Cloudflare connection the app is exposed through")
 	fs.BoolVar(&f.quick, "quick", false,
 		"expose the app through a quick tunnel at a temporary trycloudflare.com address; a tunnel and a record it had are deleted")
+	fs.IntVar(&f.previews, "previews", 0, fmt.Sprintf(
+		"run a preview of each branch the workflow publishes, at most %d at once (--previews=N for another number, up to %d); "+
+			"previews are reachable from this machine only, with --preview", ops.DefaultPreviews, ops.MaxPreviews))
+	fs.Lookup("previews").NoOptDefVal = strconv.Itoa(ops.DefaultPreviews)
+	fs.BoolVar(&f.noPreviews, "no-previews", false, "remove the app's previews, with their data")
 	if removable {
 		fs.BoolVar(&f.noRegistry, "no-registry", false, "pull without a login")
 		fs.BoolVar(&f.private, "private", false,
@@ -63,13 +74,29 @@ func (f *accessFlags) register(fs *pflag.FlagSet, removable bool) {
 	}
 }
 
+// exactArgs is cobra.ExactArgs, except that it names the likely mistake behind one argument too
+// many: --previews takes its number after "=", so "--previews 5" leaves the 5 behind.
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == n+1 && cmd.Flags().Changed("previews") {
+			if v, err := strconv.Atoi(args[n]); err == nil {
+				return fmt.Errorf("write --previews=%d; --previews alone means %d", v, ops.DefaultPreviews)
+			}
+		}
+		return cobra.ExactArgs(n)(cmd, args)
+	}
+}
+
 // changes reports whether any flag asks for a change.
 func (f *accessFlags) changes() bool {
 	return f.domain != "" || f.registry != "" || f.noRegistry || f.cloudflare != "" || f.noCloudflare ||
-		f.quick || f.private
+		f.quick || f.private || f.previews != 0 || f.noPreviews
 }
 
 func (f *accessFlags) access() (ops.Access, error) {
+	if f.fs != nil && f.fs.Changed("previews") && f.previews < 1 {
+		return ops.Access{}, fmt.Errorf("an app may have between 1 and %d previews, not %d", ops.MaxPreviews, f.previews)
+	}
 	a := ops.Access{
 		Domain:         f.domain,
 		Registry:       f.registry,
@@ -77,6 +104,8 @@ func (f *accessFlags) access() (ops.Access, error) {
 		Cloudflare:     f.cloudflare,
 		Quick:          f.quick,
 		Private:        f.private || f.noCloudflare,
+		Previews:       f.previews,
+		NoPreviews:     f.noPreviews,
 	}
 	return a, a.Check()
 }
@@ -100,7 +129,7 @@ artifact reference, generates secrets that were added to app.yaml since, and kee
 values, and the app's domain and connections unless others are given.
 
 ` + accessHelp,
-		Args: cobra.ExactArgs(2),
+		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if err := ops.CheckAppName(name); err != nil {
@@ -153,7 +182,7 @@ tunnel if the account changes; --quick moves it to a quick tunnel, and --private
 the internet.
 
 ` + accessHelp,
-		Args: cobra.ExactArgs(1),
+		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if err := ops.CheckAppName(name); err != nil {
@@ -161,7 +190,7 @@ the internet.
 			}
 			if !access.changes() {
 				return fmt.Errorf("nothing to change; pass --domain, --registry, --cloudflare, " +
-					"--no-registry, --quick or --private")
+					"--no-registry, --quick, --private, --previews or --no-previews")
 			}
 			given, err := access.access()
 			if err != nil {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -132,6 +133,11 @@ func TestTemplate(t *testing.T) {
 			app:      "testdata/features.app.yaml",
 			platform: "platform:\n  domain: example.com\n  imagePullSecret: ghcr-pull\n",
 			apis:     []string{middlewareAPI},
+		}, {
+			// A preview generates its secrets; the golden file holds a placeholder instead.
+			name:     "preview",
+			app:      "../../examples/hello/app.yaml",
+			platform: "platform:\n  domain: shelf.internal\n  imagePullSecret: shelf-registry\n  preview: true\n",
 		},
 	}
 	for _, tt := range tests {
@@ -151,10 +157,17 @@ func TestTemplate(t *testing.T) {
 			if strings.Contains(out, "LoadBalancer") {
 				t.Error("the chart must never render a LoadBalancer")
 			}
+			if strings.Contains(out, "name: shelf-secrets\n  namespace:") != (tt.name == "preview") {
+				t.Errorf("shelf-secrets rendered %v, want only in preview mode", !(tt.name == "preview"))
+			}
+			out = generatedSecret.ReplaceAllString(out, "${1}<generated>")
 			testutil.Golden(t, filepath.Join("testdata", tt.name+".manifests.yaml"), []byte(out))
 		})
 	}
 }
+
+// generatedSecret matches a value the chart generated: 26 random characters, base64-encoded.
+var generatedSecret = regexp.MustCompile(`(?m)^(  [a-z0-9-]+: )[A-Za-z0-9+/=]{36}$`)
 
 // TestSecretReferences checks which secrets a container receives: only those referenced
 // outside an escaped $$, each once, before all other variables.
