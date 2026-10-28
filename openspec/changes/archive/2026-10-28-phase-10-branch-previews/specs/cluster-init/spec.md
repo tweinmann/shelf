@@ -5,10 +5,9 @@
 ### Requirement: Platform contents
 The platform artifact SHALL contain Traefik (Helm chart from `oci://ghcr.io/traefik/helm/traefik`
 in namespace `traefik`, Service of type ClusterIP, ingress class `traefik` that is not the
-default, Kubernetes Ingress and CRD providers enabled) the ResourceSet `apps` in
-`shelf-system`, which generates every app from the ResourceSetInputProviders labelled
-`shelf.dev/app`, and the ResourceSet `previews` in `shelf-system`, which generates every preview
-from the providers labelled `shelf.dev/previews`.
+default, Kubernetes Ingress and CRD providers enabled) and, in `shelf-system`, the ResourceSet
+`apps`, which generates every app from the providers labelled `shelf.dev/app`, and the
+ResourceSet `previews`, which generates every preview from those labelled `shelf.dev/previews`.
 
 #### Scenario: Platform applied
 - **WHEN** the installation completes

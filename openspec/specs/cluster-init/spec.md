@@ -85,13 +85,13 @@ from the ConfigMap `flux-system/shelf-config`.
 ### Requirement: Platform contents
 The platform artifact SHALL contain Traefik (Helm chart from `oci://ghcr.io/traefik/helm/traefik`
 in namespace `traefik`, Service of type ClusterIP, ingress class `traefik` that is not the
-default, Kubernetes Ingress and CRD providers enabled) and the ResourceSet `apps` in
-`shelf-system`, which generates every app from the ResourceSetInputProviders labelled
-`shelf.dev/app`.
+default, Kubernetes Ingress and CRD providers enabled) and, in `shelf-system`, the ResourceSet
+`apps`, which generates every app from the providers labelled `shelf.dev/app`, and the
+ResourceSet `previews`, which generates every preview from those labelled `shelf.dev/previews`.
 
 #### Scenario: Platform applied
 - **WHEN** the installation completes
-- **THEN** Traefik runs in `traefik` reachable at `traefik.traefik.svc.cluster.local:80` and the ResourceSet `shelf-system/apps` exists
+- **THEN** Traefik runs in `traefik` reachable at `traefik.traefik.svc.cluster.local:80` and the ResourceSets `shelf-system/apps` and `shelf-system/previews` exist
 
 ### Requirement: System namespace and cluster settings
 The system SHALL apply the namespace `shelf-system` (labelled

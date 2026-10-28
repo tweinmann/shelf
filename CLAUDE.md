@@ -95,7 +95,16 @@ with the app's Host; `examples/tenant` ships a Claude Code skill and `CLAUDE.md`
 `tweinmann/shelf-hello`: a push reached a Ready verdict on `greeter` in 127 s. CI runs level 2
 when a pull request is ready, chosen by changed paths, and in full after every merge to main.
 Results in `openspec/changes/archive/2026-10-27-phase-9-agent-interface`.
-Next: Phase 10 (branch previews).
+Phase 10 complete (2026-10-28): branch previews. `shelf app add|credentials --previews[=N]`
+(default 3, at most 10; `--no-previews`) is the operator's decision; the reusable workflow
+publishes `branch-<slug>` for every branch and deletes it with the branch, with a registry build
+cache; a provider `<app>--previews` follows those tags and the ResourceSet `previews` runs each
+in its own namespace `<app>--<slug>` with a quota, limits and generated secrets, never exposed.
+`shelf app status|open --preview <branch>`. Release v0.7.0. Accepted with `tweinmann/shelf-hello`:
+a new branch reached a Ready preview in about 1 min 45 s (CI 93 s, then 11 s), deleting it
+removed the preview within a minute with the workflow's `GITHUB_TOKEN`. Results in
+`openspec/changes/archive/2026-10-28-phase-10-branch-previews`.
+Next: Phase 11 (verification chain).
 
 ## Working agreements
 
@@ -231,7 +240,10 @@ it there when it belongs to one smoke test.
 - Per app in `shelf-system`, all labelled `shelf.dev/app`: the provider `<app>` (inputs `name`,
   `url`, `tag`, `insecure`, `domain`, `tunnel`, `quick`, `registry`, `cloudflare` — the last two
   are connection names; `tunnel` and `quick` never both), `app-<app>` (secret values),
-  `tunnel-<app>` (named tunnels only). Registry connections are
+  `tunnel-<app>` (named tunnels only), and with previews `<app>--previews` (label
+  `shelf.dev/previews=<app>`). A preview runs in namespace `<app>--<slug>` (labels
+  `shelf.dev/app`, `shelf.dev/preview`), so an app name never contains `--`; the slug is
+  `schema.BranchSlug` of the branch, the tag `branch-<slug>`. Registry connections are
   `connection-registry-<name>` (label `shelf.dev/connection=registry`), and `registry-anonymous`
   is what an app without one gets. An app's tunnel is `shelf<host-suffix>-<app>`, its host
   `<app><host-suffix>.<domain>`; a cluster has no domain, and an app without one answers at

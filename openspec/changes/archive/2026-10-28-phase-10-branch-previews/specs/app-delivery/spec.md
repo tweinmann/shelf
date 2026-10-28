@@ -41,11 +41,10 @@ branch.
 ### Requirement: Reusable tenant workflow
 The reusable workflow `.github/workflows/build.yml` SHALL validate the app.yaml, build every
 `build:` component for `linux/arm64` as `ghcr.io/<owner>/<package>/<component>`, render the
-app.yaml, and push the deploy artifact as `ghcr.io/<owner>/<package>` tagged `sha-<shortsha>`
-and `main` for the default branch or `branch-<slug>` for another branch, with the annotation
-`dev.shelf.package=<package>` and the source and revision of the commit; when a branch is
-deleted, it SHALL delete that branch's artifact. It SHALL reuse image layers between runs
-through a build cache in the registry, which only runs that publish write.
+app.yaml, and push the deploy artifact `ghcr.io/<owner>/<package>` tagged `sha-<shortsha>` and
+`main` for the default branch or `branch-<slug>` for another branch, annotated with
+`dev.shelf.package=<package>` and the commit's source and revision. When a branch is deleted, it
+SHALL delete that branch's artifact.
 
 #### Scenario: Push to the default branch
 - **WHEN** the workflow runs for a push to the repository's default branch
@@ -60,10 +59,6 @@ through a build cache in the registry, which only runs that publish write.
 - **WHEN** the workflow runs for a pull request, from a fork or not
 - **THEN** it builds the images but pushes neither images nor a deploy artifact
 - **AND** a push to another branch is no longer such a case: it publishes, as in "Push to another branch"
-
-#### Scenario: Build cache
-- **WHEN** a push changes only the source of one component
-- **THEN** the build of every component reads its layers from `ghcr.io/<owner>/<package>/<component>:buildcache`, a publishing run writes that cache back, and a pull request only reads it
 
 #### Scenario: Branch deleted
 - **WHEN** the workflow runs for the deletion of the branch `feature/login`
@@ -126,3 +121,13 @@ their branch tag, state and commit; `--preview <branch>` SHALL print the same fo
 #### Scenario: One preview
 - **WHEN** a user runs `shelf app status hello --preview feature/login`
 - **THEN** the output shows the preview's namespace `hello--feature-login`, its host, artifact tag, commit, components and five stages
+
+## ADDED Requirements
+
+### Requirement: Build cache in the tenant workflow
+The reusable workflow SHALL reuse image layers between runs through a build cache in the
+registry, `ghcr.io/<owner>/<package>/<component>:buildcache`, which only runs that publish write.
+
+#### Scenario: Build cache
+- **WHEN** a push changes only the source of one component
+- **THEN** the build of every component reads its layers from `ghcr.io/<owner>/<package>/<component>:buildcache`, a publishing run writes that cache back, and a pull request only reads it

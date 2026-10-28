@@ -43,7 +43,7 @@
 
 - [x] 7.1 Enable deletes in the dev registry in `hack/cluster-up.sh`, idempotently; verify that `just cluster-up` twice leaves `storage.delete.enabled: true` and that a tag can be deleted (spec dev-environment "Deleting a tag")
 - [x] 7.2 Add `hack/smoke/previews.sh` and `just smoke-previews` as in design decision 8, including the seconds from push to Ready for a first push and a later commit; verify that it passes on the dev cluster and record RAM per preview and both times in design.md under "Results"
-- [ ] 7.3 Add `smoke-previews` to the full set in `.github/workflows/ci.yml` and to `.github/scripts/select-smokes.sh` (`platform/*`, `charts/*`, `hack/smoke/previews.sh`, `internal/cluster/*`); verify the selection on example paths and that the PR run shows it
+- [x] 7.3 Add `smoke-previews` to the full set in `.github/workflows/ci.yml` and to `.github/scripts/select-smokes.sh` (`platform/*`, `charts/*`, `hack/smoke/previews.sh`, `internal/cluster/*`); verify the selection on example paths and that the PR run shows it
 - [x] 7.4 Add `just smoke-previews` to the CLAUDE.md dev-environment table and the README; run `just test` and `openspec validate --all --strict`; both pass
 
 ## Workflow follow-up
