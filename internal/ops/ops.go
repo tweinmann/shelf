@@ -77,7 +77,7 @@ type Cluster interface {
 	Install(ctx context.Context, cfg *rest.Config, o cluster.Options) error
 	// CheckPlatform fails when the cluster has no platform, or, with quick, one without quick
 	// tunnels.
-	CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error
+	CheckPlatform(ctx context.Context, cfg *rest.Config, needs cluster.PlatformNeeds) error
 	AddApp(ctx context.Context, cfg *rest.Config, o cluster.AppOptions) error
 	RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.Duration,
 		rep progress.Reporter) (bool, error)
@@ -108,8 +108,8 @@ func (liveCluster) Install(ctx context.Context, cfg *rest.Config, o cluster.Opti
 	return cluster.Install(ctx, cfg, o)
 }
 
-func (liveCluster) CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error {
-	return cluster.CheckPlatform(ctx, cfg, quick)
+func (liveCluster) CheckPlatform(ctx context.Context, cfg *rest.Config, needs cluster.PlatformNeeds) error {
+	return cluster.CheckPlatform(ctx, cfg, needs)
 }
 
 func (liveCluster) AddApp(ctx context.Context, cfg *rest.Config, o cluster.AppOptions) error {
@@ -223,10 +223,16 @@ var (
 // CheckAppName rejects a name that cannot become a namespace and a host name, or that names a
 // namespace of the platform. The name is chosen at
 // `shelf app add`; the `name` in app.yaml only names the packages.
+// PreviewSeparator joins an app's name and a branch slug into the name of a preview, so no
+// app name may contain it.
+const PreviewSeparator = "--"
+
 func CheckAppName(name string) error {
 	switch {
 	case len(name) > schema.MaxAppNameLength || !appNameRE.MatchString(name):
 		return fmt.Errorf("app name %q must be a DNS label of at most %d characters", name, schema.MaxAppNameLength)
+	case strings.Contains(name, PreviewSeparator):
+		return fmt.Errorf("app name %q contains %q, which is reserved for previews", name, PreviewSeparator)
 	case slices.Contains(reservedAppNames, name) ||
 		slices.ContainsFunc(reservedAppPrefixes, func(pre string) bool { return strings.HasPrefix(name, pre) }):
 		return fmt.Errorf("app name %q is reserved for the platform", name)

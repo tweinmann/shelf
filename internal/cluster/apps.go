@@ -66,6 +66,9 @@ type AppOptions struct {
 	// trycloudflare.com name. Without either, the app is not exposed, and the platform stops its
 	// cloudflared.
 	Quick bool
+	// Previews is how many branches of the app may run as previews at once; 0 switches previews
+	// off and removes the ones that run.
+	Previews int
 	// Secrets are all secret values of the app; they replace the stored ones.
 	Secrets map[string]string
 	Timeout time.Duration
@@ -166,8 +169,18 @@ func AddApp(ctx context.Context, cfg *rest.Config, o AppOptions) error {
 		objs = append(objs, TunnelSecret(o.Name, o.TunnelCredentials))
 	}
 	objs = append(objs, AppProvider(o))
+	if o.Previews > 0 {
+		objs = append(objs, PreviewProvider(o))
+	}
 	for _, obj := range objs {
 		if err := c.applyReport(ctx, rep, obj); err != nil {
+			return err
+		}
+	}
+	// Without the provider of its previews, the platform removes every preview of the app.
+	if o.Previews == 0 {
+		if err := c.deleteReport(ctx, rep, ref{gvk: providerGVK, namespace: SystemNamespace,
+			name: PreviewProviderName(o.Name)}); err != nil {
 			return err
 		}
 	}
@@ -200,6 +213,8 @@ type AppConfig struct {
 	TunnelCredentials []byte
 	// Quick means the app is exposed through a quick tunnel.
 	Quick bool
+	// Previews is how many previews the app may have, 0 when it has none.
+	Previews int
 }
 
 // ReadAppConfig returns how an app is registered, or nil when there is no such app.
@@ -226,6 +241,12 @@ func ReadAppConfig(ctx context.Context, cfg *rest.Config, app string) (*AppConfi
 	config.Quick, _ = values["quick"].(bool)
 	config.Registry, _ = values["registry"].(string)
 	config.Cloudflare, _ = values["cloudflare"].(string)
+
+	previews, err := c.get(ctx, ref{gvk: providerGVK, namespace: SystemNamespace, name: PreviewProviderName(app)})
+	if err != nil {
+		return nil, err
+	}
+	config.Previews = previewLimit(previews)
 
 	tunnel, err := c.get(ctx, ref{gvk: secretGVK, namespace: SystemNamespace, name: TunnelSecretName(app)})
 	if err != nil {
@@ -335,6 +356,11 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 		rep.Report(progress.Applied(provider.String(), "deleted", ""))
 	}
 
+	previews := ref{gvk: providerGVK, namespace: SystemNamespace, name: PreviewProviderName(app)}
+	if err := c.deleteReport(ctx, rep, previews); err != nil {
+		return false, err
+	}
+
 	ns := ref{gvk: namespaceGVK, name: app}
 	err = c.step(ctx, rep, "namespace "+app+" to be deleted", func(ctx context.Context) (string, error) {
 		return "", wait.PollUntilContextCancel(ctx, pollInterval, true, func(ctx context.Context) (bool, error) {
@@ -355,6 +381,20 @@ func RemoveApp(ctx context.Context, cfg *rest.Config, app string, timeout time.D
 	if err != nil {
 		if ctx.Err() != nil {
 			return found, fmt.Errorf("namespace %s is still there; check the HelmRelease and ResourceSet in the cluster", app)
+		}
+		return found, err
+	}
+
+	// The platform deletes the previews with their provider; they go before the app's secrets.
+	err = c.step(ctx, rep, "the previews of "+app+" to be deleted", func(ctx context.Context) (string, error) {
+		return "", wait.PollUntilContextCancel(ctx, pollInterval, true, func(ctx context.Context) (bool, error) {
+			left, err := c.list(ctx, namespaceGVK, "", AppLabel+"="+app+","+PreviewLabel)
+			return len(left) == 0, err
+		})
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return found, fmt.Errorf("the previews of %s are still there; check the ResourceSet previews in the cluster", app)
 		}
 		return found, err
 	}

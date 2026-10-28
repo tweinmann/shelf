@@ -27,8 +27,16 @@ type AppProxy struct {
 }
 
 // OpenApp checks that the app exists and opens the first forward, so that a cluster that
-// cannot forward fails before anything listens.
-func (o *Ops) OpenApp(ctx context.Context, name string) (*AppProxy, error) {
+// cannot forward fails before anything listens. With a branch, it opens the app's preview of
+// that branch instead, under the preview's own host.
+func (o *Ops) OpenApp(ctx context.Context, name, preview string) (*AppProxy, error) {
+	if preview != "" {
+		p, err := o.Preview(ctx, name, preview)
+		if err != nil {
+			return nil, err
+		}
+		return o.openHost(ctx, p.Host)
+	}
 	settings, err := o.Cluster.Settings(ctx, o.config())
 	if err != nil {
 		return nil, err
@@ -43,16 +51,21 @@ func (o *Ops) OpenApp(ctx context.Context, name string) (*AppProxy, error) {
 		}
 		// The app's own host, never a quick tunnel's random name: that is the name cloudflared
 		// sets too, and the one the app's Ingress answers to.
-		p := &AppProxy{
-			Host:    AppHost(name, settings.HostSuffix, state.Domain),
-			forward: func(ctx context.Context) (*cluster.Forward, error) { return o.Cluster.ForwardTraefik(ctx, o.config()) },
-		}
-		if _, err := p.addr(ctx); err != nil {
-			return nil, err
-		}
-		return p, nil
+		return o.openHost(ctx, AppHost(name, settings.HostSuffix, state.Domain))
 	}
 	return nil, &NotFoundError{Name: name}
+}
+
+// openHost opens the first forward for a proxy that sends every request under host.
+func (o *Ops) openHost(ctx context.Context, host string) (*AppProxy, error) {
+	p := &AppProxy{
+		Host:    host,
+		forward: func(ctx context.Context) (*cluster.Forward, error) { return o.Cluster.ForwardTraefik(ctx, o.config()) },
+	}
+	if _, err := p.addr(ctx); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // NewAppProxy is an AppProxy over forwards made by forward, for tests.

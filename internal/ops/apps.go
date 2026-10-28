@@ -51,7 +51,18 @@ type Access struct {
 	// Private takes the app off the internet: it answers inside the cluster only, and a tunnel
 	// and a record it had are deleted. It is what a new app gets when nothing else is chosen.
 	Private bool
+	// Previews gives the app previews of at most that many branches at once; 0 leaves them as
+	// they are. Previews are never exposed, whatever the app's own exposure.
+	Previews int
+	// NoPreviews removes the app's previews, with their namespaces and volumes.
+	NoPreviews bool
 }
+
+// MaxPreviews is the most previews an app may have at once.
+const MaxPreviews = 10
+
+// DefaultPreviews is what --previews without a number gives an app.
+const DefaultPreviews = 3
 
 // exposures counts how many ways to reach the internet an Access asks for at once.
 func (a Access) exposures() int {
@@ -87,6 +98,12 @@ func (a Access) Check() error {
 		if err := CheckConnectionName(a.Cloudflare); err != nil {
 			return err
 		}
+	}
+	switch {
+	case a.Previews != 0 && a.NoPreviews:
+		return errors.New("previews cannot be switched on and off at once")
+	case a.Previews < 0 || a.Previews > MaxPreviews:
+		return fmt.Errorf("an app may have between 1 and %d previews, not %d", MaxPreviews, a.Previews)
 	}
 	return nil
 }
@@ -140,9 +157,19 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		cloudflare, quick = opts.Access.Cloudflare, false
 		rep.Report(progress.Info("Cloudflare connection: %s", cloudflare))
 	}
+	previews := current.Previews
+	switch {
+	case opts.Access.NoPreviews:
+		previews = 0
+		rep.Report(progress.Info("previews: none"))
+	case opts.Access.Previews > 0:
+		previews = opts.Access.Previews
+		rep.Report(progress.Info("previews: up to %d branches, inside the cluster only", previews))
+	}
 	// Before anything is written, here or in Cloudflare: without the platform the app would never
 	// be deployed, and the wait for it would only end at the timeout.
-	if err := o.Cluster.CheckPlatform(ctx, o.config(), quick); err != nil {
+	needs := cluster.PlatformNeeds{Quick: quick, Previews: previews > 0}
+	if err := o.Cluster.CheckPlatform(ctx, o.config(), needs); err != nil {
 		return err
 	}
 	domain := cmp.Or(opts.Access.Domain, current.Domain)
@@ -212,6 +239,7 @@ func (o *Ops) AddApp(ctx context.Context, opts AddOptions, report progress.Repor
 		TunnelID:          exposure.tunnelID(),
 		TunnelCredentials: exposure.credentials,
 		Quick:             quick,
+		Previews:          previews,
 		Secrets:           values,
 		Timeout:           opts.Timeout,
 		Report:            rep,
@@ -245,7 +273,7 @@ func (o *Ops) SetAccess(ctx context.Context, name string, access Access, timeout
 // what to do when a tag was moved, or when something failed and is worth another try.
 func (o *Ops) Redeploy(ctx context.Context, name string, timeout time.Duration,
 	report progress.Reporter) error {
-	if err := o.Cluster.CheckPlatform(ctx, o.config(), false); err != nil {
+	if err := o.Cluster.CheckPlatform(ctx, o.config(), cluster.PlatformNeeds{}); err != nil {
 		return err
 	}
 	return o.Cluster.Redeploy(ctx, o.config(), name, timeout, progress.OrDiscard(report))

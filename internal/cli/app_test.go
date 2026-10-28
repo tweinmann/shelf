@@ -302,3 +302,15 @@ func TestAppStatusShowsTheCommit(t *testing.T) {
 		})
 	}
 }
+
+func TestAppNameWithDoubleHyphen(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t).public()
+	_, stderr, code := h.run(t, "app", "add", "hello--copy", greeterArtifact)
+	if code != 1 || !strings.Contains(stderr, "reserved for previews") {
+		t.Errorf("exit code %d, stderr %q", code, stderr)
+	}
+	if len(h.cluster.added) != 0 {
+		t.Error("the cluster was contacted")
+	}
+}

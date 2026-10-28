@@ -1,0 +1,58 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "AppStatus",
+  "name": "hello--feature-login",
+  "previewOf": "hello",
+  "phase": "Ready",
+  "host": "hello--feature-login.shelf.internal",
+  "artifact": "oci://ghcr.io/o/hello:branch-feature-login",
+  "exposure": {
+    "kind": "none"
+  },
+  "revision": "branch-feature-login@sha256:def",
+  "commit": "3f2a9c1e5b7d9f1a3c5e7b9d1f3a5c7e9b1d3f5a",
+  "components": [
+    {
+      "name": "web",
+      "phase": "Ready",
+      "path": "/",
+      "address": "hello--feature-login.shelf.internal/"
+    }
+  ],
+  "stages": [
+    {
+      "name": "the deploy artifact",
+      "object": "OCIRepository hello/deploy",
+      "phase": "Ready",
+      "reason": "Succeeded",
+      "message": "stored artifact for digest 'main@sha256:abc'"
+    },
+    {
+      "name": "the app values",
+      "object": "Kustomization hello/deploy",
+      "phase": "Ready",
+      "reason": "ReconciliationSucceeded",
+      "message": "Applied revision: main@sha256:abc"
+    },
+    {
+      "name": "the chart",
+      "object": "OCIRepository hello/shelf-app",
+      "phase": "Ready",
+      "reason": "Succeeded",
+      "message": "stored artifact for digest '0.6.0@sha256:def'"
+    },
+    {
+      "name": "the app",
+      "object": "HelmRelease hello/hello",
+      "phase": "Ready",
+      "reason": "UpgradeSucceeded",
+      "message": "Helm upgrade succeeded"
+    },
+    {
+      "name": "the pods",
+      "object": "Pods",
+      "phase": "Ready",
+      "message": "2 running"
+    }
+  ]
+}

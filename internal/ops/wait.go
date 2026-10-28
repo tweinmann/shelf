@@ -38,6 +38,8 @@ type WaitOptions struct {
 	Timeout time.Duration
 	// Interval overrides how often the cluster is read, for tests.
 	Interval time.Duration
+	// Preview waits for the preview of this branch of the app instead of the app.
+	Preview string
 }
 
 // WaitResult is the verdict of a wait.
@@ -76,19 +78,40 @@ func (o *Ops) Wait(ctx context.Context, app string, opts WaitOptions) (WaitResul
 	if timeout <= 0 {
 		timeout = DefaultWaitTimeout
 	}
+	target := app
+	if opts.Preview != "" {
+		// A preview appears only after CI and the platform's next look at the registry, so
+		// one that does not exist yet is on its way, as long as the app has previews at all.
+		config, err := o.Cluster.AppConfig(ctx, o.config(), app)
+		switch {
+		case err != nil:
+			return WaitResult{}, err
+		case config == nil:
+			return WaitResult{}, &NotFoundError{Name: app}
+		case config.Previews == 0:
+			return WaitResult{}, &PreviewNotFoundError{App: app, Branch: opts.Preview, Off: true}
+		}
+		target = PreviewName(app, opts.Preview)
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var last WaitResult
 	for {
-		r, err := o.Cluster.AppRollout(ctx, o.config(), app)
+		r, err := o.Cluster.AppRollout(ctx, o.config(), target)
+		var missing *cluster.NotFoundError
 		switch {
 		case err == nil:
 			var done bool
-			if last, done = Verdict(app, r, opts.Commit); done {
+			if last, done = Verdict(target, r, opts.Commit); done {
 				return last, nil
 			}
+		case opts.Preview != "" && errors.As(err, &missing):
+			last = WaitResult{Outcome: OutcomeTimedOut, App: target, Stage: &cluster.Stage{
+				Name: "the preview", Object: "Namespace " + target, Phase: cluster.PhaseMissing,
+				Message: "waiting for the preview of branch " + opts.Preview,
+			}}
 		case ctx.Err() == nil:
 			return WaitResult{}, err
 		}

@@ -94,3 +94,18 @@ func TestParseImages(t *testing.T) {
 		t.Error("a repeated component must be rejected")
 	}
 }
+
+func TestBuildPlanBranch(t *testing.T) {
+	file := writeApp(t, "apiVersion: shelf.dev/v1alpha1\nname: shop\ncomponents:\n  db: { image: postgres:16 }\n")
+	stdout, _, code := run(t, "build-plan", file, "--branch", "feature/Login")
+	var plan buildPlan
+	if code != 0 || json.Unmarshal([]byte(stdout), &plan) != nil || plan.Tag != "branch-feature-login" {
+		t.Errorf("exit code %d, stdout %q", code, stdout)
+	}
+	if stdout, _, _ := run(t, "build-plan", file); strings.Contains(stdout, `"tag"`) {
+		t.Errorf("a plan without --branch has a tag: %s", stdout)
+	}
+	if _, stderr, code := run(t, "build-plan", file, "--branch", "///"); code == 0 || !strings.Contains(stderr, "no letters or digits") {
+		t.Errorf("empty slug: exit code %d, stderr %q", code, stderr)
+	}
+}

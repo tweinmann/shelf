@@ -23,6 +23,8 @@ var componentNameRE = regexp.MustCompile(schema.ComponentNamePattern)
 type buildPlan struct {
 	Package string      `json:"package"`
 	Builds  []buildItem `json:"builds"`
+	// Tag is the tag a branch's deploy artifact is published under, with --branch only.
+	Tag string `json:"tag,omitempty"`
 }
 
 // buildItem is one component that has to be built before rendering.
@@ -33,7 +35,8 @@ type buildItem struct {
 }
 
 func newBuildPlanCmd() *cobra.Command {
-	return &cobra.Command{
+	var branch string
+	cmd := &cobra.Command{
 		Use:   "build-plan <app.yaml>",
 		Short: "Print the package name and the components that have to be built, as JSON",
 		Long: `Print {package, builds} as JSON: the package name (app.yaml's name), and every component
@@ -43,7 +46,10 @@ the working directory.
 A CI workflow publishes the deploy artifact as ghcr.io/<owner>/<package> and the images below
 it: it builds each component, pushes the image and passes the result to
 ` + "`shelf render --image <component>=<reference>`" + `. The app's name in shelf is chosen at
-` + "`shelf app add`" + `, so one package can be deployed as several apps.`,
+` + "`shelf app add`" + `, so one package can be deployed as several apps.
+
+With --branch, the plan also holds the tag a push to that branch publishes the deploy artifact
+under, branch-<slug>. An app with previews runs it as <app>--<slug>.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file := args[0]
@@ -52,6 +58,11 @@ it: it builds each component, pushes the image and passes the result to
 				return err
 			}
 			plan := buildPlan{Package: doc.App.Name, Builds: []buildItem{}}
+			if branch != "" {
+				if plan.Tag = schema.BranchTag(branch); plan.Tag == schema.BranchTagPrefix {
+					return fmt.Errorf("branch %q has no letters or digits to name a preview by", branch)
+				}
+			}
 			for _, compName := range slices.Sorted(maps.Keys(doc.App.Components)) {
 				comp := doc.App.Components[compName]
 				if comp == nil || !comp.IsBuilt() {
@@ -71,6 +82,8 @@ it: it builds each component, pushes the image and passes the result to
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&branch, "branch", "", "also print the tag a push to this branch publishes, branch-<slug>")
+	return cmd
 }
 
 // parseImages turns the --image flags (component=reference) into a map.

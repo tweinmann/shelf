@@ -174,11 +174,15 @@ const appsResourceSet = "apps"
 // quickInput is how the platform refers to the input of a quick tunnel.
 const quickInput = `"quick"`
 
+// previewsResourceSet is the ResourceSet of the platform that runs the previews of apps.
+const previewsResourceSet = "previews"
+
 // CheckPlatform fails when this cluster cannot deploy the app an operation is about to change:
-// without the platform's ResourceSet nothing ever creates the app, and a platform older than
-// quick tunnels never starts cloudflared for one. Either way, a wait would only end at the
-// timeout, so operations call it before they write anything, here or in Cloudflare.
-func CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error {
+// without the platform's ResourceSet nothing ever creates the app, a platform older than quick
+// tunnels never starts cloudflared for one, and one older than previews never runs them. Either
+// way, a wait would only end at the timeout, so operations call it before they write anything,
+// here or in Cloudflare.
+func CheckPlatform(ctx context.Context, cfg *rest.Config, needs PlatformNeeds) error {
 	c, err := newClient(cfg)
 	if err != nil {
 		return err
@@ -191,7 +195,17 @@ func CheckPlatform(ctx context.Context, cfg *rest.Config, quick bool) error {
 	if err != nil {
 		return err
 	}
-	return platformError(obj, quick)
+	if err := platformError(obj, needs.Quick); err != nil || !needs.Previews {
+		return err
+	}
+	previews, err := c.get(ctx, ref{gvk: resourceSetGVK, namespace: SystemNamespace, name: previewsResourceSet})
+	if err != nil {
+		return err
+	}
+	if previews == nil {
+		return previewsMissing()
+	}
+	return nil
 }
 
 // platformError decides CheckPlatform on the ResourceSet as read; nil means there is none.

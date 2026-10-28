@@ -103,9 +103,22 @@ type stageDocument struct {
 	Hint    string        `json:"hint,omitempty"`
 }
 
+// previewDocument is one preview in the AppStatus of its app. The cluster knows a branch by its
+// slug only, so that is what names it.
+type previewDocument struct {
+	Slug      string        `json:"slug"`
+	Tag       string        `json:"tag"`
+	Namespace string        `json:"namespace"`
+	Host      string        `json:"host"`
+	Phase     cluster.Phase `json:"phase"`
+	Commit    string        `json:"commit,omitempty"`
+}
+
 type appStatusDocument struct {
 	header
-	Name       string              `json:"name"`
+	Name string `json:"name"`
+	// PreviewOf is set when this is the status of a preview: the app it is a preview of.
+	PreviewOf  string              `json:"previewOf,omitempty"`
 	Phase      cluster.Phase       `json:"phase"`
 	Host       string              `json:"host,omitempty"`
 	URL        string              `json:"url,omitempty"`
@@ -118,6 +131,11 @@ type appStatusDocument struct {
 	Deployed   *time.Time          `json:"deployed,omitempty"`
 	Components []componentDocument `json:"components"`
 	Stages     []stageDocument     `json:"stages"`
+	// Previews, PreviewLimit and PreviewLimitReached are there only for an app with previews
+	// switched on.
+	Previews            []previewDocument `json:"previews,omitempty"`
+	PreviewLimit        int               `json:"previewLimit,omitempty"`
+	PreviewLimitReached *bool             `json:"previewLimitReached,omitempty"`
 }
 
 type waitResultDocument struct {
@@ -215,6 +233,16 @@ func appStatus(a ops.App, d cluster.Diagnosis) appStatusDocument {
 			ConnectionMissing: a.CloudflareMissing, Domain: a.Domain}
 	case a.Quick:
 		doc.Exposure = exposure{Kind: "quick"}
+	}
+	if a.PreviewLimit > 0 {
+		doc.PreviewLimit = a.PreviewLimit
+		reached := len(a.Previews) >= a.PreviewLimit
+		doc.PreviewLimitReached = &reached
+		doc.Previews = []previewDocument{}
+		for _, p := range a.Previews {
+			doc.Previews = append(doc.Previews, previewDocument{Slug: p.Slug, Tag: p.Artifact.Tag,
+				Namespace: p.Name, Host: ops.PreviewHost(p.Name), Phase: p.Phase, Commit: p.Commit})
+		}
 	}
 	for _, c := range a.Components {
 		doc.Components = append(doc.Components, componentDocument{

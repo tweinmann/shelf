@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
@@ -49,7 +48,7 @@ func AppRollout(ctx context.Context, cfg *rest.Config, app string) (Rollout, err
 	}
 	objs, ok := apps[app]
 	if !ok {
-		return Rollout{}, fmt.Errorf("app %s does not exist", app)
+		return Rollout{}, &NotFoundError{Name: app}
 	}
 	values, err := c.get(ctx, ref{gvk: configMapGVK, namespace: app, name: render.ConfigMapName})
 	if err != nil {

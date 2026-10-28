@@ -27,6 +27,8 @@ this repository: after a push, wait for the verdict on that commit with
 shelf app status greeter --wait --commit "$(git rev-parse HEAD)" --json
 ```
 
-and fix what it names. Put the name you gave the app in `shelf app add` into `CLAUDE.md`. The
+and fix what it names; on a branch with `--preview <branch>`, if the operator switched previews
+on (`shelf app credentials greeter --previews`). Put the name you gave the app in
+`shelf app add` into `CLAUDE.md`. The
 agent cannot make the app public: exposure is set with `shelf app add` or
 `shelf app credentials`, never in this repository.

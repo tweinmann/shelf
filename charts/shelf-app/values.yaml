@@ -22,3 +22,6 @@ platform:
   ingressClassName: traefik
   # Name of a docker-registry Secret in the app namespace used to pull images; empty for none.
   imagePullSecret: ""
+  # A preview of a branch: the chart generates the secrets in shelf-secrets itself, keeping the
+  # values it finds there. Set only by the platform's ResourceSet previews.
+  preview: false

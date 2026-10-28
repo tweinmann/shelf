@@ -22,6 +22,7 @@ func newAppStatusCmd(o Options) *cobra.Command {
 		wait    bool
 		commit  string
 		timeout time.Duration
+		preview string
 	)
 	cmd := &cobra.Command{
 		Use:   "status [name]",
@@ -35,15 +36,22 @@ the verdict is about it and not about the version before. The exit status is 0 w
 Ready, 1 when a step failed and 2 when the time ran out. Waiting only reads the cluster; the
 platform notices a new artifact within a minute by itself.
 
+With --preview, all of this is about the preview of that branch instead of the app: its
+namespace <app>--<slug>, its artifact at the branch tag, and its stages.
+
 This is what the admin UI shows on its pages, in text.`,
-		Example: `  shelf app status hello --wait --commit "$(git rev-parse HEAD)" --json`,
-		Args:    cobra.MaximumNArgs(1),
+		Example: `  shelf app status hello --wait --commit "$(git rev-parse HEAD)" --json
+  shelf app status hello --preview feature/login --wait --commit "$(git rev-parse HEAD)" --json`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commit != "" && !wait {
 				return errors.New("--commit needs --wait")
 			}
 			if wait && len(args) == 0 {
 				return errors.New("--wait needs the name of an app")
+			}
+			if preview != "" && len(args) == 0 {
+				return errors.New("--preview needs the name of an app")
 			}
 			if commit != "" {
 				if err := ops.CheckCommit(commit); err != nil {
@@ -63,7 +71,8 @@ This is what the admin UI shows on its pages, in text.`,
 				return err
 			}
 			if wait {
-				result, err := shelf.Wait(cmd.Context(), name, ops.WaitOptions{Commit: commit, Timeout: timeout})
+				result, err := shelf.Wait(cmd.Context(), name,
+					ops.WaitOptions{Commit: commit, Timeout: timeout, Preview: preview})
 				if err != nil {
 					return err
 				}
@@ -77,20 +86,30 @@ This is what the admin UI shows on its pages, in text.`,
 				}
 				return verdictExit(result.Outcome)
 			}
-			app, err := shelf.App(cmd.Context(), name)
+			var app ops.App
+			if preview != "" {
+				app, err = shelf.Preview(cmd.Context(), name, preview)
+			} else {
+				app, err = shelf.App(cmd.Context(), name)
+			}
 			if err != nil {
 				return err
 			}
-			diagnosis, err := shelf.Diagnose(cmd.Context(), name)
+			diagnosis, err := shelf.Diagnose(cmd.Context(), app.Name)
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				return printJSON(out, appStatus(app, diagnosis))
+				doc := appStatus(app, diagnosis)
+				if preview != "" {
+					doc.PreviewOf = name
+				}
+				return printJSON(out, doc)
 			}
 			printApp(out, app)
 			printComponents(out, app.Components, app.Public || app.Quick)
 			printChain(out, diagnosis)
+			printPreviews(out, app)
 			return nil
 		},
 	}
@@ -99,6 +118,7 @@ This is what the admin UI shows on its pages, in text.`,
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until the app is Ready or a step failed, and print the verdict")
 	cmd.Flags().StringVar(&commit, "commit", "", "with --wait: the git commit the app has to run, at least 7 hex digits")
 	cmd.Flags().DurationVar(&timeout, "timeout", ops.DefaultWaitTimeout, "with --wait: how long to wait")
+	cmd.Flags().StringVar(&preview, "preview", "", "the preview of this branch (its name or its slug) instead of the app")
 	return cmd
 }
 
@@ -154,8 +174,30 @@ func listApps(cmd *cobra.Command, shelf *ops.Ops, out io.Writer, asJSON bool) er
 		if app.Reason != "" {
 			fmt.Fprintf(out, "  %s: %s\n", app.Stage, firstLine(app.Reason))
 		}
+		for _, p := range app.Previews {
+			fmt.Fprintf(out, "  preview %s: %s\n", p.Slug, p.Phase)
+		}
 	}
 	return nil
+}
+
+// printPreviews lists an app's previews, and says when the limit leaves further branches out.
+func printPreviews(out io.Writer, app ops.App) {
+	if app.PreviewLimit == 0 {
+		return
+	}
+	fmt.Fprintf(out, "  previews  %d of at most %d, inside the cluster only\n", len(app.Previews), app.PreviewLimit)
+	for _, p := range app.Previews {
+		line := fmt.Sprintf("    %s  %s  %s", p.Name, p.Phase, p.Artifact.Tag)
+		if p.Commit != "" {
+			line += "  " + p.Commit[:min(len(p.Commit), 12)]
+		}
+		fmt.Fprintln(out, line)
+	}
+	if len(app.Previews) >= app.PreviewLimit {
+		fmt.Fprintf(out, "    the preview limit of %d is reached: further branches get no preview "+
+			"(`shelf app credentials %s --previews=N` raises it)\n", app.PreviewLimit, app.Name)
+	}
 }
 
 func printApp(out io.Writer, app ops.App) {

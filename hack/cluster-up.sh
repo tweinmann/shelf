@@ -27,6 +27,16 @@ else
     --wait
 fi
 
+# registry:2 refuses to delete manifests unless told to. Previews disappear when their branch tag
+# is deleted, so level 2 has to be able to delete one, as GHCR can. The config file lives in the
+# registry container, which keeps it across restarts; this runs on every cluster-up.
+registry_config=/etc/docker/registry/config.yml
+if ! docker exec "$SHELF_REGISTRY" grep -q '^  delete:' "$registry_config"; then
+  docker exec "$SHELF_REGISTRY" sed -i 's/^storage:$/storage:\n  delete:\n    enabled: true/' "$registry_config"
+  docker restart "$SHELF_REGISTRY" >/dev/null
+  echo "registry $SHELF_REGISTRY: deleting manifests enabled"
+fi
+
 # The registry is published on this container's loopback; give it the name pods use. /etc/hosts
 # is recreated with the container, so this runs on every cluster-up.
 if ! grep -qE "^127\.0\.0\.1[[:space:]]+$SHELF_REGISTRY\$" /etc/hosts; then

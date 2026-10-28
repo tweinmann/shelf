@@ -105,6 +105,10 @@ smoke-apps:
 smoke-agent:
     hack/smoke/agent.sh
 
+# Phase 10: two branches as isolated previews, open --preview, data kept, limit, removal, RAM and times
+smoke-previews:
+    hack/smoke/previews.sh
+
 # Phase 8b acceptance: expose an app through its own Cloudflare tunnel (asks for the API token)
 smoke-expose app domain:
     hack/smoke/expose.sh {{app}} {{domain}}
