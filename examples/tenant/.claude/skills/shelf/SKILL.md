@@ -97,6 +97,9 @@ The first stage that is not Ready is the cause; everything after it is a consequ
 its namespace. A test reaches the components by their references, such as
 `http://${web.host}:${web.port}/`, never through a route, and passes when it exits with 0. Add
 one for what a change must not break; the wait counts the commit as Ready only once they pass.
+With curl, pass `--retry 5 --retry-connrefused` (a new pod's first connection can be refused for
+a moment), and `--fail-early` when it checks several URLs, or only the last one counts. Check
+that a test can fail: an app that answers every path with 200 makes `-f` on a wrong path pass.
 
 ## What you cannot do
 

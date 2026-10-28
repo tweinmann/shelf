@@ -17,8 +17,8 @@ context: |
   artefact becomes reachable beyond a preview, and the same verified state goes to any Kubernetes
   cloud as a pull request (eject), without depending on shelf. shelf runs on any Linux host with
   k3s, with a one-step install on a Mac (Colima). Today it runs against any kubecontext, developed
-  on the dev cluster, with branch previews and the verification chain; the host setup and eject
-  are planned. shelf is pre-production: an app's "main" is its stable, verified state, not
+  on the dev cluster, with isolated, tested branch previews and the verification chain; the host
+  setup and eject are planned. shelf is pre-production: an app's "main" is its stable, verified state, not
   production. Learning and reference project for platform engineering.
 
   OpenSpec is the only planning source: `openspec/specs/` is what shelf does today,

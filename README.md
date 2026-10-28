@@ -17,9 +17,10 @@ your own Cloudflare account, or a temporary `*.trycloudflare.com` name that need
 > shelf is a learning and reference project for platform engineering, and it is
 > **pre-production**: production is a separate cluster reached through eject (planned). It is
 > **still under construction**: today a push to your repository deploys your app, and the CLI or
-> an admin UI in the browser adds, changes and removes apps, every branch runs as a preview, and
-> only a signed and scanned app can be exposed. The host setup, the installer and eject are
-> planned, not built. See [Status](#status).
+> an admin UI in the browser adds, changes and removes apps, every branch runs as an isolated
+> preview that counts as green once its tests pass, and only a signed and scanned app can be
+> exposed. The host setup, the installer and eject are planned, not built. See
+> [Status](#status).
 
 Where this is going: you run Claude Code (other agents later) in several worktrees at once. Every
 branch your agents push gets its own preview of the complete stack, database included, in a
@@ -113,7 +114,7 @@ one starts.
 | 9 | Agent interface: `--json`, `shelf app status --wait`, `shelf app open` | ✅ done |
 | 10 | Branch previews: one isolated preview per branch, discovered from the registry | ✅ done |
 | 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | ✅ done |
-| 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | planned |
+| 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | ✅ done |
 | 13 | Host: macOS with Colima and Linux with k3s, `shelf doctor`, `shelf destroy` | planned |
 | 14 | Service and one-command installer | planned |
 | 15 | Logs, resource usage, self-update | planned |
@@ -465,7 +466,9 @@ A test passes when its container exits with 0. It runs inside the app's namespac
 the components by their references (`http://${web.host}:${web.port}/`), not through a route,
 and it can read the app's secrets. Let it retry its first connection (`curl --retry 5
 --retry-connrefused`): for a moment after a pod starts, the network policy may not know it yet,
-and refuses it. Until every test passed, the app is not Ready:
+and refuses it. A curl test that checks several URLs needs `--fail-early`: without it, curl
+exits with the status of the last URL only, so a failure before it passes unnoticed. Until every
+test passed, the app is not Ready:
 
 - on the app, a failing test fails the upgrade, so the previous version comes back;
 - on a preview, the failing version keeps running, so you can look at it with

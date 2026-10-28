@@ -43,6 +43,40 @@ func Parse(file string, data []byte) (*Document, error) {
 	return &Document{File: file, App: &app, root: &root}, nil
 }
 
+// ParseLenient decodes what another version of shelf may have written, such as the resolved
+// app.yaml in an app's ConfigMap: fields this version does not know are left out instead of
+// being errors, so an older shelf can still show an app whose workflow is newer. Everything a
+// person writes goes through Parse.
+func ParseLenient(file string, data []byte) (*App, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	if root.Kind == 0 {
+		return nil, fmt.Errorf("%s: file is empty", file)
+	}
+	// Route checks its own keys, since node.Decode knows no KnownFields; drop the ones it
+	// would refuse.
+	if components := mappingValue(root.Content[0], "components"); components != nil {
+		for i := 1; i < len(components.value.Content); i += 2 {
+			if route := mappingValue(components.value.Content[i], "route"); route != nil && route.value.Kind == yaml.MappingNode {
+				kept := route.value.Content[:0]
+				for j := 0; j+1 < len(route.value.Content); j += 2 {
+					if slices.Contains(routeKeys, route.value.Content[j].Value) {
+						kept = append(kept, route.value.Content[j], route.value.Content[j+1])
+					}
+				}
+				route.value.Content = kept
+			}
+		}
+	}
+	var app App
+	if err := root.Decode(&app); err != nil {
+		return nil, fmt.Errorf("%s: %w", file, err)
+	}
+	return &app, nil
+}
+
 // Line returns the line of the node at path, e.g. ("components", "web", "port"). If the path
 // does not exist, it returns the line of the deepest ancestor that does, and 0 without a tree.
 func (d *Document) Line(path ...string) int {

@@ -309,11 +309,11 @@ omitting `sha256-` signature and attestation tags; no deploy path depends on thi
 - **WHEN** the app runs tag `main`
 - **THEN** the `main` line is marked with `*`
 
-### Requirement: Five-stage diagnosis
-The system SHALL diagnose an app as five ordered stages: the deploy artifact (OCIRepository
+### Requirement: Stage diagnosis
+The system SHALL diagnose an app as six ordered stages: the deploy artifact (OCIRepository
 `deploy`), the app values (Kustomization `deploy`), the chart (OCIRepository `shelf-app`), the
-app (HelmRelease), and the pods; each stage is Ready, Working, Failed or Missing, and the app's
-state is that of the first stage that is not Ready.
+app (HelmRelease), the pods, and the tests; each stage is Ready, Working, Failed or Missing, and
+the app's state is that of the first stage that is not Ready.
 
 #### Scenario: Image cannot be pulled
 - **WHEN** all Flux stages are Ready and a pod waits in `ImagePullBackOff`
@@ -327,12 +327,16 @@ state is that of the first stage that is not Ready.
 - **WHEN** the platform has not created the app's objects yet
 - **THEN** the first stage is Missing with the message that the platform has not created the app yet
 
+#### Scenario: Failing test
+- **WHEN** every pod is ready and the test `smoke` exited with 1
+- **THEN** the tests stage is Failed naming `smoke`, and the app is Failed
+
 ### Requirement: App status command
 `shelf app status` SHALL list every app with its state and, when not Ready, the failing stage and
 reason in one line; `shelf app status <app>` SHALL print the app's address, artifact, registry
-connection, running revision and commit, deploy time, components, its verification, every stage
-with its message and, if not Ready, its hint, and its previews with tag, state and commit;
-`--preview <branch>` SHALL print the same for one preview.
+connection, running revision and commit, deploy time, components, its verification, its
+isolation, every stage with its message and, if not Ready, its hint, and its previews with tag,
+state and commit; `--preview <branch>` SHALL print the same for one preview.
 
 #### Scenario: No apps
 - **WHEN** the cluster has no registered apps
@@ -340,7 +344,7 @@ with its message and, if not Ready, its hint, and its previews with tag, state a
 
 #### Scenario: One app in detail
 - **WHEN** a user runs `shelf app status hello` for a healthy app
-- **THEN** the output shows `hello: Ready`, the artifact reference, the revision, and all five stages as Ready
+- **THEN** the output shows `hello: Ready`, the artifact reference, the revision, and all six stages as Ready
 
 #### Scenario: Commit of the running artifact
 - **WHEN** the app's deploy artifact was pushed by the reusable workflow for commit `42a964eb0b4b…`
@@ -356,7 +360,7 @@ with its message and, if not Ready, its hint, and its previews with tag, state a
 
 #### Scenario: One preview
 - **WHEN** a user runs `shelf app status hello --preview feature/login`
-- **THEN** the output shows the preview's namespace `hello--feature-login`, its host, artifact tag, commit, components and five stages
+- **THEN** the output shows the preview's namespace `hello--feature-login`, its host, artifact tag, commit, components and six stages
 
 ### Requirement: App operations require the platform
 `shelf app add`, `shelf app credentials` and `shelf app redeploy`, and their admin UI jobs, MUST

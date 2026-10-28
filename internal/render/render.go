@@ -315,13 +315,10 @@ func encodeYAML(v any) ([]byte, error) {
 const ConfigMapName = "shelf-values"
 
 // ParseApp reads back what MarshalApp wrote, so that anyone holding the ConfigMap of an app can
-// see what it is made of without going to the registry for the artifact.
+// see what it is made of without going to the registry for the artifact. The artifact may come
+// from a newer workflow than this shelf, so fields it does not know are left out.
 func ParseApp(data []byte) (*schema.App, error) {
-	doc, err := schema.Parse(ConfigMapKey, data)
-	if err != nil {
-		return nil, err
-	}
-	return doc.App, nil
+	return schema.ParseLenient(ConfigMapKey, data)
 }
 
 // ConfigMapKey is the data key holding the resolved app.yaml; the HelmRelease reads it through

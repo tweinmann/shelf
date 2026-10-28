@@ -76,10 +76,11 @@ answer at `<app>--<slug>.shelf.internal` inside the cluster, and carry the label
 
 ### Requirement: Preview contents
 The platform SHALL give each preview the same deploy chain as an app (its deploy artifact at the
-branch tag, checked every 30 seconds, the app values, the chart, the release), verified against
-the cluster's signer, the app's registry login, a ResourceQuota (requests of 1 CPU, 2Gi memory,
-5Gi storage) and a LimitRange that gives containers without requests a default; it MUST NOT give
-a preview a tunnel, cloudflared or a DNS record.
+branch tag, checked every 30 seconds, the app values, the chart, the release, the tests),
+verified against the cluster's signer, the app's registry login, the isolation of an app without
+LAN exceptions, a ResourceQuota (requests of 1 CPU, 2Gi memory, 5Gi storage) and a LimitRange that
+gives containers without requests a default; it MUST NOT give a preview a tunnel, cloudflared or a
+DNS record.
 
 #### Scenario: Preview of an exposed app
 - **WHEN** an app exposed through a Cloudflare connection has a preview
@@ -96,6 +97,10 @@ a preview a tunnel, cloudflared or a DNS record.
 #### Scenario: Built image of a preview
 - **WHEN** a preview's values name an unsigned built image of the app's package
 - **THEN** its pod is denied by the app's admission policy, as in the app's namespace
+
+#### Scenario: Preview of an app with a LAN exception
+- **WHEN** `hello` may reach `192.168.1.10/32` and has the preview `hello--feature-login`
+- **THEN** the preview's pods cannot reach `192.168.1.10`, nor the pods of `hello`
 
 ### Requirement: A preview's own state
 A preview SHALL have its own volumes and its own secret values, generated in the cluster when the

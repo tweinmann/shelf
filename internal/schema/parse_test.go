@@ -136,3 +136,42 @@ func TestSecretEnvName(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// TestParseLenient covers what an older shelf reads from the cluster: the resolved app.yaml of a
+// newer workflow, with fields it does not know, at the top, in a component and in a route.
+func TestParseLenient(t *testing.T) {
+	t.Parallel()
+	app, err := ParseLenient("app.yaml", []byte(`apiVersion: shelf.dev/v1alpha1
+name: greeter
+components:
+  web:
+    image: nginx@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    ports: { main: 8080 }
+    route: { path: /, port: main, rewrite: true }
+    sidecar: { image: envoy }
+  db:
+    image: postgres:16
+    route: /db
+futureSection:
+  anything: [1, 2]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := app.Components["web"]
+	if web == nil || web.Ports["main"] != 8080 || web.Route == nil || web.Route.Path != "/" || web.Route.Port != "main" {
+		t.Errorf("web %+v", web)
+	}
+	if db := app.Components["db"]; db == nil || db.Route == nil || db.Route.Path != "/db" {
+		t.Errorf("db %+v", db)
+	}
+	// What a person writes stays strict.
+	if _, err := Parse("app.yaml", []byte("apiVersion: shelf.dev/v1alpha1\nname: a\nfutureSection: {}\n")); err == nil {
+		t.Error("Parse accepts an unknown field")
+	}
+	for _, bad := range []string{"", "components: [\n", "components: 5\n"} {
+		if _, err := ParseLenient("app.yaml", []byte(bad)); err == nil {
+			t.Errorf("ParseLenient accepts %q", bad)
+		}
+	}
+}

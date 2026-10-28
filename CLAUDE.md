@@ -114,7 +114,17 @@ the app page show the chain. Release v0.8.0. Accepted with `tweinmann/shelf-hell
 2 min 36 s (Phase 10: 1 min 33 s), an unsigned artifact and an unsigned image were refused, and
 `gretter` was exposed only once verified. `shelf serve` now follows a rewritten kubeconfig.
 Results in `openspec/changes/archive/2026-10-28-phase-11-verification-chain`.
-Next: Phase 12 (hardening).
+Phase 12 complete (2026-10-28): hardening. App and preview namespaces enforce Pod Security
+`baseline` (and list what `restricted` would refuse), and the NetworkPolicy `shelf-isolation`
+lets pods reach their own namespace, DNS and the internet only; only Traefik reaches in, only
+cloudflared reaches Traefik. LAN ranges are per app and the operator's (`--allow-lan`), never a
+preview's. `tests:` in app.yaml run as Helm test hooks after every rollout: a failing test rolls
+an app back and leaves a preview red, and `--wait` is Ready only once they pass; `shelf app
+report` writes the per-branch report for a pull request. Release v0.9.0. Accepted with
+`tweinmann/shelf-hello`: a test on main was Ready, a broken test on a branch kept a red preview
+running, and on main it rolled `gretter` back within 32 s while it kept answering. Results in
+`openspec/changes/archive/2026-10-28-phase-12-hardening`.
+Next: Phase 13 (host).
 
 ## Working agreements
 

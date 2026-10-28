@@ -378,3 +378,37 @@ What apply found:
 
 Also confirmed: `shelf serve` kept working through two `cluster-reset`s without a restart, the
 follow-up of Phase 11.
+
+### Level 3 (`tweinmann/shelf-hello` as `gretter`, release v0.9.0, 2026-10-28)
+
+The dev cluster was installed again from the release, keyless, and `gretter` added privately with
+previews. Both release artifacts carried keyless signatures of `release.yml`.
+
+| Check | Result |
+|---|---|
+| `gretter` on the release platform | verified; Pod Security baseline; for `restricted`, only "unrestricted capabilities, runAsNonRoot" are left per pod (decision 1b), Postgres and Mongo run |
+| Push of a curl test to `main` (`33f8756`) | CI 1 min 58 s (Phase 11: 2 min 36 s, cold cache); Ready, "1 passed: smoke"; the scan covers the test's image |
+| A branch with a test that fails (`3a40f54`) | CI 1 min 48 s; `--wait --commit` ends `Failed` at "the tests" with exit code 7 and the log; the preview keeps running that commit; `shelf app report --preview` shows it red, with the log, the scan and the comparison with `main` |
+| The same commit merged to `main` | CI 1 min 35 s; `--wait` ends `Failed` after 22 s; Helm rolled back 10 s later; after four attempts (about 2 min) `gretter` runs the values of `33f8756` again, `/` answered 200 throughout; "the app" Ready, "the tests" Failed |
+
+Two things the acceptance taught, both now in the README and the tenant skill:
+- **A test has to be able to fail.** The web component of `shelf-hello` answers every path with
+  200, so `curl -f …/nope` passed. Breaking the port did fail.
+- **curl with several URLs** exits with the status of the last one; a failure before it passes
+  unnoticed without `--fail-early`.
+
+As foreseen in the risks, a failing test on `main` makes helm-controller retry the upgrade three
+times before it stalls, replacing the pods each time; the verdict does not wait for that.
+
+After the acceptance, the test was fixed on `main` (`801843a`): Ready, verified, and the release
+left its stalled state with the new values. `gretter` was then exposed again with
+`--cloudflare tobile --domain tobile.ch`: deployed privately, verified, then tunnel and record
+created; `https://gretter.tobile.ch/` answered 200, so cloudflared reaches Traefik under
+`shelf-cloudflared` on the released platform.
+
+**Found after the archive, and fixed with it:** an admin UI started before Phase 12 failed on the
+app page of `gretter` once its values held `tests`: shelf read the resolved app.yaml from the
+cluster as strictly as one a person writes. `render.ParseApp` now uses `schema.ParseLenient`,
+which leaves out fields it does not know (also in a long-form `route`), so an older shelf can
+still show an app built by a newer workflow; `shelf validate` and `render` stay strict. The main
+spec `app-manifest` has the requirement "Reading a resolved app.yaml from the cluster".

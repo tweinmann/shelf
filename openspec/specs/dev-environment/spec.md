@@ -80,7 +80,7 @@ Cloudflare), and a task that needs level 2 or 3 MUST say so.
 
 #### Scenario: Level 2 in full
 - **WHEN** a commit is pushed to `main`, or a pull request carries the label `level-2-full`
-- **THEN** CI runs `smoke-secrets`, `smoke-chart`, `smoke-init`, `smoke-apps`, `smoke-agent`, `smoke-previews` and `smoke-verify` with `SMOKE_FULL=1`
+- **THEN** CI runs `smoke-secrets`, `smoke-chart`, `smoke-init`, `smoke-apps`, `smoke-agent`, `smoke-previews`, `smoke-verify` and `smoke-hardening` with `SMOKE_FULL=1`
 
 #### Scenario: main fails
 - **WHEN** CI fails on `main`
