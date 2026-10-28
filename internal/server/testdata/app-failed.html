@@ -69,6 +69,23 @@ reaches them.</p>
 </section>
 
 
+<section class="card">
+<h2>Verification</h2>
+<dl class="facts">
+
+<dt>Signer</dt><dd>keyless, issuer https://token.actions.githubusercontent.com</dd>
+<dt>Verified</dt><dd>no: the deploy artifact has no scan (dev.shelf.scan)</dd>
+
+<dt>Exposure</dt><dd>refused until it is verified</dd>
+</dl>
+<p>push again with the current reusable workflow, which signs and scans every build</p>
+
+<p class="muted">The cluster runs only what this signer signed. A scan must exist before the app can
+be exposed; how many findings it has is shown, never enforced.</p>
+</section>
+
+
+
 
 <section class="card">
 <h2>Deploy</h2>

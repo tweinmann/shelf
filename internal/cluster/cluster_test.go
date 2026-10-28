@@ -124,19 +124,23 @@ func TestParseArtifact(t *testing.T) {
 	}
 }
 
+// TestFluxInstance covers a release cluster, which verifies keyless signatures, and the dev
+// cluster, which reads the platform without TLS and verifies with a key.
 func TestFluxInstance(t *testing.T) {
 	for _, insecure := range []bool{false, true} {
 		name := "fluxinstance"
 		ref := "oci://ghcr.io/tweinmann/shelf/platform:v0.3.0"
+		signer := DefaultSigner()
 		if insecure {
-			name, ref = "fluxinstance-insecure", "oci://shelf-registry:5000/shelf/platform:dev"
+			name, ref = "fluxinstance-insecure", "oci://shelf-registry.local:5000/shelf/platform:dev"
+			signer = Signer{Key: testSignerKey(t)}
 		}
 		t.Run(name, func(t *testing.T) {
 			p, err := ParseArtifact(ref)
 			if err != nil {
 				t.Fatal(err)
 			}
-			out, err := yaml.Marshal(FluxInstance(p, insecure).Object)
+			out, err := yaml.Marshal(FluxInstance(p, insecure, signer).Object)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -206,7 +210,7 @@ func TestPlatformObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	objs := ConfigObjects(Settings{Chart: chart, InsecureRegistry: true})
+	objs := ConfigObjects(Settings{Chart: chart, InsecureRegistry: true, Signer: DefaultSigner()})
 	withLogin, err := RegistryConnectionSecret("ghcr", RegistryAuth{Username: "tobi", Token: "not-a-real-token"})
 	if err != nil {
 		t.Fatal(err)
@@ -283,21 +287,22 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Settings{
-		HostSuffix:       "-dev",
-		Chart:            chart,
-		InsecureRegistry: true,
-	}
-	var data map[string]string
-	for _, obj := range ConfigObjects(want) {
-		if obj.GetKind() != "ConfigMap" {
-			continue
+	settingsData := func(s Settings) map[string]string {
+		for _, obj := range ConfigObjects(s) {
+			if obj.GetKind() == "ConfigMap" {
+				data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
+				return data
+			}
 		}
-		data, _, _ = unstructured.NestedStringMap(obj.Object, "data")
+		return nil
 	}
-	if got := ParseSettings(data); got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+	for _, signer := range []Signer{DefaultSigner(), {Key: testSignerKey(t)}} {
+		want := Settings{HostSuffix: "-dev", Chart: chart, InsecureRegistry: true, Signer: signer}
+		if got := ParseSettings(settingsData(want)); got != want {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
 	}
+	data := settingsData(Settings{HostSuffix: "-dev", Chart: chart, InsecureRegistry: true, Signer: DefaultSigner()})
 	if got := ParseSettings(nil); got != (Settings{}) || got.Installed() {
 		t.Errorf("a cluster without settings must read as zero, got %+v", got)
 	}

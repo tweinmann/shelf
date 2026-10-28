@@ -6,6 +6,11 @@
 # GHCR_USERNAME and GHCR_TOKEN (classic PAT, read:packages) are read from the environment, or
 # prompted for. They become the registry connection "tenant", which the app pulls with and which
 # is also what shelf reads the artifact with.
+#
+# The tenant's artifacts are signed keyless by shelf's reusable workflow, so the cluster is
+# installed with a released platform and chart, which release.yml signed the same way, and the
+# default signer; the dev platform is signed with the dev key, which a keyless cluster refuses.
+# SHELF_RELEASE picks the release (default: the newest v* tag here); it must be v0.8.0 or later.
 set -euo pipefail
 source "$(dirname "$0")/../lib.sh"
 require_devcontainer
@@ -43,13 +48,12 @@ cleanup() {
 trap cleanup EXIT
 step() { echo "--- $*"; }
 
-step "build shelf, push platform and chart, init cluster"
+release="${SHELF_RELEASE:-$(git -C "$repo" describe --tags --abbrev=0 --match 'v*.*.*')}"
+step "build shelf, init cluster with release $release and keyless verification"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
-"$repo/hack/platform-push.sh" >/dev/null 2>&1
-"$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
-  --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
-  --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" | grep -E 'Platform'
+shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" \
+  --platform "oci://ghcr.io/tweinmann/shelf/platform:$release" \
+  --chart "oci://ghcr.io/tweinmann/shelf/charts/shelf-app:${release#v}" | grep -E 'Platform|signer'
 # No Docker config at all: shelf has to read the artifact with the app's own login.
 export DOCKER_CONFIG="$work/docker"
 mkdir -p "$DOCKER_CONFIG"

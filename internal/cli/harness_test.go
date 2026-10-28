@@ -62,6 +62,9 @@ type fakeCluster struct {
 	// rolloutMissing is how many reads of a rollout find nothing before it appears, as a preview
 	// that the platform has not created yet.
 	rolloutMissing int
+	// verifications are what AppVerification returns, by app or preview namespace; without an
+	// entry, the app is verified and its one component scanned.
+	verifications map[string]cluster.Verification
 	// traefik is the address ForwardTraefik hands out, empty when no Traefik pod is ready.
 	traefik string
 	found   bool
@@ -171,6 +174,21 @@ func (f *fakeCluster) AppRollout(_ context.Context, _ *rest.Config, app string) 
 	return r, nil
 }
 
+func (f *fakeCluster) AppVerification(_ context.Context, _ *rest.Config, name string) (cluster.Verification, error) {
+	if v, ok := f.verifications[name]; ok {
+		return v, nil
+	}
+	return cluster.Verification{
+		Verified: true,
+		Source:   "https://github.com/acme/hello",
+		Commit:   "42a964eb0b4bd7248305d5f22233d6dbabcd56f3",
+		Scan: &cluster.Scan{Scanner: "trivy 0.75.0", ScannedAt: "2026-10-28T12:00:00Z", Images: []cluster.ScannedImage{{
+			Component: "web", Image: "traefik/whoami:v1.11.0@sha256:2006", Digest: "sha256:2006",
+			Scanned: true, Critical: 1, High: 26,
+		}}},
+	}, nil
+}
+
 func (f *fakeCluster) ForwardTraefik(context.Context, *rest.Config) (*cluster.Forward, error) {
 	if f.traefik == "" {
 		return nil, errors.New("no Traefik pod is ready")
@@ -268,7 +286,8 @@ func newHarness(t *testing.T) *harness {
 // exposed under a domain of their own.
 func (h *harness) public() *harness {
 	h.cluster.settings = cluster.Settings{HostSuffix: "-dev",
-		Chart: cluster.Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"}}
+		Chart:  cluster.Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.5.0"},
+		Signer: cluster.DefaultSigner()}
 	return h
 }
 

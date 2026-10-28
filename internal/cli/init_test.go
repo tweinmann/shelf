@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -269,5 +271,70 @@ func TestInitClusterPinsTheFormerDomain(t *testing.T) {
 		if got := h.cluster.installed[0].PinDomain; got != want {
 			t.Errorf("former domain %q: pinned %q, want %q", legacy, got, want)
 		}
+	}
+}
+
+func TestInitClusterSigner(t *testing.T) {
+	t.Parallel()
+	const platform = "oci://shelf-registry.local:5000/shelf/platform:dev"
+	const chart = "oci://shelf-registry.local:5000/shelf/charts/shelf-app:0.0.0-dev"
+	base := []string{"init", "cluster", "--yes", "--platform", platform, "--chart", chart}
+	notAKey := filepath.Join(t.TempDir(), "not-a-key.pub")
+	if err := os.WriteFile(notAKey, []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		args     []string
+		wantMode string
+		wantOut  string
+		wantErr  string
+	}{
+		{"keyless by default", nil, "keyless", "signer    keyless, issuer " + cluster.DefaultSignerIssuer, ""},
+		{"own subject", []string{"--signer-subject", `^https://github\.com/fork/shelf/.+$`}, "keyless", `subject ^https://github\.com/fork/shelf/.+$`, ""},
+		{"key", []string{"--signer-key", filepath.Join("..", "cluster", "testdata", "signer.pub")}, "key", "signer    cosign key sha256:", ""},
+		{"not a key", []string{"--signer-key", notAKey}, "", "", "not a PEM public key"},
+		{"missing key file", []string{"--signer-key", filepath.Join(t.TempDir(), "missing.pub")}, "", "", "--signer-key"},
+		{"bad subject", []string{"--signer-subject", "("}, "", "", "signer: subject"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			stdout, stderr, code := h.run(t, append(append([]string{}, base...), tt.args...)...)
+			if tt.wantErr != "" {
+				if code == 0 || !strings.Contains(stderr, tt.wantErr) || len(h.cluster.installed) != 0 {
+					t.Fatalf("exit %d, %d installs, stderr:\n%s", code, len(h.cluster.installed), stderr)
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("exit code %d: %s", code, stderr)
+			}
+			if got := h.cluster.installed[0].Settings.Signer.Mode(); got != tt.wantMode {
+				t.Errorf("mode %s, want %s", got, tt.wantMode)
+			}
+			if !strings.Contains(stdout, tt.wantOut) {
+				t.Errorf("stdout lacks %q:\n%s", tt.wantOut, stdout)
+			}
+		})
+	}
+}
+
+func TestInitClusterListsUnverifiedApps(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t).public()
+	h.cluster.states = []cluster.AppState{{Name: "greeter"}, {Name: "hello"}}
+	h.cluster.verifications = map[string]cluster.Verification{
+		"greeter": {Reason: "the cluster does not verify the deploy artifact's signature"},
+	}
+	stdout, stderr, code := h.run(t, "init", "cluster", "--yes",
+		"--platform", "oci://ghcr.io/tweinmann/shelf/platform:v0.8.0", "--chart", "oci://ghcr.io/tweinmann/shelf/charts/shelf-app:0.8.0")
+	if code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "  unverified apps: greeter\n") || !strings.Contains(stdout, "one build with the current workflow") {
+		t.Errorf("stdout:\n%s", stdout)
 	}
 }

@@ -101,7 +101,7 @@ func Install(ctx context.Context, cfg *rest.Config, opts Options) error {
 		return err
 	}
 
-	instance := FluxInstance(opts.Platform, opts.Settings.InsecureRegistry)
+	instance := FluxInstance(opts.Platform, opts.Settings.InsecureRegistry, opts.Settings.Signer)
 	action, err := c.apply(ctx, instance)
 	if err != nil {
 		return err
@@ -376,8 +376,9 @@ func (c *client) waitForPlatform(ctx context.Context, p Artifact) (string, error
 	if err != nil {
 		return "", err
 	}
-	obj, err := c.reconcileAndWait(ctx, repo, failOnAuthError(readyCondition,
-		"the platform artifact is read without a login, so it has to be public"))
+	obj, err := c.reconcileAndWait(ctx, repo, failOnUnverified(failOnAuthError(readyCondition,
+		"the platform artifact is read without a login, so it has to be public"),
+		"install a released platform, which release.yml signs, or one signed with the cluster's --signer-key"))
 	if err != nil {
 		return "", err
 	}

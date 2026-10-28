@@ -30,6 +30,13 @@ spec:
       target:
         kind: Kustomization
         name: flux-system
+    - patch: |
+        - op: add
+          path: /spec/verify
+          value: {"matchOIDCIdentity":[{"issuer":"^https://token\\.actions\\.githubusercontent\\.com$","subject":"^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$"}],"provider":"cosign"}
+      target:
+        kind: OCIRepository
+        name: flux-system
   sync:
     interval: 1m
     kind: OCIRepository

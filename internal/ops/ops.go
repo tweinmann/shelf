@@ -89,6 +89,9 @@ type Cluster interface {
 	AppComponents(ctx context.Context, cfg *rest.Config, app string) ([]cluster.Component, error)
 	AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (cluster.Diagnosis, error)
 	AppRollout(ctx context.Context, cfg *rest.Config, app string) (cluster.Rollout, error)
+	// AppVerification reads whether an app or a preview, by its namespace, runs a verified
+	// deploy artifact.
+	AppVerification(ctx context.Context, cfg *rest.Config, name string) (cluster.Verification, error)
 	ForwardTraefik(ctx context.Context, cfg *rest.Config) (*cluster.Forward, error)
 	Settings(ctx context.Context, cfg *rest.Config) (cluster.Settings, error)
 	// AppConfig returns how an app is registered, or nil when there is no such app.
@@ -128,6 +131,10 @@ func (liveCluster) Redeploy(ctx context.Context, cfg *rest.Config, app string, t
 
 func (liveCluster) AppSecrets(ctx context.Context, cfg *rest.Config, app string) (map[string]string, error) {
 	return cluster.AppSecrets(ctx, cfg, app)
+}
+
+func (liveCluster) AppVerification(ctx context.Context, cfg *rest.Config, name string) (cluster.Verification, error) {
+	return cluster.AppVerification(ctx, cfg, name)
 }
 
 func (liveCluster) AppNames(ctx context.Context, cfg *rest.Config) ([]string, error) {

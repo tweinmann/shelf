@@ -76,9 +76,9 @@ chart-push:
 # Install Flux and the platform into the dev cluster from the dev registry. The working copy's
 # platform and chart are pushed first: a reset cluster comes with an empty registry.
 init-cluster *flags: platform-push chart-push
-    go run ./cmd/shelf init cluster --insecure-registry \
-      --platform oci://shelf-registry:5000/shelf/platform:dev \
-      --chart oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
+    go run ./cmd/shelf init cluster --insecure-registry --signer-key .local/cosign/cosign.pub \
+      --platform oci://shelf-registry.local:5000/shelf/platform:dev \
+      --chart oci://shelf-registry.local:5000/shelf/charts/shelf-app:0.0.0-dev {{flags}}
 
 # Run the admin UI against the dev cluster. The devcontainer forwards 8080, so the browser on
 # the Mac reaches it at http://localhost:8080; the setup code is printed on the first start.
@@ -108,6 +108,10 @@ smoke-agent:
 # Phase 10: two branches as isolated previews, open --preview, data kept, limit, removal, RAM and times
 smoke-previews:
     hack/smoke/previews.sh
+
+# Phase 11: signed and scanned is verified, admission of built images, previews, no scan, unsigned refused
+smoke-verify:
+    hack/smoke/verify.sh
 
 # Phase 8b acceptance: expose an app through its own Cloudflare tunnel (asks for the API token)
 smoke-expose app domain:

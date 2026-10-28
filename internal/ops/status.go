@@ -30,6 +30,51 @@ type App struct {
 	// Components is what the app is made of, filled by App but not by Apps: a list of apps
 	// does not need it, and it costs a read per app.
 	Components []Component `json:"components,omitempty"`
+	// Verification says whether the app runs what the cluster's signer signed and CI scanned,
+	// filled by App and Preview but not by Apps.
+	Verification *Verification `json:"verification,omitempty"`
+}
+
+// Verification is the chain of an app or a preview from the commit to what runs, and whether
+// it may be exposed.
+type Verification struct {
+	cluster.Verification
+	// Signer is who the cluster expects to have signed what it runs.
+	Signer string
+	// Exposable is whether the app may get a tunnel. A preview never may.
+	Exposable bool
+	// Hint is what to do when it is not verified.
+	Hint string
+}
+
+// verify reads the verification of an app or a preview, by its namespace.
+func (o *Ops) verify(ctx context.Context, name string, settings cluster.Settings, preview bool) (*Verification, error) {
+	v, err := o.Cluster.AppVerification(ctx, o.config(), name)
+	if err != nil {
+		return nil, err
+	}
+	out := &Verification{Verification: v, Signer: settings.Signer.String(), Exposable: v.Verified && !preview}
+	if settings.Signer.IsZero() {
+		out.Signer = "none: the cluster was installed before shelf verified anything"
+	}
+	if !v.Verified {
+		out.Hint = verificationHint(v.Reason)
+	}
+	return out, nil
+}
+
+// verificationHint is what to do about the first thing verification found missing.
+func verificationHint(reason string) string {
+	switch {
+	case strings.Contains(reason, "does not run the verified deploy artifact yet"):
+		return "wait for the rollout to finish"
+	case strings.Contains(reason, "cluster does not verify"):
+		return "install the current platform with `shelf init cluster`"
+	case strings.Contains(reason, "chart"):
+		return "install a released platform and chart with `shelf init cluster`"
+	}
+	return "push again with the current reusable workflow, which signs and scans every build " +
+		"(the caller's deploy.yml needs `id-token: write`)"
 }
 
 // Component is one part of an app together with the address it answers at.
@@ -95,8 +140,12 @@ func (o *Ops) Apps(ctx context.Context) ([]App, error) {
 	return apps, nil
 }
 
-// App returns one app with its state and its address.
+// App returns one app with its state, its address, its components and its verification.
 func (o *Ops) App(ctx context.Context, name string) (App, error) {
+	settings, err := o.Cluster.Settings(ctx, o.config())
+	if err != nil {
+		return App{}, err
+	}
 	apps, err := o.Apps(ctx)
 	if err != nil {
 		return App{}, err
@@ -118,6 +167,9 @@ func (o *Ops) App(ctx context.Context, name string) (App, error) {
 		}
 		a.CloudflareMissing = a.Cloudflare != "" && conn == nil
 		a.Components = components(list, a.Host, a.URL != "")
+		if a.Verification, err = o.verify(ctx, name, settings, false); err != nil {
+			return App{}, err
+		}
 		return a, nil
 	}
 	return App{}, &NotFoundError{Name: name}

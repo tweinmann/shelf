@@ -1,0 +1,22 @@
+{
+  "apiVersion": "shelf.dev/v1alpha1",
+  "kind": "AppStatus",
+  "name": "hello",
+  "phase": "Ready",
+  "host": "hello.shelf.internal",
+  "artifact": ":",
+  "exposure": {
+    "kind": "none"
+  },
+  "revision": "main@sha256:abc",
+  "components": [],
+  "stages": [],
+  "verification": {
+    "verified": false,
+    "reason": "the deploy artifact is not signed by the cluster's signer: no matching signatures were found",
+    "hint": "push again with the current reusable workflow, which signs and scans every build (the caller's deploy.yml needs `id-token: write`)",
+    "source": "https://github.com/acme/hello",
+    "signer": "keyless, issuer https://token.actions.githubusercontent.com, subject ^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$",
+    "exposable": false
+  }
+}

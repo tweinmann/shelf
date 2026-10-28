@@ -53,6 +53,13 @@ func (o *Ops) Preview(ctx context.Context, name, branch string) (App, error) {
 			return App{}, err
 		}
 		preview.Components = components(list, preview.Host, false)
+		settings, err := o.Cluster.Settings(ctx, o.config())
+		if err != nil {
+			return App{}, err
+		}
+		if preview.Verification, err = o.verify(ctx, p.Name, settings, true); err != nil {
+			return App{}, err
+		}
 		return preview, nil
 	}
 	missing := &PreviewNotFoundError{App: name, Branch: branch, Off: a.PreviewLimit == 0}

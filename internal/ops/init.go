@@ -24,7 +24,9 @@ type InitOptions struct {
 	// name. Without it such a change is refused, because it silently takes those apps off the
 	// name they answer under.
 	MoveHosts bool
-	Timeout   time.Duration
+	// Signer is who must have signed every artifact and built image the cluster runs.
+	Signer  cluster.Signer
+	Timeout time.Duration
 }
 
 // HostsMoveError is returned when an installation would rename every app and was not asked to.
@@ -63,6 +65,8 @@ type InitPlan struct {
 	Chart    cluster.Artifact
 	// Hosts is the pattern the apps with a domain answer under, such as <app>-dev.<domain>.
 	Hosts string
+	// Signer is who the cluster will expect to have signed what it runs.
+	Signer cluster.Signer
 }
 
 // CheckDomain rejects a domain that cannot carry host names. The message has no leading field
@@ -117,7 +121,29 @@ func (o *Ops) PlanCluster(opts InitOptions) InitPlan {
 		Platform: opts.Platform,
 		Chart:    opts.Chart,
 		Hosts:    Hosts(opts.HostSuffix),
+		Signer:   opts.Signer,
 	}
+}
+
+// UnverifiedApps returns the apps whose running deploy artifact is not verified, so that an
+// upgrade to a platform that verifies can say which of them get no new deploys until they were
+// built once with the current workflow. A cluster without shelf has none.
+func (o *Ops) UnverifiedApps(ctx context.Context) ([]string, error) {
+	states, err := o.Cluster.AppStates(ctx, o.config())
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, s := range states {
+		v, err := o.Cluster.AppVerification(ctx, o.config(), s.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !v.Verified {
+			out = append(out, s.Name)
+		}
+	}
+	return out, nil
 }
 
 // InitCluster installs Flux and the platform and waits until everything is ready. A cluster
@@ -132,6 +158,9 @@ func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Re
 	if PublicDomain(before.LegacyDomain) {
 		pin = before.LegacyDomain
 	}
+	if err := opts.Signer.Check(); err != nil {
+		return fmt.Errorf("signer: %w", err)
+	}
 	if err := o.checkHostsStay(ctx, opts, before, pin); err != nil {
 		return err
 	}
@@ -142,6 +171,7 @@ func (o *Ops) InitCluster(ctx context.Context, opts InitOptions, rep progress.Re
 			HostSuffix:       opts.HostSuffix,
 			Chart:            opts.Chart,
 			InsecureRegistry: opts.Insecure,
+			Signer:           opts.Signer,
 		},
 		Timeout: opts.Timeout,
 		Report:  rep,

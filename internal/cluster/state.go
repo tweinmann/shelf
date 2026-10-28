@@ -15,7 +15,10 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-var podGVK = schema.GroupVersionKind{Version: "v1", Kind: "Pod"}
+var (
+	podGVK   = schema.GroupVersionKind{Version: "v1", Kind: "Pod"}
+	eventGVK = schema.GroupVersionKind{Version: "v1", Kind: "Event"}
+)
 
 // Phase is how far an app, or one step towards it, has got.
 type Phase string
@@ -119,6 +122,9 @@ type appObjects struct {
 	chart         *unstructured.Unstructured
 	release       *unstructured.Unstructured
 	pods          []*unstructured.Unstructured
+	// refusals are the FailedCreate events in the namespace: a pod the API server did not
+	// create, because the admission webhook or a quota refused it, never shows up as a pod.
+	refusals []*unstructured.Unstructured
 }
 
 // NotFoundError means there is no app, or no preview, of that name in the cluster.
@@ -130,7 +136,7 @@ func (e *NotFoundError) Error() string { return "app " + e.Name + " does not exi
 func (o *appObjects) isApp() bool { return o.provider != nil }
 
 // AppStates returns every registered app with its current state and its previews. It reads the
-// whole cluster in eight list calls, however many apps and previews there are, plus two for each
+// whole cluster in nine list calls, however many apps and previews there are, plus two for each
 // app with a quick tunnel.
 func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	c, err := newClient(cfg)
@@ -245,6 +251,15 @@ func (c *client) appObjects(ctx context.Context) (map[string]*appObjects, error)
 			app.pods = append(app.pods, p)
 		}
 	}
+	refusals, err := c.listFields(ctx, eventGVK, "reason=FailedCreate")
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range refusals {
+		if app, ok := apps[e.GetNamespace()]; ok {
+			app.refusals = append(app.refusals, e)
+		}
+	}
 	return apps, nil
 }
 
@@ -252,11 +267,22 @@ func (c *client) appObjects(ctx context.Context) (map[string]*appObjects, error)
 // selector every object.
 func (c *client) list(ctx context.Context, gvk schema.GroupVersionKind, namespace, selector string) (
 	[]*unstructured.Unstructured, error) {
+	return c.listWith(ctx, gvk, namespace, metav1.ListOptions{LabelSelector: selector})
+}
+
+// listFields returns the objects of a kind in every namespace that match a field selector.
+func (c *client) listFields(ctx context.Context, gvk schema.GroupVersionKind, selector string) (
+	[]*unstructured.Unstructured, error) {
+	return c.listWith(ctx, gvk, "", metav1.ListOptions{FieldSelector: selector})
+}
+
+func (c *client) listWith(ctx context.Context, gvk schema.GroupVersionKind, namespace string, opts metav1.ListOptions) (
+	[]*unstructured.Unstructured, error) {
 	ri, err := c.resource(gvk, namespace)
 	if err != nil {
 		return nil, err
 	}
-	list, err := ri.List(ctx, metav1.ListOptions{LabelSelector: selector})
+	list, err := ri.List(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("listing %s: %w", gvk.Kind, err)
 	}
@@ -352,7 +378,7 @@ func diagnose(name string, o *appObjects) Diagnosis {
 			"the platform has not created the app yet",
 			"the app.yaml was rendered but the release did not succeed"),
 	)
-	d.Stages = append(d.Stages, podStage(o.pods))
+	d.Stages = append(d.Stages, podStage(o.pods, o.refusals))
 	return d
 }
 
@@ -394,6 +420,15 @@ func fluxStage(name, object string, obj *unstructured.Unstructured, missing, fai
 				s.Hint = "the registry refused to hand out the deploy artifact; " + registryHint(app)
 			}
 		}
+		// Flux fetched the artifact but its signature is not the cluster's signer's.
+		if s.Reason == "VerificationError" {
+			if strings.HasSuffix(s.Object, "/"+chartName) {
+				s.Hint = "the chart is not signed by the cluster's signer; install a released platform and chart"
+			} else {
+				s.Hint = "the deploy artifact is not signed by the cluster's signer; push again with the " +
+					"current workflow, which signs it (its caller needs `id-token: write`)"
+			}
+		}
 	}
 	return s
 }
@@ -405,9 +440,20 @@ func working(reason string) bool {
 }
 
 // podStage looks at the pods the chart created, because a release can succeed while the
-// container it starts does not run at all.
-func podStage(pods []*unstructured.Unstructured) Stage {
+// container it starts does not run at all, or never gets a pod: a refusal newer than every pod
+// means a workload is still being refused. An older one was about a pod that exists by now.
+func podStage(pods, refusals []*unstructured.Unstructured) Stage {
 	s := Stage{Name: "the pods", Object: "Pods"}
+	if refused := currentRefusal(pods, refusals); refused != nil {
+		involved, _, _ := unstructured.NestedMap(refused.Object, "involvedObject")
+		kind, _ := involved["kind"].(string)
+		name, _ := involved["name"].(string)
+		message, _, _ := unstructured.NestedString(refused.Object, "message")
+		return Stage{
+			Name: "the pods", Object: kind + " " + refused.GetNamespace() + "/" + name,
+			Phase: PhaseFailed, Reason: "FailedCreate", Message: message, Hint: podHint("FailedCreate", message),
+		}
+	}
 	if len(pods) == 0 {
 		s.Phase, s.Message = PhaseMissing, "no pods yet"
 		return s
@@ -484,6 +530,15 @@ var missingSecret = regexp.MustCompile(`couldn't find key (\S+) in Secret \S+/` 
 
 func podHint(reason, message string) string {
 	switch reason {
+	case "FailedCreate":
+		switch {
+		case strings.Contains(message, "policy.sigstore.dev"):
+			return "a built image is not signed by the cluster's signer; push again, so that the " +
+				"reusable workflow builds and signs it"
+		case strings.Contains(message, "exceeded quota"):
+			return "the preview's quota is used up; give the components fewer resources, or fewer instances"
+		}
+		return "the workload cannot create its pods; the message says why"
 	case "ImagePullBackOff", "ErrImagePull":
 		return "the image cannot be pulled; check the reference and whether the cluster may read that registry"
 	case "CrashLoopBackOff":
@@ -498,6 +553,28 @@ func podHint(reason, message string) string {
 		return "the container cannot be configured, usually a missing secret or config map"
 	}
 	return ""
+}
+
+// currentRefusal returns the newest refusal that no pod came after, or nil.
+func currentRefusal(pods, refusals []*unstructured.Unstructured) *unstructured.Unstructured {
+	var newestPod string
+	for _, p := range pods {
+		if created := p.GetCreationTimestamp().UTC().Format(time.RFC3339); created > newestPod {
+			newestPod = created
+		}
+	}
+	var found *unstructured.Unstructured
+	var foundAt string
+	for _, e := range refusals {
+		at, _, _ := unstructured.NestedString(e.Object, "lastTimestamp")
+		if at == "" {
+			at, _, _ = unstructured.NestedString(e.Object, "eventTime")
+		}
+		if at > newestPod && at > foundAt {
+			found, foundAt = e, at
+		}
+	}
+	return found
 }
 
 // nested returns a nested map, e.g. state.waiting.

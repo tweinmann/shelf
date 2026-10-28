@@ -54,16 +54,14 @@ step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
+shelf init cluster --yes --signer-key "$SHELF_SIGNER_PUB" --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" >/dev/null
 
 step "publish examples/hello"
 mkdir -p "$work/v1"
 (cd "$repo" && go run ./cmd/shelf render examples/hello/app.yaml) >"$work/v1/configmap.yaml" 2>/dev/null
-flux push artifact "$artifact:main" --path "$work/v1" --source local \
-  --revision "main@sha1:$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
-  --insecure-registry >/dev/null 2>&1 || die "push failed"
+push_artifact "$artifact:main" "$work/v1" "main@sha1:$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')" >/dev/null
 
 step "shelf app add --quick gives the app a quick tunnel"
 start=$SECONDS

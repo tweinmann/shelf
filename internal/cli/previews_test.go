@@ -141,7 +141,8 @@ func TestStatusOfOnePreview(t *testing.T) {
 	h := previewHarness(t)
 	stdout := h.mustRun(t, "app", "status", "hello", "--preview", "feature/login")
 	for _, want := range []string{"hello--feature-login: Ready", "address   hello--feature-login.shelf.internal",
-		"artifact  oci://ghcr.io/o/hello:branch-feature-login", "commit    3f2a9c1e5b7d"} {
+		"artifact  oci://ghcr.io/o/hello:branch-feature-login", "commit    3f2a9c1e5b7d",
+		"verified  yes", "exposure  never: a preview stays inside the cluster"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}

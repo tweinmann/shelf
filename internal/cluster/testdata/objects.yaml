@@ -12,10 +12,36 @@ data:
   SHELF_CHART_URL: oci://shelf-registry:5000/shelf/charts/shelf-app
   SHELF_HOST_SUFFIX: ""
   SHELF_INSECURE_REGISTRY: "true"
+  SHELF_SIGNER_AUTHORITY: '{"ctlog":{"url":"https://rekor.sigstore.dev"},"keyless":{"identities":[{"issuer":"https://token.actions.githubusercontent.com","subjectRegExp":"^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$"}],"url":"https://fulcio.sigstore.dev"}}'
+  SHELF_SIGNER_ISSUER: https://token.actions.githubusercontent.com
+  SHELF_SIGNER_KEY: ""
+  SHELF_SIGNER_MODE: keyless
+  SHELF_SIGNER_SUBJECT: ^https://github\.com/tweinmann/shelf/\.github/workflows/(build|release)\.yml@refs/(tags|heads)/.+$
+  SHELF_SIGNER_VERIFY: '{"matchOIDCIdentity":[{"issuer":"^https://token\\.actions\\.githubusercontent\\.com$","subject":"^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$"}],"provider":"cosign"}'
 kind: ConfigMap
 metadata:
   name: shelf-config
   namespace: flux-system
+---
+apiVersion: v1
+data: {}
+kind: Secret
+metadata:
+  labels:
+    reconcile.fluxcd.io/watch: Enabled
+  name: signer-key
+  namespace: shelf-system
+type: Opaque
+---
+apiVersion: v1
+data: {}
+kind: Secret
+metadata:
+  labels:
+    reconcile.fluxcd.io/watch: Enabled
+  name: shelf-signer
+  namespace: flux-system
+type: Opaque
 ---
 apiVersion: v1
 data:

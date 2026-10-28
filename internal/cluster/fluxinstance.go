@@ -63,9 +63,15 @@ const syncKustomizationPatch = `- op: add
 `
 
 // FluxInstance returns the FluxInstance that installs Flux and syncs the platform. insecure
-// allows a platform registry without TLS.
-func FluxInstance(platform Artifact, insecure bool) *unstructured.Unstructured {
-	patches := []any{jsonPatch("Kustomization", PlatformSyncName, syncKustomizationPatch)}
+// allows a platform registry without TLS. The platform artifact is verified against signer
+// before Flux applies it.
+func FluxInstance(platform Artifact, insecure bool, signer Signer) *unstructured.Unstructured {
+	patches := []any{
+		jsonPatch("Kustomization", PlatformSyncName, syncKustomizationPatch),
+		// spec.sync has no field for verification either.
+		jsonPatch("OCIRepository", PlatformSyncName,
+			"- op: add\n  path: /spec/verify\n  value: "+compactJSON(signer.verify(SignerSecretName))+"\n"),
+	}
 	if insecure {
 		// spec.sync has no field for registries without TLS.
 		patches = append(patches,

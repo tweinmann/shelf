@@ -38,8 +38,7 @@ commit() { head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 # publish <tag> <commit>: pushes examples/hello as the deploy artifact under tag, built from
 # commit.
 publish() {
-  flux push artifact "$artifact:$1" --path "$work/hello" --source local --revision "$1@sha1:$2" \
-    --insecure-registry >/dev/null 2>&1 || die "push of $1 failed"
+  push_artifact "$artifact:$1" "$work/hello" "$1@sha1:$2" >/dev/null
 }
 
 # unpublish <tag>: deletes a tag from the dev registry, as build.yml does on GHCR for a deleted
@@ -82,11 +81,16 @@ for leftover in "namespace/$app" "-n shelf-system resourcesetinputprovider/$app"
 done
 trap cleanup EXIT
 
+# Branch tags a run that failed left behind would be previews from the start.
+for tag in $(crane ls --insecure "${artifact#oci://}" 2>/dev/null | grep '^branch-' || true); do
+  unpublish "$tag"
+done
+
 step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
+shelf init cluster --yes --signer-key "$SHELF_SIGNER_PUB" --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" >/dev/null
 kubectl -n shelf-system get resourceset previews >/dev/null || die "the platform has no ResourceSet previews"
@@ -146,7 +150,8 @@ kubectl top pods -n "$app" --no-headers | awk '{sub("Mi","",$3); sum+=$3} END {p
 
 step "the limit holds"
 publish branch-gamma "$(commit)"
-for _ in $(seq 60); do
+# Up to three minutes: the evicted preview's release and volume are removed first.
+for _ in $(seq 90); do
   [[ "$(kubectl get namespace -l "shelf.dev/app=$app,shelf.dev/preview" --no-headers 2>/dev/null | wc -l)" == 2 ]] \
     && kubectl get namespace "$app--gamma" >/dev/null 2>&1 && break
   sleep 2

@@ -134,6 +134,11 @@ Next: Phase 11 (verification chain).
 - Exposure is an operator decision, made with `shelf app add` / `shelf app credentials` (CLI or
   UI, audit-logged) and never part of `app.yaml`. A tenant repository, and so an agent working in
   it, cannot make its app public.
+- Only a verified digest goes beyond a preview: `--cloudflare` and `--quick` refuse an app that
+  has no tunnel yet unless its running deploy artifact and chart are signed by the cluster's
+  signer and the artifact's scan covers every image (`ops.AddApp`, CLI and UI alike). There is
+  no setting that turns verification off. A signature proves that shelf's workflow built the
+  artifact; which tenant built it follows from who may write to the registry path.
 - Agent-facing commands offer `--json` with stable fields, so an agent never parses text written
   for people.
 - The runtime output depends on no shelf-specific CRD: what runs in the cluster is Flux, Helm and
@@ -166,14 +171,14 @@ it there when it belongs to one smoke test.
 | `just test` | devcontainer | level-1 checks, same as CI (gofmt, vet, `go test -race`, helm lint, kubeconform, examples) |
 | `just golden` | devcontainer | rewrite golden files and `schema/app.schema.json` after an intended change |
 | `just build` | devcontainer | build `bin/shelf` (linux) |
-| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry:5000` (added to `/etc/hosts`, deletes enabled), write kubeconfig (run after every container restart or rebuild) |
+| `just cluster-up` | devcontainer | create or start k3d cluster `shelf-dev` with its registry `shelf-registry.local:5000` (added to `/etc/hosts`, deletes enabled; the `.local` name lets the policy-controller read it over HTTP), create the dev signer key pair under `.local/cosign/` once, write kubeconfig (run after every container restart or rebuild) |
 | `just cluster-stop` | devcontainer | stop the cluster to free memory |
 | `just cluster-down` | devcontainer | delete the cluster |
 | `just cluster-reset` | devcontainer | delete and recreate the cluster |
-| `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry:5000/shelf/platform:dev` |
-| `just chart-push` | devcontainer | push the chart as `oci://shelf-registry:5000/shelf/charts/shelf-app:0.0.0-dev` |
+| `just platform-push` | devcontainer | push `platform/` to the dev registry as `oci://shelf-registry.local:5000/shelf/platform:dev` |
+| `just chart-push` | devcontainer | push the chart as `oci://shelf-registry.local:5000/shelf/charts/shelf-app:0.0.0-dev` |
 | `just serve` | devcontainer | run the admin UI against the dev cluster on port 8080 (forwarded to the Mac's browser); prints the setup code on the first start |
-| `just init-cluster [--yes]` | devcontainer | push the working copy's platform and chart, then `shelf init cluster` against the dev cluster with them (pass `--host-suffix -dev` if the cluster has one) |
+| `just init-cluster [--yes]` | devcontainer | push the working copy's platform and chart, signed with the dev key, then `shelf init cluster --signer-key .local/cosign/cosign.pub` against the dev cluster with them (pass `--host-suffix -dev` if the cluster has one) |
 | `just flux-operator-update <version>` | devcontainer | replace the embedded Flux Operator manifest |
 | `just smoke-secrets` | devcontainer | check `$(VAR)` expansion from `secretKeyRef` |
 | `just smoke-registry <image>` | devcontainer | check a private GHCR pull via `imagePullSecret` |
@@ -182,7 +187,8 @@ it there when it belongs to one smoke test.
 | `just smoke-apps` | devcontainer | Phase 4: `shelf app add`/`rm`, rollout by polling, tampered artifact refused, restore from backup (needs network) |
 | `just smoke-agent` | devcontainer | Phase 9: `--json` documents, `--wait --commit` (Ready only after the commit rolled out, Failed for an image that cannot be pulled, TimedOut for a commit that never arrives; with `SMOKE_FULL=1`, the default, also Ready again for a fix after a failure, which takes about 5 more minutes because Helm times out the broken upgrade first) and `shelf app open` with the app's Host and `stripPrefix` (needs Docker Hub) |
 | `just smoke-previews` | devcontainer | Phase 10: `examples/hello` with `--previews=2`; two branch tags run as isolated previews with their own database, volume and password; `open --preview`; a new commit keeps the data; the limit holds; a deleted tag removes its preview; `--no-previews` keeps the app; prints push-to-Ready times and RAM per preview (needs Docker Hub) |
-| `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; asks for the GHCR login, waits for a push |
+| `just smoke-verify` | devcontainer | Phase 11: a signed and scanned artifact with a signed built image is verified and exposable; the admission policy admits it and denies an unsigned image, in the app's and a preview's namespace; a preview is verified; an artifact without a scan runs but is not verified; an unsigned artifact is not applied and the wait fails with a hint; `rm` removes the image policy; prints the policy-controller's RAM (needs Docker Hub) |
+| `just smoke-tenant <app> <artifact>` | devcontainer | Phase 4 acceptance with a real tenant repo and GHCR; installs a released platform and chart (`SHELF_RELEASE`, default the newest tag, v0.8.0 or later) with keyless verification, since the tenant's artifacts are signed keyless; asks for the GHCR login, waits for a push |
 | `just smoke-expose <app> <domain>` | devcontainer | Phase 8b acceptance: the app gets the Cloudflare connection `smoke`, its own tunnel, DNS record and HTTPS, then is taken off again; asks for the Cloudflare API token (set `CF_ACCOUNT_ID` if it sees several accounts); needs a cluster with a host suffix |
 | `just smoke-quick [app]` | devcontainer | Phase 8d acceptance: `examples/hello` as `hello-quick` with `--quick` gets a quick tunnel, answers with its own Host, gets a new name after a restart, `--private`/`--quick`, rm; keeps the cluster's host suffix; opens a public trycloudflare.com tunnel for a few minutes |
 | `openspec validate --all --strict` | devcontainer | check specs and active changes (part of `just test`) |
@@ -218,6 +224,10 @@ it there when it belongs to one smoke test.
   record by anything but its exact name, and never one without the `-dev` suffix.
 - `shelf app rm` deletes an app's volumes; never run it against an app you did not create in
   this session.
+- The dev signer key under `.local/cosign/` signs artifacts and images in the dev registry only,
+  without a transparency log; it never leaves the devcontainer and never signs anything pushed
+  to GHCR. A cluster installed with `--signer-key` accepts nothing else, so never install a
+  cluster that serves real apps with it.
 - A quick tunnel puts an app on the internet without any account. Only `smoke-quick` passes
   `--quick`; never give an app you did not create a quick tunnel.
 - `shelf init cluster` with a different `--host-suffix` moves every app with a domain to another
@@ -279,6 +289,16 @@ it there when it belongs to one smoke test.
   structs of `ops` or `cluster`: `apiVersion` `shelf.dev/v1alpha1`, a `kind`, empty fields left
   out rather than null, one golden file per kind in `internal/cli/testdata/json`. Within a version
   fields are only added; a failing command prints an `Error` document
+- Verification: the cluster settings carry the signer (`SHELF_SIGNER_*`, keyless by default with
+  shelf's `build.yml`/`release.yml` as subject, or a key in `shelf-system/signer-key`, copied as
+  `shelf-signer` into app and preview namespaces); the platform renders `verify` on every
+  OCIRepository from `SHELF_SIGNER_VERIFY` and a ClusterImagePolicy `shelf-<app>` for
+  `<registry>/<package>/**` from `SHELF_SIGNER_AUTHORITY`, and labels app and preview namespaces
+  `policy.sigstore.dev/include`. Signatures use cosign's classic format
+  (`--new-bundle-format=false`), the only one the policy-controller reads. The scan summary is
+  the deploy artifact's annotation `dev.shelf.scan` (per image digest the CRITICAL and HIGH
+  counts), written before the artifact is signed. What "verified" means is decided in
+  `cluster.verification` alone
 - Which values a Helm release holds is decided by its `configDigest`, which `cluster.ConfigDigest`
   computes as helm-controller does, never by timestamps: after a failed upgrade, its failure and
   its rollback are both newer than the values that replaced it

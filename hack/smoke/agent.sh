@@ -44,8 +44,7 @@ commit() { head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 # publish <dir> <commit>: pushes the files in dir as the deploy artifact, tag main, built from
 # commit, and asks Flux to fetch it once the app exists.
 publish() {
-  flux push artifact "$artifact:main" --path "$1" --source local --revision "main@sha1:$2" \
-    --insecure-registry >/dev/null 2>&1 || die "push failed"
+  push_artifact "$artifact:main" "$1" "main@sha1:$2" >/dev/null
   kubectl -n "$app" annotate ocirepository deploy --overwrite \
     "reconcile.fluxcd.io/requestedAt=$(date +%s%N)" >/dev/null 2>&1 || true
 }
@@ -71,7 +70,7 @@ step "build shelf, push platform and chart, init cluster"
 (cd "$repo" && go build -o "$work/shelf" ./cmd/shelf)
 "$repo/hack/platform-push.sh" >/dev/null 2>&1
 "$repo/hack/chart-push.sh" >/dev/null 2>&1
-shelf init cluster --yes --host-suffix "$(cluster_host_suffix)" --insecure-registry \
+shelf init cluster --yes --signer-key "$SHELF_SIGNER_PUB" --host-suffix "$(cluster_host_suffix)" --insecure-registry \
   --platform "oci://$SHELF_REGISTRY_HOST/shelf/platform:dev" \
   --chart "oci://$SHELF_REGISTRY_HOST/shelf/charts/shelf-app:0.0.0-dev" >/dev/null
 

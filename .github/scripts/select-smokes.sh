@@ -7,7 +7,7 @@
 # reason to skip.
 set -euo pipefail
 
-all=(smoke-secrets smoke-chart smoke-init smoke-apps smoke-agent smoke-previews)
+all=(smoke-secrets smoke-chart smoke-init smoke-apps smoke-agent smoke-previews smoke-verify)
 declare -A need=()
 
 for_path() {
@@ -26,8 +26,9 @@ for_path() {
     hack/smoke/agent.* | internal/cli/json* | internal/cli/open* | internal/cli/wait* | internal/cli/tenant_test.go)
       echo smoke-agent ;;
     hack/smoke/previews.sh | internal/cli/previews* | internal/ops/previews*) echo smoke-previews ;;
+    hack/smoke/verify.sh | internal/cli/verification*) echo smoke-verify ;;
     internal/cli/* | internal/ops/* | internal/progress/* | internal/secrets/* | internal/hostcfg/*)
-      echo smoke-apps smoke-agent smoke-previews ;;
+      echo smoke-apps smoke-agent smoke-previews smoke-verify ;;
     *) echo "${all[@]}" ;;
   esac
 }

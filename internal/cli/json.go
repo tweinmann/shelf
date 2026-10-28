@@ -136,6 +136,33 @@ type appStatusDocument struct {
 	Previews            []previewDocument `json:"previews,omitempty"`
 	PreviewLimit        int               `json:"previewLimit,omitempty"`
 	PreviewLimitReached *bool             `json:"previewLimitReached,omitempty"`
+	// Verification is whether the app runs what the cluster's signer signed and CI scanned.
+	Verification *verificationDocument `json:"verification,omitempty"`
+}
+
+type verificationDocument struct {
+	Verified bool `json:"verified"`
+	// Reason is the first thing that does not hold, and Hint what to do; both only when not
+	// verified.
+	Reason string `json:"reason,omitempty"`
+	Hint   string `json:"hint,omitempty"`
+	Source string `json:"source,omitempty"`
+	Signer string `json:"signer"`
+	// Exposable is whether the app may get a tunnel; never for a preview.
+	Exposable bool `json:"exposable"`
+	// Scan is one entry per component, left out when the artifact has no scan summary.
+	Scan []scanDocument `json:"scan,omitempty"`
+}
+
+type scanDocument struct {
+	Component string `json:"component"`
+	Digest    string `json:"digest,omitempty"`
+	// Scanned is false when the summary does not name the component's image.
+	Scanned   bool   `json:"scanned"`
+	Critical  int    `json:"critical"`
+	High      int    `json:"high"`
+	Scanner   string `json:"scanner,omitempty"`
+	ScannedAt string `json:"scannedAt,omitempty"`
 }
 
 type waitResultDocument struct {
@@ -248,6 +275,17 @@ func appStatus(a ops.App, d cluster.Diagnosis) appStatusDocument {
 		doc.Components = append(doc.Components, componentDocument{
 			Name: c.Name, Phase: c.Phase, Path: c.Path, Address: c.Address, URL: c.URL, Internal: c.Internal,
 		})
+	}
+	if v := a.Verification; v != nil {
+		doc.Verification = &verificationDocument{Verified: v.Verified, Reason: v.Reason, Hint: v.Hint,
+			Source: v.Source, Signer: v.Signer, Exposable: v.Exposable}
+		if v.Scan != nil {
+			for _, img := range v.Scan.Images {
+				doc.Verification.Scan = append(doc.Verification.Scan, scanDocument{Component: img.Component,
+					Digest: img.Digest, Scanned: img.Scanned, Critical: img.Critical, High: img.High,
+					Scanner: v.Scan.Scanner, ScannedAt: v.Scan.ScannedAt})
+			}
+		}
 	}
 	return doc
 }
