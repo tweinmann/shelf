@@ -69,6 +69,43 @@ func TestBuildPlanWithoutBuilds(t *testing.T) {
 	}
 }
 
+// A built test comes after the components, so the workflow builds and pushes it as
+// <package>/<test> like a component.
+func TestBuildPlanWithTests(t *testing.T) {
+	file := writeApp(t, `apiVersion: shelf.dev/v1alpha1
+name: shop
+components:
+  web: { build: ./web, port: 8080 }
+tests:
+  e2e: { build: ./e2e }
+  smoke: { image: curlimages/curl:8.10.1 }
+`, "web", "e2e")
+	stdout, stderr, code := run(t, "build-plan", file)
+	if code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr)
+	}
+	var plan buildPlan
+	if err := json.Unmarshal([]byte(stdout), &plan); err != nil {
+		t.Fatalf("%v: %s", err, stdout)
+	}
+	dir := filepath.Dir(file)
+	want := []buildItem{{Component: "web", Context: filepath.Join(dir, "web")}, {Component: "e2e", Context: filepath.Join(dir, "e2e")}}
+	if len(plan.Builds) != 2 || plan.Builds[0] != want[0] || plan.Builds[1] != want[1] {
+		t.Errorf("plan %+v, want %+v", plan.Builds, want)
+	}
+
+	file = writeApp(t, `apiVersion: shelf.dev/v1alpha1
+name: shop
+components:
+  web: { image: nginx }
+tests:
+  e2e: { build: ./e2e }
+`)
+	if _, stderr, code := run(t, "build-plan", file); code == 0 || !strings.Contains(stderr, "test e2e: build directory") {
+		t.Errorf("exit code %d, stderr %q", code, stderr)
+	}
+}
+
 func TestBuildPlanMissingDirectory(t *testing.T) {
 	file := writeApp(t, builtApp, "web")
 	_, stderr, code := run(t, "build-plan", file)

@@ -18,5 +18,9 @@
     "source": "https://github.com/acme/hello",
     "signer": "keyless, issuer https://token.actions.githubusercontent.com, subject ^https://github\\.com/tweinmann/shelf/\\.github/workflows/(build|release)\\.yml@refs/(tags|heads)/.+$",
     "exposable": false
+  },
+  "isolation": {
+    "podSecurity": "baseline",
+    "lan": []
   }
 }

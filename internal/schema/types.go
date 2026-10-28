@@ -18,6 +18,7 @@ const SecretEnvPrefix = "SHELF_SECRET_"
 const (
 	MaxAppNameLength       = 40
 	MaxComponentNameLength = 40
+	MaxTestNameLength      = 40
 	MaxVolumeNameLength    = 40
 	MaxSecretNameLength    = 63
 )
@@ -45,6 +46,7 @@ type App struct {
 	Name       string                `yaml:"name" jsonschema_description:"Package name: the workflow publishes the deploy artifact as ghcr.io/<owner>/<name> and built images below it. Not the app's name in shelf, which is given at shelf app add."`
 	Components map[string]*Component `yaml:"components" jsonschema_description:"The containers that make up the app, by name."`
 	Secrets    map[string]*Secret    `yaml:"secrets,omitempty" jsonschema_description:"Secrets referenced as ${secrets.<name>}, by name."`
+	Tests      map[string]*Test      `yaml:"tests,omitempty" jsonschema_description:"Containers run against the app after every rollout, by name; the rollout counts only when each exits with 0."`
 }
 
 // Component is one container image with its runtime settings.
@@ -62,6 +64,20 @@ type Component struct {
 	Health    *Health            `yaml:"health,omitempty" jsonschema_description:"HTTP readiness and liveness probe."`
 	Resources *Resources         `yaml:"resources,omitempty" jsonschema_description:"Resource requests. Memory is also the limit."`
 }
+
+// Test is a container run once against the app after every rollout. It reaches the components
+// by their references, ${<component>.host} and ${<component>.port}, inside the app's namespace.
+type Test struct {
+	Image     string            `yaml:"image,omitempty" jsonschema_description:"Image reference of a ready-made image. Tags are pinned to a digest by shelf render. Mutually exclusive with build."`
+	Build     string            `yaml:"build,omitempty" jsonschema_description:"Directory with the Dockerfile of this test, relative to app.yaml. The CI builds it and shelf render pins the result. Mutually exclusive with image."`
+	Command   []string          `yaml:"command,omitempty" jsonschema_description:"Overrides the image entrypoint. Supports ${...} references; write $$ for a literal $."`
+	Args      []string          `yaml:"args,omitempty" jsonschema_description:"Overrides the image command. Supports ${...} references; write $$ for a literal $."`
+	Env       map[string]string `yaml:"env,omitempty" jsonschema_description:"Environment variables. Values support ${...} references; write $$ for a literal $."`
+	Resources *Resources        `yaml:"resources,omitempty" jsonschema_description:"Resource requests. Memory is also the limit."`
+}
+
+// IsBuilt reports whether the test's image is built from this repository.
+func (t *Test) IsBuilt() bool { return t.Build != "" }
 
 // Route exposes a component over HTTP. In app.yaml it is either a path or a mapping.
 type Route struct {

@@ -18,5 +18,15 @@ components:
       TOKEN: ${secrets.token}
     resources: { cpu: 10m, memory: 16Mi }
 
+# Runs after every rollout, against the app or a preview, inside its namespace. The rollout counts
+# only when curl exits with 0; on main a failing test brings the previous version back.
+tests:
+  smoke:
+    image: curlimages/curl:8.10.1
+    # A new pod's first connection can be refused for a moment, until the network policy knows
+    # it; --retry-connrefused waits that out, as against any service that just started.
+    args: [-fsS, --retry, "5", --retry-connrefused, --retry-delay, "1", "http://${web.host}:${web.port}/healthz"]
+    resources: { cpu: 10m, memory: 16Mi }
+
 secrets:
   token: { generate: true }

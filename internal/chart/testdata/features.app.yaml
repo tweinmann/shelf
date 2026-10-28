@@ -1,6 +1,6 @@
 # Exercises the chart paths the hello example does not: several ports, stripPrefix, probe
 # delay, secret references in command, args and env, literal $, a secret referenced only in
-# escaped form, several instances with volumes, and a StatefulSet without ports.
+# escaped form, several instances with volumes, a StatefulSet without ports, and tests.
 apiVersion: shelf.dev/v1alpha1
 name: features
 
@@ -31,6 +31,17 @@ components:
     volumes:
       cache: { path: /cache, size: 1Gi }
     resources: { cpu: 250m }
+
+tests:
+  smoke:
+    image: curlimages/curl:8.10.1
+    args: [-fsS, "http://${api.host}:${api.ports.http}/healthz"]
+  login:
+    image: ghcr.io/example/login-test:1.0
+    env:
+      TOKEN: ${secrets.api-token}
+      DB: ${db.host}:${db.port}
+    resources: { cpu: 20m, memory: 32Mi }
 
 secrets:
   api-token: { generate: true }

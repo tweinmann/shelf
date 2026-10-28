@@ -60,9 +60,18 @@ The app's name on shelf is in `CLAUDE.md` (the operator chose it; it is not `nam
    in code.
 
 5. For the whole picture, run `shelf app status <app> --json` (or with `--preview <branch>`):
-   - every stage from the deploy artifact to the pods;
+   - every stage from the deploy artifact to the pods and the tests;
    - the running `commit`, the components and their addresses;
+   - `tests`, with the exit code and the end of the log of one that failed;
    - for the app, its `previews`.
+6. When the branch has a pull request, post the report of its preview there:
+
+   ```sh
+   shelf app report <app> --preview <branch> | gh pr comment --body-file -
+   ```
+
+   It says whether the preview is Ready, how its tests went, whether it is signed and scanned,
+   and which images differ from `main`.
 
 ## What the stages mean
 
@@ -74,9 +83,20 @@ The stages, in order:
 4. `the app`: the Helm release; often a bad `app.yaml`.
 5. `the pods`: image pull, crash loop, out of memory, missing secret, a preview's quota, or a
    built image the admission policy refused because it is not signed.
+6. `the tests`: a test under `tests:` in `app.yaml` exited with something else than 0 against
+   this version. The message has its exit code and the end of its log. On `main` the previous
+   version runs again; on a branch the preview keeps the failing version, so the operator can
+   look at it. Fix the code or the test, and push again.
 
 The first stage that is not Ready is the cause; everything after it is a consequence.
 `shelf validate app.yaml` catches most app.yaml mistakes before a push.
+
+## Tests
+
+`tests:` in `app.yaml` declares containers that run against the app after every rollout, inside
+its namespace. A test reaches the components by their references, such as
+`http://${web.host}:${web.port}/`, never through a route, and passes when it exits with 0. Add
+one for what a change must not break; the wait counts the commit as Ready only once they pass.
 
 ## What you cannot do
 
@@ -84,6 +104,9 @@ The first stage that is not Ready is the cause; everything after it is a consequ
   made with `shelf app add` or `shelf app credentials` outside this repository. Nothing in
   `app.yaml` changes it, so do not try. Previews are never exposed.
 - Switch previews on or off; that is the operator's decision too.
+- Reach other apps, the operator's LAN or the Kubernetes API from the app. The app reaches its
+  own components, DNS and the internet only; anything more is the operator's decision
+  (`--allow-lan`), and a preview never gets it.
 - Read secret values. `shelf app secrets` is for the operator; a preview's secrets are its own.
 - `shelf app open <app>` (with `--preview <branch>` for a preview) makes the app reachable in a
   browser on the operator's machine. It is for the person, not for you; ask them to look if a

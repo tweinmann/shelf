@@ -407,7 +407,7 @@ components:
 		wantErr string
 	}{
 		{"no image for a built component", nil, "pass the image it was pushed as"},
-		{"image for an unknown component", map[string]string{"web": "ghcr.io/o/shop-web:main", "nope": "x"}, "no component nope"},
+		{"image for an unknown component", map[string]string{"web": "ghcr.io/o/shop-web:main", "nope": "x"}, "no component or test nope"},
 		{"image for a component with an image", map[string]string{"web": "ghcr.io/o/shop-web:main", "db": "x"}, "component db has an image"},
 	}
 	for _, tt := range tests {
@@ -417,5 +417,80 @@ components:
 				t.Fatalf("error %v, want one containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// Tests are pinned like components, with their references resolved, whether their image is
+// ready-made or built by the CI.
+func TestRenderTests(t *testing.T) {
+	const src = head + `
+components:
+  web: { image: "traefik/whoami:v1.11.0", port: 80, env: { TOKEN: "${secrets.token}" } }
+tests:
+  smoke: { image: "curlimages/curl:8.10.1", args: [-fsS, "http://${web.host}:${web.port}/"] }
+  e2e: { build: ./e2e, env: { TOKEN: "${secrets.token}", PRICE: "5$" } }
+secrets:
+  token: { generate: true }
+`
+	const e2eRef = "ghcr.io/o/shop/e2e:sha-abc1234"
+	images := fakeResolver{
+		"traefik/whoami:v1.11.0": {Digest: digest('a'), ExposedPorts: []int{80}},
+		"curlimages/curl:8.10.1": {Digest: digest('c')},
+		e2eRef:                   {Digest: digest('d')},
+	}
+	app, _ := renderApp(t, src, images, map[string]string{"e2e": e2eRef})
+
+	smoke := app.Tests["smoke"]
+	if smoke.Image != "curlimages/curl:8.10.1@"+digest('c') {
+		t.Errorf("smoke image %q", smoke.Image)
+	}
+	if got := strings.Join(smoke.Args, " "); got != "-fsS http://web:80/" {
+		t.Errorf("smoke args %q", got)
+	}
+	e2e := app.Tests["e2e"]
+	if e2e.Image != e2eRef+"@"+digest('d') || e2e.Build != "" {
+		t.Errorf("e2e image %q, build %q", e2e.Image, e2e.Build)
+	}
+	if e2e.Env["TOKEN"] != "${secrets.token}" || e2e.Env["PRICE"] != "5$$" {
+		t.Errorf("e2e env %v", e2e.Env)
+	}
+
+	// Without tests, the resolved app.yaml has none, so the values of existing apps stay as
+	// they were.
+	app, _ = renderApp(t, head+"components:\n  web: { image: \"traefik/whoami:v1.11.0\" }\n", images, nil)
+	if app.Tests != nil {
+		t.Errorf("tests %v, want none", app.Tests)
+	}
+}
+
+func TestRenderTestErrors(t *testing.T) {
+	const src = head + `
+components:
+  web: { image: postgres:16 }
+tests:
+  e2e: { build: ./e2e }
+  smoke: { image: curl }
+`
+	images := fakeResolver{"postgres:16": {Digest: digest('b')}, "curl": {Digest: digest('c')}, "e2e:1": {Digest: digest('d')}}
+	tests := []struct {
+		name    string
+		built   map[string]string
+		wantErr string
+	}{
+		{"no image for a built test", nil, "test e2e is built from ./e2e; pass the image"},
+		{"image for a test with an image", map[string]string{"e2e": "e2e:1", "smoke": "x"}, "test smoke has an image"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := Render(context.Background(), parse(t, "app.yaml", []byte(src)), images, tt.built)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %v, want one containing %q", err, tt.wantErr)
+			}
+		})
+	}
+	// An image that cannot be looked up names the test.
+	_, _, err := Render(context.Background(), parse(t, "app.yaml", []byte(src)), fakeResolver{"postgres:16": {Digest: digest('b')}, "e2e:1": {Digest: digest('d')}}, map[string]string{"e2e": "e2e:1"})
+	if err == nil || !strings.Contains(err.Error(), "test smoke") {
+		t.Errorf("error %v, want one naming test smoke", err)
 	}
 }

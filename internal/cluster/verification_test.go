@@ -145,6 +145,41 @@ func TestVerification(t *testing.T) {
 	}
 }
 
+// A test's image runs in the app's namespace like a component's, so the scan has to cover it
+// too. The values here are what the release would run; the digest stays that of verifiedValues,
+// as the rollout is not what is being checked.
+func TestVerificationCoversTests(t *testing.T) {
+	t.Parallel()
+	const testDigest = "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+	withTest := verifiedValues + "tests:\n  smoke:\n    image: curlimages/curl:8.10.1@" + testDigest + "\n"
+	o, _ := verifiedApp(t, fullScan)
+	images, err := valueImages(&unstructured.Unstructured{Object: map[string]any{"data": map[string]any{"app.yaml": withTest}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 3 || images[2].Component != "web" || images[1].Component != "smoke" || images[1].Digest != testDigest {
+		t.Errorf("images %+v, want db, smoke and web", images)
+	}
+
+	// Run the whole check with values that name the test, and a release that holds them.
+	inline := map[string]any{"name": "shop"}
+	digest, err := ConfigDigest(withTest, inline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unstructured.SetNestedSlice(o.release.Object, []any{map[string]any{"version": int64(2), "configDigest": digest}}, "status", "history")
+	values := &unstructured.Unstructured{Object: map[string]any{"data": map[string]any{"app.yaml": withTest}}}
+	if v := verification("shop", o, values); v.Verified || v.Reason != "the scan does not cover the image of smoke" {
+		t.Errorf("verified %v, reason %q", v.Verified, v.Reason)
+	}
+	covered := strings.Replace(fullScan, `"images":{`, `"images":{"`+testDigest+`":{"critical":0,"high":0},`, 1)
+	o, _ = verifiedApp(t, covered)
+	_ = unstructured.SetNestedSlice(o.release.Object, []any{map[string]any{"version": int64(2), "configDigest": digest}}, "status", "history")
+	if v := verification("shop", o, values); !v.Verified {
+		t.Errorf("not verified with the test's image scanned: %s", v.Reason)
+	}
+}
+
 func refusal(at, kind, name, message string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1", "kind": "Event",

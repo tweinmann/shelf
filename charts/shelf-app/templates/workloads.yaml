@@ -36,6 +36,7 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      {{- include "shelf-app.podSecurity" . | nindent 6 }}
       {{- with $.Values.platform.imagePullSecret }}
       imagePullSecrets:
         - name: {{ . }}
@@ -43,6 +44,7 @@ spec:
       containers:
         - name: {{ $compName }}
           image: {{ $comp.image | quote }}
+          {{- include "shelf-app.containerSecurity" . | nindent 10 }}
           {{- with $comp.command }}
           command:
             {{- range . }}

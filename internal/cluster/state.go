@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
+
+	"github.com/tweinmann/shelf/internal/render"
 )
 
 var (
@@ -55,6 +57,10 @@ type Stage struct {
 type Diagnosis struct {
 	Name   string  `json:"name"`
 	Stages []Stage `json:"stages"`
+	// Tests are the results of the app's tests for the values the release last tried.
+	Tests []TestResult `json:"tests,omitempty"`
+	// testedDigest is the configDigest those results are for, empty while there are none.
+	testedDigest string
 }
 
 // Trouble returns the first stage that is not ready, or nil when the app is healthy.
@@ -121,7 +127,11 @@ type appObjects struct {
 	kustomization *unstructured.Unstructured
 	chart         *unstructured.Unstructured
 	release       *unstructured.Unstructured
-	pods          []*unstructured.Unstructured
+	// values is the ConfigMap with the app values of the newest deploy artifact.
+	values *unstructured.Unstructured
+	pods   []*unstructured.Unstructured
+	// tests are the pods of the app's tests, kept apart from its pods.
+	tests []*unstructured.Unstructured
 	// refusals are the FailedCreate events in the namespace: a pod the API server did not
 	// create, because the admission webhook or a quota refused it, never shows up as a pod.
 	refusals []*unstructured.Unstructured
@@ -136,7 +146,7 @@ func (e *NotFoundError) Error() string { return "app " + e.Name + " does not exi
 func (o *appObjects) isApp() bool { return o.provider != nil }
 
 // AppStates returns every registered app with its current state and its previews. It reads the
-// whole cluster in nine list calls, however many apps and previews there are, plus two for each
+// whole cluster in ten list calls, however many apps and previews there are, plus two for each
 // app with a quick tunnel.
 func AppStates(ctx context.Context, cfg *rest.Config) ([]AppState, error) {
 	c, err := newClient(cfg)
@@ -190,7 +200,8 @@ func AppDiagnosis(ctx context.Context, cfg *rest.Config, app string) (Diagnosis,
 	if !ok {
 		return Diagnosis{}, &NotFoundError{Name: app}
 	}
-	return diagnose(app, objs), nil
+	d := diagnose(app, objs)
+	return d, c.addTestLogs(ctx, app, &d)
 }
 
 // appObjects collects everything that belongs to an app, in one pass over the cluster. The
@@ -247,8 +258,22 @@ func (c *client) appObjects(ctx context.Context) (map[string]*appObjects, error)
 		return nil, err
 	}
 	for _, p := range pods {
-		if app, ok := apps[p.GetNamespace()]; ok {
+		app, ok := apps[p.GetNamespace()]
+		switch {
+		case !ok:
+		case p.GetLabels()[TestLabel] != "":
+			app.tests = append(app.tests, p)
+		default:
 			app.pods = append(app.pods, p)
+		}
+	}
+	values, err := c.listFields(ctx, configMapGVK, "metadata.name="+render.ConfigMapName)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range values {
+		if app, ok := apps[v.GetNamespace()]; ok {
+			app.values = v
 		}
 	}
 	refusals, err := c.listFields(ctx, eventGVK, "reason=FailedCreate")
@@ -374,12 +399,30 @@ func diagnose(name string, o *appObjects) Diagnosis {
 		fluxStage("the chart", "OCIRepository "+name+"/"+chartName, o.chart,
 			"the platform has not created the app yet",
 			"shelf cannot read the shelf-app chart from the registry"),
-		fluxStage("the app", "HelmRelease "+name+"/"+name, o.release,
-			"the platform has not created the app yet",
-			"the app.yaml was rendered but the release did not succeed"),
+		releaseStage(name, o.release),
 	)
 	d.Stages = append(d.Stages, podStage(o.pods, o.refusals))
+	tests, results, digest := testsStage(name, o)
+	d.Stages = append(d.Stages, tests)
+	d.Tests, d.testedDigest = results, digest
 	return d
+}
+
+// releaseStage is the HelmRelease's own stage. A release whose only problem is a failed test is
+// not where the trouble lies: Helm released the values, and the tests stage after the pods says
+// what failed. On an app, helm-controller has rolled back by then, and the previous version runs.
+func releaseStage(name string, release *unstructured.Unstructured) Stage {
+	s := fluxStage("the app", "HelmRelease "+name+"/"+name, release,
+		"the platform has not created the app yet",
+		"the app.yaml was rendered but the release did not succeed")
+	if s.Phase != PhaseFailed {
+		return s
+	}
+	released, tested := condition(release, "Released"), condition(release, "TestSuccess")
+	if released != nil && released["status"] == "True" && tested != nil && tested["status"] == "False" {
+		s.Phase, s.Hint = PhaseReady, ""
+	}
+	return s
 }
 
 // fluxStage reads the Ready condition of a Flux object, which every one of them reports the
@@ -535,6 +578,9 @@ func podHint(reason, message string) string {
 		case strings.Contains(message, "policy.sigstore.dev"):
 			return "a built image is not signed by the cluster's signer; push again, so that the " +
 				"reusable workflow builds and signs it"
+		case strings.Contains(message, "violates PodSecurity"):
+			return "the pod breaks the namespace's Pod Security level baseline (privileged containers, " +
+				"host namespaces, hostPath volumes or added capabilities); shelf does not run such pods"
 		case strings.Contains(message, "exceeded quota"):
 			return "the preview's quota is used up; give the components fewer resources, or fewer instances"
 		}

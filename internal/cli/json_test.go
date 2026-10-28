@@ -15,8 +15,8 @@ import (
 
 const testCommit = "42a964eb0b4bd7248305d5f22233d6dbabcd56f3"
 
-// fiveStages is the chain of a healthy app; failing replaces the pods stage.
-func fiveStages(pods cluster.Stage) []cluster.Stage {
+// chain is the chain of a healthy app whose one test passed; failing replaces the pods stage.
+func chain(pods cluster.Stage) []cluster.Stage {
 	return []cluster.Stage{
 		{Name: "the deploy artifact", Object: "OCIRepository hello/deploy", Phase: cluster.PhaseReady,
 			Reason: "Succeeded", Message: "stored artifact for digest 'main@sha256:abc'"},
@@ -27,8 +27,11 @@ func fiveStages(pods cluster.Stage) []cluster.Stage {
 		{Name: "the app", Object: "HelmRelease hello/hello", Phase: cluster.PhaseReady,
 			Reason: "UpgradeSucceeded", Message: "Helm upgrade succeeded"},
 		pods,
+		testsPassed,
 	}
 }
+
+var testsPassed = cluster.Stage{Name: "the tests", Object: "Pods hello/hello-test-*", Phase: cluster.PhaseReady, Message: "1 passed: smoke"}
 
 var (
 	podsReady  = cluster.Stage{Name: "the pods", Object: "Pods", Phase: cluster.PhaseReady, Message: "2 running"}
@@ -107,7 +110,7 @@ func TestJSONAppStatus(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t).public()
 			h.cluster.states = []cluster.AppState{helloState(tt.phase)}
-			h.cluster.components, h.cluster.stages = components, fiveStages(tt.pods)
+			h.cluster.components, h.cluster.stages = components, chain(tt.pods)
 			goldenJSON(t, name, runJSON(t, h, 0, "app", "status", "hello"))
 		})
 	}

@@ -36,11 +36,11 @@ func settled() cluster.Rollout {
 		Diagnosis: cluster.Diagnosis{Name: "hello", Stages: []cluster.Stage{
 			stage("the deploy artifact", cluster.PhaseReady), stage("the app values", cluster.PhaseReady),
 			stage("the chart", cluster.PhaseReady), stage("the app", cluster.PhaseReady),
-			stage("the pods", cluster.PhaseReady),
+			stage("the pods", cluster.PhaseReady), stage("the tests", cluster.PhaseReady),
 		}},
 		Revision: "main@sha256:new", Commit: newCommit,
 		AppliedRevision: "main@sha256:new", AttemptedRevision: "main@sha256:new",
-		ValuesDigest: newValues, ReleasedDigest: newValues, AttemptedDigest: newValues,
+		ValuesDigest: newValues, ReleasedDigest: newValues, AttemptedDigest: newValues, TestedDigest: newValues,
 	}
 }
 
@@ -71,6 +71,28 @@ func TestVerdict(t *testing.T) {
 		contains string
 	}{
 		{name: "already Ready", rollout: settled(), done: true, outcome: ops.OutcomeReady},
+		// The tests, as seen on the dev cluster on 2026-10-28.
+		{name: "tests running", rollout: with(settled(), phase(5, cluster.PhaseWorking)),
+			stage: "the tests", phase: cluster.PhaseWorking},
+		{name: "a platform that runs no tests", rollout: with(settled(), func(r *cluster.Rollout) { r.TestedDigest = "" }),
+			done: true, outcome: ops.OutcomeReady},
+		{name: "tests passed for the previous values only", rollout: with(settled(), func(r *cluster.Rollout) { r.TestedDigest = oldValues }),
+			stage: "the tests", phase: cluster.PhaseWorking, contains: "waiting for the tests of the new values"},
+		{name: "test failed on a preview", rollout: with(settled(), phase(5, cluster.PhaseFailed)),
+			done: true, outcome: ops.OutcomeFailed, stage: "the tests", phase: cluster.PhaseFailed},
+		{name: "test failed and the app rolled back", rollout: with(settled(), func(r *cluster.Rollout) {
+			r.ReleasedDigest, r.AttemptedDigest = oldValues, newValues
+			phase(5, cluster.PhaseFailed)(r)
+		}), done: true, outcome: ops.OutcomeFailed, stage: "the tests", phase: cluster.PhaseFailed},
+		{name: "test failed while the upgrade retries", rollout: with(settled(), func(r *cluster.Rollout) {
+			r.Reconciling = true
+			phase(3, cluster.PhaseWorking)(r)
+			phase(5, cluster.PhaseFailed)(r)
+		}), done: true, outcome: ops.OutcomeFailed, stage: "the tests", phase: cluster.PhaseFailed},
+		{name: "a failed test of the previous values", rollout: with(settled(), func(r *cluster.Rollout) {
+			r.TestedDigest = oldValues
+			phase(5, cluster.PhaseFailed)(r)
+		}), stage: "the tests", phase: cluster.PhaseFailed},
 		{name: "Ready at the awaited commit", rollout: settled(), commit: "42a964e", done: true, outcome: ops.OutcomeReady},
 		{name: "full commit", rollout: settled(), commit: newCommit, done: true, outcome: ops.OutcomeReady},
 		{name: "pods starting", rollout: with(settled(), phase(4, cluster.PhaseWorking)),

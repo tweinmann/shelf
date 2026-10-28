@@ -1,5 +1,5 @@
 # The app part of the values is a resolved app.yaml, as printed by `shelf render -o app`
-# (apiVersion, name, components, secrets). Do not write it by hand: the chart relies on its
+# (apiVersion, name, components, secrets, tests). Do not write it by hand: the chart relies on its
 # normalized shape and on every literal $ being escaped as $$.
 #
 # `name` is the app's name, which is also the release namespace. The resolved app.yaml carries a
@@ -12,6 +12,7 @@ apiVersion: shelf.dev/v1alpha1
 name: ""
 components: {}
 secrets: {}
+tests: {}
 
 # Set by the platform, not by the app.
 platform:

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -208,6 +209,8 @@ func runningPlatform() *fakePlatform {
 				Public:            true,
 				URL:               "https://greeter-dev.example.com/",
 				CloudflareAccount: "acc-1",
+				Isolation: &cluster.Isolation{PodSecurity: "baseline", LAN: []string{"192.168.1.10/32"},
+					Restricted: []cluster.Violation{{Pod: "db-0", Reason: "allowPrivilegeEscalation != false, runAsNonRoot != true"}}},
 				Verification: &ops.Verification{
 					Verification: cluster.Verification{
 						Verified: true, Source: "https://github.com/tweinmann/shelf-hello",
@@ -253,6 +256,7 @@ func runningPlatform() *fakePlatform {
 				Host:              "shop-dev.shop.ch",
 				Public:            true,
 				CloudflareMissing: true,
+				Isolation:         &cluster.Isolation{PodSecurity: "baseline"},
 				Verification: &ops.Verification{
 					Verification: cluster.Verification{Reason: "the deploy artifact has no scan (dev.shelf.scan)"},
 					Signer:       "keyless, issuer https://token.actions.githubusercontent.com",
@@ -290,6 +294,7 @@ func runningPlatform() *fakePlatform {
 				{Name: "the app", Object: "HelmRelease greeter/greeter", Phase: cluster.PhaseReady,
 					Reason: "InstallSucceeded", Message: "Helm install succeeded"},
 				{Name: "the pods", Object: "Pods", Phase: cluster.PhaseReady, Message: "2 running"},
+				{Name: "the tests", Object: "Pods greeter/greeter-test-*", Phase: cluster.PhaseReady, Message: "1 passed: smoke"},
 			}},
 			"shop": {Name: "shop", Stages: []cluster.Stage{
 				{Name: "the deploy artifact", Object: "OCIRepository shop/deploy", Phase: cluster.PhaseFailed,
@@ -302,6 +307,9 @@ func runningPlatform() *fakePlatform {
 				{Name: "the app", Object: "HelmRelease shop/shop", Phase: cluster.PhaseReady,
 					Reason: "InstallSucceeded", Message: "Helm install succeeded"},
 				{Name: "the pods", Object: "Pods", Phase: cluster.PhaseReady, Message: "1 running"},
+				{Name: "the tests", Object: "Pod shop/shop-test-smoke", Phase: cluster.PhaseFailed, Reason: "TestFailed",
+					Message: "test smoke failed with exit code 22:\ncurl: (22) The requested URL returned error: 500",
+					Hint:    "the app's own test smoke fails against this version; the previous version runs again. Its log says why"},
 			}},
 		},
 	}
@@ -976,6 +984,16 @@ func TestAccessForms(t *testing.T) {
 			form: url.Values{"registry": {"ghcr"}, "cloudflare": {""}},
 			want: ops.Access{Registry: "ghcr", Private: true},
 		},
+		{
+			name: "let an app reach a NAS", path: "/apps/greeter/access",
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {"home"}, "lan": {"192.168.1.10/32, 192.168.2.0/24"}},
+			want: ops.Access{Registry: "ghcr", Cloudflare: "home", LAN: []string{"192.168.1.10/32", "192.168.2.0/24"}},
+		},
+		{
+			name: "take the LAN away", path: "/apps/greeter/access",
+			form: url.Values{"registry": {"ghcr"}, "cloudflare": {"home"}, "lan": {" "}},
+			want: ops.Access{Registry: "ghcr", Cloudflare: "home", DenyLAN: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -987,11 +1005,25 @@ func TestAccessForms(t *testing.T) {
 				t.Fatalf("status %d\n%s", rec.Code, rec.Body)
 			}
 			waitForJob(t, h, cookie, "job-1")
-			if got := platform.lastAccess(); got != tt.want {
+			if got := platform.lastAccess(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("access %+v, want %+v", got, tt.want)
 			}
 		})
 	}
+
+	t.Run("an invalid LAN range", func(t *testing.T) {
+		t.Parallel()
+		platform := runningPlatform()
+		h, cookie := claimed(t, platform)
+		form := url.Values{"registry": {"ghcr"}, "cloudflare": {"home"}, "lan": {"8.8.8.0/24"}}
+		rec := post(h, "/apps/greeter/access", withCSRF(t, h, cookie, form), cookie)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "8.8.8.0/24 is not a private range") {
+			t.Errorf("status %d\n%s", rec.Code, rec.Body)
+		}
+		if got := platform.lastAccess(); !reflect.DeepEqual(got, ops.Access{}) {
+			t.Errorf("a refused range started a change: %+v", got)
+		}
+	})
 
 	t.Run("an invalid domain", func(t *testing.T) {
 		t.Parallel()

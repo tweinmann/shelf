@@ -54,6 +54,12 @@
       "object": "Pods",
       "phase": "Ready",
       "message": "2 running"
+    },
+    {
+      "name": "the tests",
+      "object": "Pods hello/hello-test-*",
+      "phase": "Ready",
+      "message": "1 passed: smoke"
     }
   ],
   "previews": [
@@ -91,5 +97,9 @@
         "scannedAt": "2026-10-28T12:00:00Z"
       }
     ]
+  },
+  "isolation": {
+    "podSecurity": "baseline",
+    "lan": []
   }
 }

@@ -87,7 +87,7 @@ func TestRollout(t *testing.T) {
 	if !r.Reconciling {
 		t.Error("a release with Reconciling=True is not reconciling")
 	}
-	if len(r.Diagnosis.Stages) != 5 {
+	if len(r.Diagnosis.Stages) != 6 {
 		t.Errorf("stages %d", len(r.Diagnosis.Stages))
 	}
 

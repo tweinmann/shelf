@@ -64,7 +64,7 @@ func TestValidate(t *testing.T) {
 	}{
 		{"valid", []string{"validate", hello}, 0, hello + ": valid\n", ""},
 		{"warning only", []string{"validate", warning}, 0, warning + ": valid (1 warning)\n",
-			warning + ":6: warning: secrets.pw: secret \"pw\" is not referenced by any component\n"},
+			warning + ":6: warning: secrets.pw: secret \"pw\" is not referenced by any component or test\n"},
 		{"invalid", []string{"validate", invalid}, 1, invalid + ": invalid (1 error, 0 warnings)\n",
 			invalid + ":4: error: components.web.route: route needs a port; add port or ports to the component\n"},
 		{"several files, one invalid", []string{"validate", hello, invalid}, 1,

@@ -69,6 +69,9 @@ type AppOptions struct {
 	// Previews is how many branches of the app may run as previews at once; 0 switches previews
 	// off and removes the ones that run.
 	Previews int
+	// LAN are the private address ranges the app's pods may reach, as CIDRs; its previews never
+	// get them.
+	LAN []string
 	// Secrets are all secret values of the app; they replace the stored ones.
 	Secrets map[string]string
 	Timeout time.Duration
@@ -120,9 +123,19 @@ func AppProvider(o AppOptions) *unstructured.Unstructured {
 				"quick":      o.Quick,
 				"registry":   o.Registry,
 				"cloudflare": o.Cloudflare,
+				"lan":        lanInput(o.LAN),
 			},
 		},
 	}}
+}
+
+// lanInput is the LAN exceptions as an input: always a list, so the platform can range over it.
+func lanInput(lan []string) []any {
+	out := make([]any, len(lan))
+	for i, cidr := range lan {
+		out[i] = cidr
+	}
+	return out
 }
 
 // AppSecrets returns the stored secret values of an app; none if the app has no Secret yet.
@@ -215,6 +228,8 @@ type AppConfig struct {
 	Quick bool
 	// Previews is how many previews the app may have, 0 when it has none.
 	Previews int
+	// LAN are the private address ranges the app may reach, none when it has no exceptions.
+	LAN []string
 }
 
 // ReadAppConfig returns how an app is registered, or nil when there is no such app.
@@ -241,6 +256,12 @@ func ReadAppConfig(ctx context.Context, cfg *rest.Config, app string) (*AppConfi
 	config.Quick, _ = values["quick"].(bool)
 	config.Registry, _ = values["registry"].(string)
 	config.Cloudflare, _ = values["cloudflare"].(string)
+	lan, _ := values["lan"].([]any)
+	for _, cidr := range lan {
+		if s, ok := cidr.(string); ok {
+			config.LAN = append(config.LAN, s)
+		}
+	}
 
 	previews, err := c.get(ctx, ref{gvk: providerGVK, namespace: SystemNamespace, name: PreviewProviderName(app)})
 	if err != nil {

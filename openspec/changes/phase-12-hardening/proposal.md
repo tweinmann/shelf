@@ -1,45 +1,85 @@
 # Proposal
 
-> Draft. This change holds the roadmap text only and is marked `skip_specs: true`.
-> `/opsx:propose` turns it into a full change: it writes the delta specs, `design.md` and
-> `tasks.md`, revises this proposal, and removes `skip_specs` from `.openspec.yaml`.
-
 ## Why
 
-A preview runs code an agent wrote. It must not reach other apps or the home LAN, and a preview
-should count as green only when the app's own checks pass against it.
+A preview runs code an agent wrote, and since Phase 11 shelf knows that code was built by its
+workflow, but not that it behaves. Today a preview can reach every other app in the cluster, the
+home LAN and the cloud metadata address, and it counts as green as soon as its pods are ready.
+Before agents push branches unattended, a preview must be fenced in, and "green" must mean that
+the app's own checks pass against it.
 
 ## What Changes
 
-- Pod Security labels on app and preview namespaces.
-- Default-deny NetworkPolicies per app namespace: traffic only within the namespace and from
-  Traefik; egress to the internet allowed, egress to private address ranges outside the cluster
-  (the home LAN) denied.
-- Smoke tests by convention: an optional test component that runs against the preview and reports
-  by exit code; a preview counts as green only when it passes.
-- A verification report per branch: preview address, smoke test result, scan result, what changed.
+- **Pod Security.** App and preview namespaces enforce the Pod Security level `baseline` and warn
+  and audit `restricted`. Pods that would violate `restricted` are listed in `shelf app status`,
+  without blocking them, so stock images that start as root (Postgres) keep working. The chart
+  gives every pod the two settings no image depends on (seccomp `RuntimeDefault`, no privilege
+  escalation), so that list shows what the images decide.
+- **Network isolation.** Every app and preview namespace gets a default-deny NetworkPolicy:
+  - ingress only from its own namespace and from Traefik;
+  - egress to its own namespace, to the cluster DNS and to the internet;
+  - egress to other namespaces, the Kubernetes API, private address ranges (the LAN) and
+    link-local addresses (cloud metadata) denied.
+- **LAN exceptions, operator only.** `shelf app add|credentials --allow-lan <cidr>` (repeatable,
+  `--deny-lan` clears it) lets one app reach named private addresses, for example a NAS. Like
+  exposure, it is never part of `app.yaml`, and previews never get it.
+- **Tests in app.yaml.** A new optional section `tests:` declares test containers (`image` or
+  `build`, `command`, `args`, `env` with references such as `${web.host}`). The chart renders them
+  as Helm test hooks, and Flux runs them after every install and upgrade. A failing test:
+  - on an app, fails the upgrade, so the previous version keeps running;
+  - on a preview, keeps the failing version running, so it can be looked at;
+  - in both cases marks the app red: a new sixth stage "the tests", and `--wait` ends `Failed`.
+- **Built tests.** `shelf build-plan`, `shelf render --image` and the reusable workflow build,
+  sign and scan test images like component images.
+- **Report.** A new command `shelf app report <app> [--preview <branch>]` prints a verification
+  report as Markdown, or `--json` (kind `Report`):
+  - the commit, the address and the verdict;
+  - the test results;
+  - signature and scan;
+  - for a preview, what differs from the app: components with another digest, and the change in
+    CRITICAL and HIGH findings.
+
+  Everything comes from the cluster and the registry, never from Git.
+- **Admin UI.** The app page shows the tests, the isolation and its LAN exceptions; the connection
+  form edits the exceptions through the same function as the CLI.
+- **`just smoke-hardening`** joins level 2.
 
 ## Capabilities
 
 ### New Capabilities
 
-To be decided at `/opsx:propose`; possibly `isolation` and `preview-checks`.
+- `isolation`: Pod Security levels, the NetworkPolicy of app and preview namespaces, LAN
+  exceptions as an operator decision, and how isolation is reported.
+- `app-tests`: running an app's tests after each rollout, how a failing test affects an app and a
+  preview, and how test results are reported.
 
 ### Modified Capabilities
 
-To be decided at `/opsx:propose`; likely `app-chart`, `app-manifest`, `branch-previews`.
+- `app-manifest`: the `tests` section, test names, `--image` and `shelf build-plan` for built tests.
+- `app-chart`: test hooks rendered from `tests`.
+- `app-delivery`: the diagnosis gets the stage "the tests".
+- `agent-interface`: `AppStatus` carries tests and isolation; the new `Report` document.
+- `branch-previews`: a preview's contents include the isolation, without LAN exceptions.
+- `admin-ui`: the app page shows tests and isolation, and edits LAN exceptions.
+- `dev-environment`: `smoke-hardening` in level 2.
 
 ## Impact
 
-`charts/shelf-app`, `platform/apps`, `internal/schema`, `internal/ops`, CLI. Level 2.
-
-## Roadmap text (from the re-cut of 2026-10-27)
-
-**Open:** `restricted` breaks many stock images (e.g. Postgres starting as root); likely
-`baseline` enforced plus `restricted` warned, with a per-app opt-in to `restricted`.
-
-**Open:** whether the dev cluster's k3d network policy controller enforces the LAN egress rule the
-same way k3s on a host does, i.e. what level 2 can prove.
-
-**Acceptance (level 2):** a preview cannot reach another app's namespace or a LAN address; a
-failing smoke test marks the preview red.
+- **Chart and platform:**
+  - `charts/shelf-app`: test hook pods;
+  - `platform/apps` and `platform/previews`: namespace labels, NetworkPolicy, HelmRelease `test`,
+    provider input `lan`.
+- **Code:**
+  - `internal/schema`: `tests`;
+  - `internal/render`, `internal/cli` build-plan;
+  - `internal/cluster`: the tests stage, isolation state, restricted findings, LAN input;
+  - `internal/ops`: report, LAN option;
+  - `internal/cli`: `--allow-lan`, `report`, JSON;
+  - `internal/server`: app page, connection form.
+- **Workflow:** `build.yml` needs no new step, since it builds what `shelf build-plan` lists and
+  scans every digest in the values.
+- **Existing apps:** keep running. An app that reaches another namespace or the LAN loses that
+  path at the platform upgrade, until the operator adds an exception. A pod that violates
+  `baseline` is refused at its next start. Both are named in the upgrade notes.
+- **Levels:** level 2 (k3d enforces NetworkPolicies, checked in a spike); level 3 with
+  `shelf-hello` and a test.

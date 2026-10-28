@@ -111,7 +111,7 @@ func previewHarness(t *testing.T) *harness {
 	h.cluster.configs = map[string]*cluster.AppConfig{"hello": {Artifact: hello.Artifact, Previews: 2}}
 	h.cluster.components = []cluster.Component{{Name: "web", Ports: []cluster.Port{{Name: "main", Number: 80}},
 		Path: "/", Phase: cluster.PhaseReady}}
-	h.cluster.stages = fiveStages(podsReady)
+	h.cluster.stages = chain(podsReady)
 	return h
 }
 

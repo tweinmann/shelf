@@ -1,0 +1,71 @@
+{{- /*
+One Pod per test, run by `helm test` after every install and upgrade; Flux's helm-controller
+does that for the platform. The last pod of a test stays until the next run, so its log can be
+read. Tests carry shelf.dev/test instead of shelf.dev/component: they are no part of the app's
+pods, and nothing routes to them.
+*/ -}}
+{{- $secrets := .Values.secrets | default dict }}
+{{- range $testName, $test := .Values.tests }}
+{{- $resources := $test.resources | default dict }}
+{{- $refs := include "shelf-app.referencedSecrets" (dict "comp" $test "secrets" $secrets) | fromJsonArray }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $.Values.name }}-test-{{ $testName }}
+  labels:
+    shelf.dev/app: {{ $.Values.name }}
+    shelf.dev/test: {{ $testName }}
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  enableServiceLinks: false
+  automountServiceAccountToken: false
+  {{- include "shelf-app.podSecurity" . | nindent 2 }}
+  {{- with $.Values.platform.imagePullSecret }}
+  imagePullSecrets:
+    - name: {{ . }}
+  {{- end }}
+  containers:
+    - name: {{ $testName }}
+      image: {{ $test.image | quote }}
+      {{- include "shelf-app.containerSecurity" . | nindent 6 }}
+      {{- with $test.command }}
+      command:
+        {{- range . }}
+        - {{ include "shelf-app.expand" (dict "s" (toString .) "secrets" $secrets) | quote }}
+        {{- end }}
+      {{- end }}
+      {{- with $test.args }}
+      args:
+        {{- range . }}
+        - {{ include "shelf-app.expand" (dict "s" (toString .) "secrets" $secrets) | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if or $refs $test.env }}
+      env:
+        {{- range $refs }}
+        - name: {{ include "shelf-app.secretEnv" . }}
+          valueFrom:
+            secretKeyRef:
+              name: shelf-secrets
+              key: {{ . }}
+        {{- end }}
+        {{- range $name, $value := $test.env }}
+        - name: {{ $name }}
+          value: {{ include "shelf-app.expand" (dict "s" (toString $value) "secrets" $secrets) | quote }}
+        {{- end }}
+      {{- end }}
+      resources:
+        requests:
+          cpu: {{ $resources.cpu | default "50m" | quote }}
+          memory: {{ $resources.memory | default "64Mi" | quote }}
+        {{- with $resources.memory }}
+        limits:
+          memory: {{ . | quote }}
+        {{- end }}
+{{- end }}

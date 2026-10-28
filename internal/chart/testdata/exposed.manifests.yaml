@@ -91,9 +91,14 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: check
           image: "postgres:16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          securityContext:
+            allowPrivilegeEscalation: false
           command:
             - "sh"
             - "-c"
@@ -141,9 +146,14 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: web
           image: "traefik/whoami:v1.11.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          securityContext:
+            allowPrivilegeEscalation: false
           ports:
             - name: main
               containerPort: 80
@@ -200,9 +210,14 @@ spec:
       # Service links would inject variables such as DB_PORT=tcp://... into every container.
       enableServiceLinks: false
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: db
           image: "postgres:16@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          securityContext:
+            allowPrivilegeEscalation: false
           env:
             - name: SHELF_SECRET_DB_PASSWORD
               valueFrom:

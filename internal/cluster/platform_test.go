@@ -169,3 +169,105 @@ func TestPlatformVerifies(t *testing.T) {
 		})
 	}
 }
+
+// TestPlatformIsolates renders an app without and with LAN exceptions, an app with a tunnel, and
+// a preview of an app with exceptions, and checks the Pod Security labels, the NetworkPolicy and
+// how a failing test is treated.
+func TestPlatformIsolates(t *testing.T) {
+	t.Parallel()
+	settings := Settings{Chart: Artifact{URL: "oci://ghcr.io/tweinmann/shelf/charts/shelf-app", Tag: "0.9.0"}, Signer: DefaultSigner()}
+	appInputs := func(extra map[string]any) map[string]any {
+		in := map[string]any{
+			"name": "hello", "url": "oci://ghcr.io/acme/hello", "tag": "main", "insecure": false,
+			"domain": "", "tunnel": "", "quick": false, "registry": "ghcr", "cloudflare": "",
+		}
+		for k, v := range extra {
+			in[k] = v
+		}
+		return in
+	}
+	// A provider from before LAN exceptions has no input lan.
+	plain := platformObjects(t, "../../platform/apps/resourceset.yaml", settings, appInputs(nil))
+	nas := platformObjects(t, "../../platform/apps/resourceset.yaml", settings, appInputs(map[string]any{
+		"lan": []any{"192.168.1.10/32", "192.168.2.0/24"},
+	}))
+	tunnel := platformObjects(t, "../../platform/apps/resourceset.yaml", settings, appInputs(map[string]any{
+		"domain": "example.com", "tunnel": "t-1", "cloudflare": "home", "lan": []any{},
+	}))
+	preview := platformObjects(t, "../../platform/previews/resourceset.yaml", settings, map[string]any{
+		"app": "hello", "url": "oci://ghcr.io/acme/hello", "tag": "branch-feature-login",
+		"insecure": false, "registry": "ghcr", "lan": []any{"192.168.1.10/32"},
+	})
+
+	// The extra ipBlocks of the rule that reaches the internet.
+	exceptions := func(name string, objs []*unstructured.Unstructured) []string {
+		t.Helper()
+		policy := find(objs, "NetworkPolicy", "shelf-isolation")
+		if policy == nil {
+			t.Fatalf("%s: no NetworkPolicy shelf-isolation", name)
+		}
+		selector, _, _ := unstructured.NestedMap(policy.Object, "spec", "podSelector")
+		types, _, _ := unstructured.NestedStringSlice(policy.Object, "spec", "policyTypes")
+		if len(selector) != 0 || strings.Join(types, ",") != "Ingress,Egress" {
+			t.Errorf("%s: the policy selects %v for %v, want every pod both ways", name, selector, types)
+		}
+		ingress, _, _ := unstructured.NestedSlice(policy.Object, "spec", "ingress")
+		if from := ingress[0].(map[string]any)["from"].([]any); len(ingress) != 1 || len(from) != 2 {
+			t.Errorf("%s: ingress %v, want the namespace and Traefik only", name, ingress)
+		}
+		egress, _, _ := unstructured.NestedSlice(policy.Object, "spec", "egress")
+		if len(egress) != 3 {
+			t.Fatalf("%s: egress %v, want namespace, DNS and internet", name, egress)
+		}
+		blocks := egress[2].(map[string]any)["to"].([]any)
+		v4 := blocks[0].(map[string]any)["ipBlock"].(map[string]any)
+		if v4["cidr"] != "0.0.0.0/0" || len(v4["except"].([]any)) != 5 {
+			t.Errorf("%s: internet rule %v", name, v4)
+		}
+		var out []string
+		for _, b := range blocks[2:] {
+			out = append(out, b.(map[string]any)["ipBlock"].(map[string]any)["cidr"].(string))
+		}
+		return out
+	}
+	if got := exceptions("app", plain); len(got) != 0 {
+		t.Errorf("an app without exceptions reaches %v", got)
+	}
+	if got := exceptions("app with a NAS", nas); strings.Join(got, ",") != "192.168.1.10/32,192.168.2.0/24" {
+		t.Errorf("an app with exceptions reaches %v", got)
+	}
+	if got := exceptions("preview", preview); len(got) != 0 {
+		t.Errorf("a preview reaches %v, want no exceptions", got)
+	}
+
+	// Only cloudflared reaches Traefik, and only where it runs.
+	if find(plain, "NetworkPolicy", "shelf-cloudflared") != nil || find(preview, "NetworkPolicy", "shelf-cloudflared") != nil {
+		t.Error("a policy for cloudflared without cloudflared")
+	}
+	cloudflared := find(tunnel, "NetworkPolicy", "shelf-cloudflared")
+	if cloudflared == nil {
+		t.Fatal("an app with a tunnel has no policy that lets cloudflared reach Traefik")
+	}
+	if sel, _, _ := unstructured.NestedStringMap(cloudflared.Object, "spec", "podSelector", "matchLabels"); sel["app.kubernetes.io/name"] != "cloudflared" {
+		t.Errorf("the cloudflared policy selects %v", sel)
+	}
+
+	for name, objs := range map[string][]*unstructured.Unstructured{"app": plain, "preview": preview} {
+		var ns *unstructured.Unstructured
+		for _, o := range objs {
+			if o.GetKind() == "Namespace" {
+				ns = o
+			}
+		}
+		labels := ns.GetLabels()
+		if labels["pod-security.kubernetes.io/enforce"] != "baseline" || labels["pod-security.kubernetes.io/warn"] != "restricted" ||
+			labels["pod-security.kubernetes.io/audit"] != "restricted" || labels["pod-security.kubernetes.io/enforce-version"] != "latest" {
+			t.Errorf("%s: namespace labels %v", name, labels)
+		}
+		release := find(objs, "HelmRelease", map[string]string{"app": "hello", "preview": "hello--feature-login"}[name])
+		test, _, _ := unstructured.NestedMap(release.Object, "spec", "test")
+		if test["enable"] != true || test["ignoreFailures"] != (name == "preview") {
+			t.Errorf("%s: test %v, want enabled and failures ignored only in a preview", name, test)
+		}
+	}
+}

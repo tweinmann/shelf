@@ -10,10 +10,11 @@ import (
 // rolledOut is hello after the artifact of testCommit rolled out.
 func rolledOut(pods cluster.Stage) cluster.Rollout {
 	return cluster.Rollout{
-		Diagnosis: cluster.Diagnosis{Name: "hello", Stages: fiveStages(pods)},
+		Diagnosis: cluster.Diagnosis{Name: "hello", Stages: chain(pods)},
 		Revision:  "main@sha256:abc", Commit: testCommit,
 		AppliedRevision: "main@sha256:abc", AttemptedRevision: "main@sha256:abc",
 		ValuesDigest: "sha256:values", ReleasedDigest: "sha256:values", AttemptedDigest: "sha256:values",
+		TestedDigest: "sha256:values",
 	}
 }
 

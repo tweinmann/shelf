@@ -12,4 +12,5 @@ The app runs on shelf as **`greeter`**. (Operator: replace this with the name yo
 After every push, use the `shelf` skill: start
 `shelf app status greeter --wait --commit "$(git rev-parse HEAD)" --json` in the background (on a
 branch, with `--preview <branch>`), keep working, and fix what the verdict names. The work is
-done when that command exits 0.
+done when that command exits 0, which needs the tests under `tests:` in `app.yaml` to pass. On
+a branch with a pull request, post `shelf app report greeter --preview <branch>` there.

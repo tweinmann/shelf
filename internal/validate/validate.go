@@ -70,6 +70,9 @@ func Validate(doc *schema.Document) Findings {
 	for _, compName := range slices.Sorted(maps.Keys(app.Components)) {
 		c.checkComponent(app, compName)
 	}
+	for _, testName := range slices.Sorted(maps.Keys(app.Tests)) {
+		c.checkTest(app, testName)
+	}
 	c.checkRouteCollisions(app)
 	c.checkSecrets(app)
 
@@ -113,7 +116,7 @@ func (c *checker) checkComponent(app *schema.App, compName string) {
 		return
 	}
 
-	c.checkImage(p, comp)
+	c.checkImage(p, comp.Image, comp.Build)
 
 	c.checkPorts(p, comp)
 	c.checkRoute(p, comp)
@@ -122,15 +125,46 @@ func (c *checker) checkComponent(app *schema.App, compName string) {
 	}
 	c.checkVolumes(p, comp)
 	c.checkHealth(p, comp)
-	c.checkResources(p, comp)
+	c.checkResources(p, comp.Resources)
+	c.checkRuntime(app, p, comp.Command, comp.Args, comp.Env)
+}
 
-	for i, s := range comp.Command {
+// checkTest checks one entry of tests. A test is a container like a component, without anything
+// that would make it reachable or keep it running; its image is published next to the
+// components' as <package>/<name>, so the names must not clash.
+func (c *checker) checkTest(app *schema.App, testName string) {
+	p := []string{"tests", testName}
+	test := app.Tests[testName]
+
+	switch {
+	case len(testName) > schema.MaxTestNameLength:
+		c.errorf(p, "test name must be at most %d characters", schema.MaxTestNameLength)
+	case !componentNameRE.MatchString(testName):
+		c.errorf(p, "test name %q must consist of lowercase letters, digits and '-', start "+
+			"with a letter and end with a letter or digit", testName)
+	}
+	if _, ok := app.Components[testName]; ok {
+		c.errorf(p, "test name %q is already the name of a component", testName)
+	}
+	if test == nil {
+		c.errorf(p, "test is empty; image or build is required")
+		return
+	}
+	c.checkImage(p, test.Image, test.Build)
+	c.checkResources(p, test.Resources)
+	c.checkRuntime(app, p, test.Command, test.Args, test.Env)
+}
+
+// checkRuntime checks what a component and a test share: command, args and env, with their
+// references.
+func (c *checker) checkRuntime(app *schema.App, p []string, command, args []string, env map[string]string) {
+	for i, s := range command {
 		c.checkTemplate(app, at(p, "command", fmt.Sprint(i)), s)
 	}
-	for i, s := range comp.Args {
+	for i, s := range args {
 		c.checkTemplate(app, at(p, "args", fmt.Sprint(i)), s)
 	}
-	for _, k := range slices.Sorted(maps.Keys(comp.Env)) {
+	for _, k := range slices.Sorted(maps.Keys(env)) {
 		ep := at(p, "env", k)
 		switch {
 		case !envNameRE.MatchString(k):
@@ -139,24 +173,24 @@ func (c *checker) checkComponent(app *schema.App, compName string) {
 			c.errorf(ep, "the prefix %s is reserved for secrets; use ${secrets.<name>} instead",
 				schema.SecretEnvPrefix)
 		}
-		c.checkTemplate(app, ep, comp.Env[k])
+		c.checkTemplate(app, ep, env[k])
 	}
 }
 
 // checkImage requires exactly one of image (a ready-made image) and build (a directory in the
 // repository, which the CI builds and shelf render pins).
-func (c *checker) checkImage(p []string, comp *schema.Component) {
+func (c *checker) checkImage(p []string, image, build string) {
 	switch {
-	case comp.Image == "" && comp.Build == "":
+	case image == "" && build == "":
 		c.errorf(p, "needs image or build")
-	case comp.Image != "" && comp.Build != "":
+	case image != "" && build != "":
 		c.errorf(at(p, "build"), "cannot be used together with image")
-	case comp.Image != "":
-		if _, err := name.ParseReference(comp.Image); err != nil {
-			c.errorf(at(p, "image"), "invalid image reference %q: %v", comp.Image, err)
+	case image != "":
+		if _, err := name.ParseReference(image); err != nil {
+			c.errorf(at(p, "image"), "invalid image reference %q: %v", image, err)
 		}
 	default:
-		c.checkBuildPath(at(p, "build"), comp.Build)
+		c.checkBuildPath(at(p, "build"), build)
 	}
 }
 
@@ -338,8 +372,7 @@ func (c *checker) checkHealth(p []string, comp *schema.Component) {
 	}
 }
 
-func (c *checker) checkResources(p []string, comp *schema.Component) {
-	r := comp.Resources
+func (c *checker) checkResources(p []string, r *schema.Resources) {
 	if r == nil {
 		return
 	}
@@ -418,17 +451,22 @@ func (c *checker) checkRef(app *schema.App, p []string, ref *schema.Ref) {
 
 func (c *checker) checkSecrets(app *schema.App) {
 	used := map[string]bool{}
+	var strs []string
 	for _, comp := range app.Components {
-		if comp == nil {
-			continue
+		if comp != nil {
+			strs = slices.Concat(strs, comp.Command, comp.Args, slices.Collect(maps.Values(comp.Env)))
 		}
-		strs := slices.Concat(comp.Command, comp.Args, slices.Collect(maps.Values(comp.Env)))
-		for _, s := range strs {
-			tokens, _ := schema.ParseTemplate(s)
-			for _, t := range tokens {
-				if t.Ref != nil && t.Ref.Kind == schema.RefSecret {
-					used[t.Ref.Secret] = true
-				}
+	}
+	for _, test := range app.Tests {
+		if test != nil {
+			strs = slices.Concat(strs, test.Command, test.Args, slices.Collect(maps.Values(test.Env)))
+		}
+	}
+	for _, s := range strs {
+		tokens, _ := schema.ParseTemplate(s)
+		for _, t := range tokens {
+			if t.Ref != nil && t.Ref.Kind == schema.RefSecret {
+				used[t.Ref.Secret] = true
 			}
 		}
 	}
@@ -446,7 +484,7 @@ func (c *checker) checkSecrets(app *schema.App) {
 			c.errorf(sp, "only generated secrets are supported; set generate: true")
 		}
 		if !used[secretName] {
-			c.add(Warning, sp, "secret %q is not referenced by any component", secretName)
+			c.add(Warning, sp, "secret %q is not referenced by any component or test", secretName)
 		}
 	}
 }

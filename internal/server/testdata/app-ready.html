@@ -99,6 +99,27 @@ be exposed; how many findings it has is shown, never enforced.</p>
 
 
 
+<section class="card">
+<h2>Isolation</h2>
+<dl class="facts">
+<dt>Pod Security</dt><dd>baseline</dd>
+<dt>LAN</dt><dd>192.168.1.10/32</dd>
+</dl>
+
+<p>The stricter level restricted would refuse:</p>
+<ul class="components">
+
+<li><div class="app-head"><span class="name">db-0</span><span class="muted">allowPrivilegeEscalation != false, runAsNonRoot != true</span></div></li>
+
+</ul>
+
+<p class="muted">The app reaches its own components, the cluster DNS and the internet, and nothing
+else: not other apps, not the Kubernetes API, not the LAN, except the ranges given under Access.
+Only Traefik reaches in. Its previews never reach the LAN.</p>
+</section>
+
+
+
 
 <section class="card">
 <h2>Deploy</h2>
@@ -143,6 +164,8 @@ you come forward again.</p>
 </select>
 <label for="domain">A domain of its own</label>
 <input id="domain" name="domain" value="example.com" placeholder="example.com" data-cloudflare-from="cloudflare" data-empty-label="unchanged: example.com">
+<label for="lan">Private addresses it may reach</label>
+<input id="lan" name="lan" value="192.168.1.10/32" placeholder="none, or 192.168.1.10/32 for a NAS">
 <button type="submit" class="secondary">Change</button>
 </form>
 <p class="muted">The connections themselves are defined on the <a href="/connections">connections
@@ -194,6 +217,13 @@ connection, a quick tunnel can give the app a random address that changes whenev
 <pre>2 running</pre>
 
 <p class="muted">Pods</p>
+</li>
+
+<li class="Ready">
+<div class="app-head"><span class="name">the tests</span><span class="pill Ready">Ready</span></div>
+<pre>1 passed: smoke</pre>
+
+<p class="muted">Pods greeter/greeter-test-*</p>
 </li>
 
 </ol>

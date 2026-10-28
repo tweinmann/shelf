@@ -203,6 +203,73 @@
         "generate"
       ]
     },
+    "Test": {
+      "oneOf": [
+        {
+          "required": [
+            "image"
+          ]
+        },
+        {
+          "required": [
+            "build"
+          ]
+        }
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Image reference of a ready-made image. Tags are pinned to a digest by shelf render. Mutually exclusive with build."
+        },
+        "build": {
+          "type": "string",
+          "pattern": "^\\.?/?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+          "description": "Directory with the Dockerfile of this test, relative to app.yaml. The CI builds it and shelf render pins the result. Mutually exclusive with image."
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Overrides the image entrypoint. Supports ${...} references; write $$ for a literal $."
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Overrides the image command. Supports ${...} references; write $$ for a literal $."
+        },
+        "env": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "type": "object",
+          "description": "Environment variables. Values support ${...} references; write $$ for a literal $."
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources",
+          "description": "Resource requests. Memory is also the limit."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Volume": {
       "properties": {
         "path": {
@@ -259,6 +326,18 @@
       },
       "type": "object",
       "description": "Secrets referenced as ${secrets.\u003cname\u003e}, by name."
+    },
+    "tests": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Test"
+      },
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 40,
+        "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+      },
+      "type": "object",
+      "description": "Containers run against the app after every rollout, by name; the rollout counts only when each exits with 0."
     }
   },
   "additionalProperties": false,

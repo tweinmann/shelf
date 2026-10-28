@@ -40,7 +40,7 @@ type Resolver interface {
 }
 
 // Render validates the document, resolves its images and returns the resolved app. built holds
-// the image reference for every component with a `build` directory, by component name; the CI
+// the image reference for every component and test with a `build` directory, by name; the CI
 // pushes those images and passes what it got. Findings include validation findings and warnings
 // from the image lookup. On validation errors it returns ErrInvalid together with the findings.
 func Render(ctx context.Context, doc *schema.Document, resolver Resolver, built map[string]string) (*schema.App, validate.Findings, error) {
@@ -55,18 +55,30 @@ func Render(ctx context.Context, doc *schema.Document, resolver Resolver, built 
 		return nil, findings, err
 	}
 	images := map[string]ImageInfo{}
-	for _, compName := range slices.Sorted(maps.Keys(src.Components)) {
-		ref := refs[compName]
+	resolve := func(what, name string) (ImageInfo, error) {
+		ref := refs[name]
 		info, ok := images[ref]
 		if !ok {
 			var err error
 			info, err = resolver.Resolve(ctx, ref)
 			if err != nil {
-				return nil, findings, fmt.Errorf("component %s: %w", compName, err)
+				return ImageInfo{}, fmt.Errorf("%s %s: %w", what, name, err)
 			}
 			images[ref] = info
 		}
-		findings = append(findings, checkExposedPorts(doc, compName, ref, info)...)
+		return info, nil
+	}
+	for _, compName := range slices.Sorted(maps.Keys(src.Components)) {
+		info, err := resolve("component", compName)
+		if err != nil {
+			return nil, findings, err
+		}
+		findings = append(findings, checkExposedPorts(doc, compName, refs[compName], info)...)
+	}
+	for _, testName := range slices.Sorted(maps.Keys(src.Tests)) {
+		if _, err := resolve("test", testName); err != nil {
+			return nil, findings, err
+		}
 	}
 	findings.Sort()
 
@@ -79,36 +91,56 @@ func Render(ctx context.Context, doc *schema.Document, resolver Resolver, built 
 	for compName, comp := range src.Components {
 		out.Components[compName] = resolveComponent(src, comp, refs[compName], images[refs[compName]])
 	}
+	if len(src.Tests) > 0 {
+		out.Tests = map[string]*schema.Test{}
+		for testName, test := range src.Tests {
+			out.Tests[testName] = resolveTest(src, test, refs[testName], images[refs[testName]])
+		}
+	}
 	return out, findings, nil
 }
 
-// imageRefs returns the image reference of every component: the one from app.yaml, or the one
-// the CI passed for a component built from a directory.
+// imageRefs returns the image reference of every component and test: the one from app.yaml, or
+// the one the CI passed for one built from a directory. Validation keeps test names apart from
+// component names, so one map holds both.
 func imageRefs(app *schema.App, built map[string]string) (map[string]string, error) {
-	for _, compName := range slices.Sorted(maps.Keys(built)) {
-		comp, ok := app.Components[compName]
+	sources := map[string]imageSource{}
+	for n, comp := range app.Components {
+		sources[n] = imageSource{"component", comp.Image, comp.Build}
+	}
+	for n, test := range app.Tests {
+		sources[n] = imageSource{"test", test.Image, test.Build}
+	}
+	for _, n := range slices.Sorted(maps.Keys(built)) {
+		src, ok := sources[n]
 		switch {
 		case !ok:
-			return nil, fmt.Errorf("no component %s in this app.yaml, but an image was passed for it", compName)
-		case !comp.IsBuilt():
-			return nil, fmt.Errorf("component %s has an image in app.yaml, so no image can be passed for it", compName)
+			return nil, fmt.Errorf("no component or test %s in this app.yaml, but an image was passed for it", n)
+		case src.build == "":
+			return nil, fmt.Errorf("%s %s has an image in app.yaml, so no image can be passed for it", src.what, n)
 		}
 	}
 	refs := map[string]string{}
-	for _, compName := range slices.Sorted(maps.Keys(app.Components)) {
-		comp := app.Components[compName]
-		if !comp.IsBuilt() {
-			refs[compName] = comp.Image
+	for _, n := range slices.Sorted(maps.Keys(sources)) {
+		src := sources[n]
+		if src.build == "" {
+			refs[n] = src.image
 			continue
 		}
-		ref, ok := built[compName]
+		ref, ok := built[n]
 		if !ok {
-			return nil, fmt.Errorf("component %s is built from %s; pass the image it was pushed as (--image %s=<reference>)",
-				compName, comp.Build, compName)
+			return nil, fmt.Errorf("%s %s is built from %s; pass the image it was pushed as (--image %s=<reference>)",
+				src.what, n, src.build, n)
 		}
-		refs[compName] = ref
+		refs[n] = ref
 	}
 	return refs, nil
+}
+
+// imageSource is where the image of a component or a test comes from.
+type imageSource struct {
+	what         string // "component" or "test", for messages
+	image, build string
 }
 
 // checkExposedPorts warns about declared ports the image does not EXPOSE. Images without any
@@ -178,6 +210,23 @@ func resolveComponent(app *schema.App, comp *schema.Component, image string, inf
 		h := *comp.Health
 		h.Port = soleOr(out.Ports, h.Port)
 		out.Health = &h
+	}
+	return out
+}
+
+// resolveTest pins the test's image and resolves its references as for a component.
+func resolveTest(app *schema.App, test *schema.Test, image string, info ImageInfo) *schema.Test {
+	out := &schema.Test{
+		Image:     pinImage(image, info.Digest),
+		Command:   resolveList(app, test.Command),
+		Args:      resolveList(app, test.Args),
+		Resources: test.Resources,
+	}
+	if test.Env != nil {
+		out.Env = map[string]string{}
+		for k, v := range test.Env {
+			out.Env[k] = resolveString(app, v)
+		}
 	}
 	return out
 }
