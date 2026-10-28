@@ -117,7 +117,7 @@
   - `smoke-quick` checks that the quick tunnel's name is still read through the pod proxy.
 
   Record the turnaround with and without a test in design.md under "Results".
-- [ ] 9.2 Level 3 with `tweinmann/shelf-hello`:
+- [x] 9.2 Level 3 with `tweinmann/shelf-hello`:
   - add a curl test and push to main: Ready;
   - a branch whose test fails: a red preview that keeps running, then `shelf app report` for it;
   - merge a failing test: `gretter` keeps the previous version.

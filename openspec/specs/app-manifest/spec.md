@@ -11,8 +11,8 @@ and the platform, carried in the deploy artifact as the ConfigMap `shelf-values`
 
 ### Requirement: Document structure and strict parsing
 The system SHALL accept an app.yaml only as a single YAML document with the top-level fields
-`apiVersion`, `name`, `components` and optional `secrets`, and SHALL reject unknown fields,
-duplicate keys, wrong types, empty files and multiple documents as parse errors.
+`apiVersion`, `name`, `components` and optional `secrets` and `tests`, and SHALL reject unknown
+fields, duplicate keys, wrong types, empty files and multiple documents as parse errors.
 
 #### Scenario: Unknown field
 - **WHEN** an app.yaml contains a field that is not part of the schema, at any level including inside a long-form `route`
@@ -209,11 +209,25 @@ image's TCP `EXPOSE` list (images without any `EXPOSE` are not checked).
 - **WHEN** a component declares port 8080 and its image exposes only 80
 - **THEN** a warning `port 8080 is not exposed by image ... (EXPOSE 80)` is printed and rendering continues
 
+### Requirement: Reading a resolved app.yaml from the cluster
+The system SHALL read the resolved app.yaml in an app's ConfigMap `shelf-values` leniently,
+leaving out fields it does not know, at any level including a long-form `route`, so that a shelf
+older than the workflow that built the artifact can still show the app; `shelf validate` and
+`shelf render` stay strict.
+
+#### Scenario: Artifact from a newer workflow
+- **WHEN** the ConfigMap of an app holds a section this shelf does not know, such as `tests` for a shelf from before Phase 12
+- **THEN** `shelf app status` and the app page show the app and its components as before
+
+#### Scenario: What a person writes
+- **WHEN** `shelf validate` reads an app.yaml with an unknown field
+- **THEN** it still reports a parse error
+
 ### Requirement: Built components and --image
-The system SHALL take the image of every component with `build` from a repeatable flag
-`--image <component>=<reference>` and SHALL fail when a built component has no `--image`, when
-`--image` names an unknown component or a component with `image`, when a component is given
-twice, or when the flag is not of the form `<component>=<reference>`.
+The system SHALL take the image of every component and test with `build` from a repeatable flag
+`--image <name>=<reference>` and SHALL fail when a built component or test has no `--image`, when
+`--image` names an unknown component or test or one with `image`, when a name is given twice, or
+when the flag is not of the form `<name>=<reference>`.
 
 #### Scenario: Built image passed back
 - **WHEN** `shelf render --image web=ghcr.io/owner/greeter/web:sha-abc1234` is run for `examples/tenant/app.yaml`
@@ -222,6 +236,10 @@ twice, or when the flag is not of the form `<component>=<reference>`.
 #### Scenario: Missing --image
 - **WHEN** a component has `build: ./web` and no `--image web=...` is given
 - **THEN** `shelf render` fails with an error telling the user to pass `--image web=<reference>`
+
+#### Scenario: Built test
+- **WHEN** a test `e2e` has `build: ./e2e` and `--image e2e=ghcr.io/owner/greeter/e2e:sha-abc1234` is given
+- **THEN** the resolved test `e2e` has that image pinned to its digest
 
 ### Requirement: Render output
 The system SHALL write the render result to stdout and everything else to stderr: by default
@@ -253,9 +271,10 @@ The system SHALL deliver each secret referenced by a component as the environmen
 
 ### Requirement: shelf build-plan
 The system SHALL provide `shelf build-plan <app.yaml>` that prints JSON
-`{"package": <name>, "builds": [{"component", "context"}]}` listing every component with `build`
-in component name order, with each context relative to the working directory, an empty list when
-nothing is built, and an error when a build directory does not exist.
+`{"package": <name>, "builds": [{"component", "context"}]}` listing every component and test with
+`build`, components first, each in name order, with each context relative to the working
+directory, an empty list when nothing is built, and an error when a build directory does not
+exist.
 
 #### Scenario: Tenant example
 - **WHEN** `shelf build-plan examples/tenant/app.yaml` is run
@@ -264,6 +283,10 @@ nothing is built, and an error when a build directory does not exist.
 #### Scenario: Missing build directory
 - **WHEN** a component's `build` directory does not exist
 - **THEN** the command fails with an error naming the component and the directory
+
+#### Scenario: Built test
+- **WHEN** an app.yaml has a built component `web` and a built test `e2e`
+- **THEN** the plan lists `web`, then `e2e`, so the workflow builds and pushes `ghcr.io/<owner>/<package>/e2e`
 
 ### Requirement: shelf schema
 The system SHALL provide `shelf schema` that prints the JSON Schema (draft 2020-12) for app.yaml,
@@ -275,3 +298,21 @@ including the name patterns, the exclusive choice of `image` or `build`, and the
 - **WHEN** `shelf schema` is run
 - **THEN** it prints a JSON Schema with `$id` `https://raw.githubusercontent.com/tweinmann/shelf/main/schema/app.schema.json`
 - **AND** the schema accepts every app.yaml under `examples/`
+
+### Requirement: Tests section
+The system SHALL accept an optional top-level `tests` map; each test name MUST be a DNS-1035 label
+of at most 40 characters that is not also a component name, and each test MUST have exactly one of
+`image` or `build` and MAY have `command`, `args`, `env` and `resources`, with the same rules and
+references as a component; a test MUST NOT have ports, a route, volumes, health or instances.
+
+#### Scenario: Test against the web component
+- **WHEN** an app.yaml has `tests: { smoke: { image: curlimages/curl:8.10.1, args: [-fsS, "http://${web.host}:${web.port}/healthz"] } }`
+- **THEN** validation passes, and `shelf render` pins the test image to its digest like a component image
+
+#### Scenario: Name taken by a component
+- **WHEN** a test and a component are both named `web`
+- **THEN** validation reports an error at `tests.web`
+
+#### Scenario: Test with a route
+- **WHEN** a test declares `route: /`
+- **THEN** parsing fails, as `route` is not a field of a test
