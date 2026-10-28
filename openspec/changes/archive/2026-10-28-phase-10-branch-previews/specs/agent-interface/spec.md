@@ -28,11 +28,11 @@ and `previewLimit` and `previewLimitReached` when the app has previews.
 
 ### Requirement: Agent instructions in the tenant template
 `examples/tenant` SHALL hold a Claude Code skill `.claude/skills/shelf/SKILL.md` and a `CLAUDE.md`
-section that tell an agent to push, run `shelf app status <app> --wait --commit <sha> --json`, read
-the verdict, and fix what its stage and hint name; the app name is a placeholder the operator
-fills in. The skill SHALL tell the agent to start the wait in the background and keep working
-until it needs the verdict, to check the CI run of its push first when the GitHub CLI is
-available, and to wait for its branch's preview with `--preview` when it works on a branch.
+section that tell an agent to push, run `shelf app status <app> --wait --commit <sha> --json`
+(with `--preview <branch>` on a branch), read the verdict, and fix what its stage and hint name;
+the app name is a placeholder the operator fills in. The skill SHALL tell the agent to run the
+wait in the background and, when the GitHub CLI is available, to check the CI run of its push
+first.
 
 #### Scenario: Agent loop described
 - **WHEN** an agent working in a copy of `examples/tenant` reads the skill

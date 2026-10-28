@@ -283,9 +283,8 @@ agent's flow as little as possible.
 
 ## Open Questions
 
-- Whether GHCR lets the workflow's `GITHUB_TOKEN` delete a package version of a user-owned
-  package without a separate PAT. This is answered at level 3. If not, deleting falls back to a
-  documented manual step, and the specs stay as they are.
+- ~~Whether GHCR lets the workflow's `GITHUB_TOKEN` delete a package version of a user-owned
+  package without a separate PAT.~~ It does: answered at level 3 on 2026-10-28 (see Results).
 
 ## Results
 
@@ -302,3 +301,16 @@ from the moment the tag is in the registry, so without the CI build:
 Both previews kept their own password and volume across a new commit, the limit of two held
 with three branch tags, and `--no-previews` removed the previews and kept the app. The push to
 Ready of a real tenant, CI build included, is measured in the level-3 acceptance.
+
+Level 3 with the private tenant `tweinmann/shelf-hello` and release v0.7.0 on 2026-10-28, app
+`gretter` (four components, two databases) with `--previews`:
+
+| Measurement | Value |
+|---|---|
+| CI run of the branch push (build, render, push), first build with v0.7.0, cache empty | 1 min 33 s |
+| Deploy artifact `branch-try-preview` pushed by CI to the preview Ready | 11 s (10:38:14 to 10:38:25) |
+| Push of a new branch to a Ready preview, in total | about 1 min 45 s |
+| Branch deleted on GitHub to the preview namespace gone | under 1 min; the tag left GHCR, then 20 s to the namespace gone |
+
+The `delete-branch` job deleted the tag with the workflow's `GITHUB_TOKEN`; no separate token
+is needed.

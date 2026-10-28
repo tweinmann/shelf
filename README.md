@@ -110,7 +110,7 @@ one starts.
 | 8b | Connections instead of platform credentials: registry logins and Cloudflare accounts chosen per app, one tunnel per app | ✅ done |
 | 8d | Apps stay inside the cluster by default, quick tunnels, no cluster domain | ✅ done |
 | 9 | Agent interface: `--json`, `shelf app status --wait`, `shelf app open` | ✅ done |
-| 10 | Branch previews: one isolated preview per branch, discovered from the registry | planned |
+| 10 | Branch previews: one isolated preview per branch, discovered from the registry | ✅ done |
 | 11 | Verification chain: signatures, scans, provenance; exposure only for verified digests | planned |
 | 12 | Hardening: Pod Security, NetworkPolicies, smoke tests per preview | planned |
 | 13 | Host: macOS with Colima and Linux with k3s, `shelf doctor`, `shelf destroy` | planned |
